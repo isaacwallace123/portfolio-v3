@@ -282,3 +282,24 @@ html[data-reduce-motion] *::after {
 html[data-reduce-motion] {
   scroll-behavior: auto !important;
 }
+
+/* reduce transparency — kill the frosted-glass blur and make the translucent chrome opaque
+   (per-site preference from the settings modal). */
+html[data-reduce-transparency] *,
+html[data-reduce-transparency] *::before,
+html[data-reduce-transparency] *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html[data-reduce-transparency] header {
+  background: var(--paper) !important;
+}
+
+/* high contrast — stronger borders + text (per-site preference). Placed AFTER the dark palette so
+   it wins in both themes (equal specificity, later in source). */
+:root[data-high-contrast] {
+  --ink-mid: var(--ink);
+  --ink-dim: color-mix(in srgb, var(--ink) 76%, var(--surface));
+  --line: color-mix(in srgb, var(--ink) 42%, var(--line));
+  --line-2: color-mix(in srgb, var(--ink) 50%, var(--line-2));
+}

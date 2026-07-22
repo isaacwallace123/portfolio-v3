@@ -14,6 +14,26 @@ public static class AuthOps
     // Display names are free text from an external provider; cap them before they hit the UI/db.
     public static string Trunc(string s) => s.Length <= 40 ? s : s[..40];
 
+    // Normalise a user-entered profile link: default the scheme to https, require a valid http(s)
+    // absolute URL, and cap the length. Returns false for anything that isn't a usable web URL.
+    public static bool TryNormalizeUrl(string raw, out string url)
+    {
+        url = "";
+        var s = raw.Trim();
+        if (s.Length == 0) return false;
+        if (!s.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            && !s.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            s = "https://" + s;
+        if (s.Length > 200) return false;
+        if (Uri.TryCreate(s, UriKind.Absolute, out var u)
+            && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps))
+        {
+            url = s;
+            return true;
+        }
+        return false;
+    }
+
     // Only allow redirecting the browser back to a known site origin — never an attacker-supplied URL.
     public static string SafeReturn(string? url, IReadOnlyList<string> allowed)
     {

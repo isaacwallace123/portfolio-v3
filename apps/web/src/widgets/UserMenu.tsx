@@ -9,7 +9,7 @@ import {
   type SessionUser,
 } from "@iw/core";
 import { SettingsModal } from "@iw/ui";
-import SiteSettings from "@/widgets/SiteSettings";
+import AppearanceSettings from "@/widgets/AppearanceSettings";
 
 // Account menu for the nav. Opens on click AND on hover (desktop nicety), but click + keyboard +
 // touch all work and it closes on Escape / outside-click — so it's not a hover-only trap.
@@ -147,7 +147,7 @@ export default function UserMenu() {
           user={user}
           onUser={setUser}
           onClose={() => setSettingsOpen(false)}
-          siteTab={<SiteSettings />}
+          appearanceTab={<AppearanceSettings />}
         />
       )}
     </div>

@@ -11,6 +11,19 @@ export interface SessionUser {
   /** Network-wide appearance preference — see theme.ts. */
   theme: "light" | "dark" | "system";
   roles: string[];
+  /** Optional public profile links, editable in the settings modal. */
+  linkedInUrl: string | null;
+  websiteUrl: string | null;
+  /** External identity providers currently linked to this account (e.g. ["Google","GitHub"]). */
+  connections: string[];
+}
+
+/** A single editable field of the shared profile. Every field is optional so the settings modal can
+    save any subset. Passing null for a link clears it. */
+export interface ProfilePatch {
+  displayName?: string;
+  linkedInUrl?: string | null;
+  websiteUrl?: string | null;
 }
 
 export interface AuthProviders {
@@ -96,11 +109,25 @@ export async function logout(): Promise<void> {
   await authApi("/auth/logout", { method: "POST" });
 }
 
-/** Update the shared display name — the one identity setting editable in-app. */
-export function updateProfile(displayName: string): Promise<SessionUser> {
+/** Update the shared profile — display name and/or the public links. */
+export function updateProfile(patch: ProfilePatch): Promise<SessionUser> {
   return authApi<SessionUser>("/auth/profile", {
     method: "POST",
-    body: JSON.stringify({ displayName }),
+    body: JSON.stringify(patch),
+  });
+}
+
+// ── Connected accounts: link/unlink external identity providers ──────────────
+/** Full-page URL to link `provider` to the CURRENT signed-in account, returning here afterwards.
+    (A navigation, not fetch — it runs the provider's OAuth dance.) */
+export function connectProviderUrl(provider: string, returnTo: string): string {
+  return `${AUTH_API_URL}/auth/connect/${provider.toLowerCase()}?returnUrl=${encodeURIComponent(returnTo)}`;
+}
+
+/** Unlink a provider from the current account. Fails if it's the last sign-in method. */
+export function disconnectProvider(provider: string): Promise<SessionUser> {
+  return authApi<SessionUser>(`/auth/connections/${provider.toLowerCase()}`, {
+    method: "DELETE",
   });
 }
 
@@ -135,7 +162,10 @@ export function revokeSession(
   return authApi(`/auth/sessions/${id}`, { method: "DELETE" });
 }
 
-export function revokeOtherSessions(): Promise<{ ok: boolean; revoked: number }> {
+export function revokeOtherSessions(): Promise<{
+  ok: boolean;
+  revoked: number;
+}> {
   return authApi("/auth/sessions/revoke-others", { method: "POST" });
 }
 

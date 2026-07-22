@@ -11,7 +11,8 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
   useEffect(() => setChoice(readThemeChoice()), []);
 
   const next = () => {
-    const n = THEME_ORDER[(THEME_ORDER.indexOf(choice) + 1) % THEME_ORDER.length];
+    const n =
+      THEME_ORDER[(THEME_ORDER.indexOf(choice) + 1) % THEME_ORDER.length];
     setChoice(n);
     void setThemeChoice(n);
   };

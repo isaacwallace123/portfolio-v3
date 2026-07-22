@@ -10,4 +10,10 @@ public class AppUser : IdentityUser
     /// <summary>Network-wide appearance preference: "light" | "dark" | "system". Follows the user
     /// across devices; mirrored into the cross-subdomain <c>iw_theme</c> cookie for no-flash SSR.</summary>
     public string ThemePreference { get; set; } = "system";
+
+    /// <summary>Optional public LinkedIn profile URL, editable in the settings modal.</summary>
+    public string? LinkedInUrl { get; set; }
+
+    /// <summary>Optional public personal website URL, editable in the settings modal.</summary>
+    public string? WebsiteUrl { get; set; }
 }

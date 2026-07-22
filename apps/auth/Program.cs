@@ -257,6 +257,29 @@ using (var scope = app.Services.CreateScope())
             await db.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE "AspNetUsers" ADD COLUMN "ThemePreference" TEXT NOT NULL DEFAULT 'system';""");
     }
+    // The nullable profile-link columns (LinkedIn / website), same EnsureCreated caveat as the theme
+    // column above. Column names are compile-time constants, so the interpolation is injection-safe.
+    foreach (var col in new[] { "LinkedInUrl", "WebsiteUrl" })
+    {
+        if (isNpgsql)
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                $"""ALTER TABLE "AspNetUsers" ADD COLUMN IF NOT EXISTS "{col}" text NULL;""");
+        }
+        else
+        {
+            var conn2 = db.Database.GetDbConnection();
+            if (conn2.State != System.Data.ConnectionState.Open) await conn2.OpenAsync();
+            bool hasCol;
+            await using (var cmd = conn2.CreateCommand())
+            {
+                cmd.CommandText = $"SELECT 1 FROM pragma_table_info('AspNetUsers') WHERE name = '{col}';";
+                hasCol = await cmd.ExecuteScalarAsync() is not null;
+            }
+            if (!hasCol)
+                await db.Database.ExecuteSqlRawAsync($"""ALTER TABLE "AspNetUsers" ADD COLUMN "{col}" TEXT NULL;""");
+        }
+    }
     var roles = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
     if (!await roles.RoleExistsAsync("admin")) await roles.CreateAsync(new IdentityRole("admin"));
     var users = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
@@ -285,8 +308,14 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference();
 }
 
-static async Task<UserDto> ToDto(UserManager<AppUser> users, AppUser user) =>
-    new(user.Id, user.Email ?? "", user.DisplayName, NormalizeTheme(user.ThemePreference), [.. await users.GetRolesAsync(user)]);
+static async Task<UserDto> ToDto(UserManager<AppUser> users, AppUser user)
+{
+    var roles = await users.GetRolesAsync(user);
+    var logins = await users.GetLoginsAsync(user);
+    return new(user.Id, user.Email ?? "", user.DisplayName, NormalizeTheme(user.ThemePreference),
+        [.. roles], user.LinkedInUrl, user.WebsiteUrl,
+        [.. logins.Select(l => l.LoginProvider).Distinct()]);
+}
 
 // Appearance is a closed set; anything else collapses to the "follow the OS" default.
 static string NormalizeTheme(string? t) =>
@@ -381,7 +410,10 @@ app.MapPost("/auth/profile", async (UpdateProfileRequest req, UserManager<AppUse
     if (user is null)
         return Results.Json(new { error = "Not signed in." }, statusCode: StatusCodes.Status401Unauthorized);
 
-    if (req.DisplayName is null && req.Theme is null)
+    // Every field is optional; a caller (settings modal / theme control) sends only what it changes.
+    // For the link fields, "not present" (null) leaves them untouched, while an empty string clears
+    // them — so saving the theme alone never wipes a user's saved links.
+    if (req.DisplayName is null && req.Theme is null && req.LinkedInUrl is null && req.WebsiteUrl is null)
         return Results.BadRequest(new { error = "Nothing to update." });
 
     if (req.DisplayName is not null)
@@ -399,7 +431,73 @@ app.MapPost("/auth/profile", async (UpdateProfileRequest req, UserManager<AppUse
         user.ThemePreference = req.Theme;
     }
 
+    if (req.LinkedInUrl is not null)
+    {
+        if (req.LinkedInUrl.Trim().Length == 0) user.LinkedInUrl = null;
+        else if (AuthOps.TryNormalizeUrl(req.LinkedInUrl, out var url)) user.LinkedInUrl = url;
+        else return Results.BadRequest(new { error = "LinkedIn must be a valid URL." });
+    }
+
+    if (req.WebsiteUrl is not null)
+    {
+        if (req.WebsiteUrl.Trim().Length == 0) user.WebsiteUrl = null;
+        else if (AuthOps.TryNormalizeUrl(req.WebsiteUrl, out var url)) user.WebsiteUrl = url;
+        else return Results.BadRequest(new { error = "Website must be a valid URL." });
+    }
+
     await users.UpdateAsync(user);
+    return Results.Ok(await ToDto(users, user));
+}).RequireAuthorization();
+
+// ── Connected accounts: link/unlink additional external providers to THIS account ───────────────
+// Signing in with any linked provider lands the same account; the /auth/complete find-or-create
+// already auto-links a new provider by shared email. These endpoints let a signed-in user add or
+// remove a provider deliberately from the settings modal.
+
+// Step 1: challenge the provider while already signed in; the callback links it to the current user.
+app.MapGet("/auth/connect/{provider}", (string provider, string? returnUrl, SignInManager<AppUser> signIn, UserManager<AppUser> users, ClaimsPrincipal principal) =>
+{
+    var scheme = providers.FirstOrDefault(p => string.Equals(p, provider, StringComparison.OrdinalIgnoreCase));
+    if (scheme is null)
+        return Results.BadRequest(new { error = $"Unknown or unconfigured provider '{provider}'." });
+    var target = AuthOps.SafeReturn(returnUrl, corsOrigins);
+    var callback = $"/auth/connect/complete?returnUrl={Uri.EscapeDataString(target)}";
+    // Bind the flow to this user id (XSRF) so a stray external cookie can't be linked to the wrong one.
+    var props = signIn.ConfigureExternalAuthenticationProperties(scheme, callback, users.GetUserId(principal));
+    return Results.Challenge(props, [scheme]);
+}).RequireAuthorization();
+
+// Step 2: the provider authenticated; attach its login to the signed-in account (unless it already
+// belongs to someone else), then bounce back to the site. A browser follows this → redirects, not JSON.
+app.MapGet("/auth/connect/complete", async (string? returnUrl, HttpContext ctx, SignInManager<AppUser> signIn, UserManager<AppUser> users, ClaimsPrincipal principal) =>
+{
+    var target = AuthOps.SafeReturn(returnUrl, corsOrigins);
+    var user = await users.GetUserAsync(principal);
+    if (user is null) return Results.Redirect(target);
+    var info = await signIn.GetExternalLoginInfoAsync(user.Id);
+    if (info is not null)
+    {
+        var existing = await users.FindByLoginAsync(info.LoginProvider, info.ProviderKey);
+        if (existing is null) await users.AddLoginAsync(user, info); // free to link
+        // If it already belongs to THIS user it's a no-op; if to another account we simply don't steal it.
+        await ctx.SignOutAsync(IdentityConstants.ExternalScheme);
+    }
+    return Results.Redirect(target);
+}).RequireAuthorization();
+
+// Unlink a provider. Guarded so you can't remove your last sign-in method (there are no passwords).
+app.MapDelete("/auth/connections/{provider}", async (string provider, ClaimsPrincipal principal, UserManager<AppUser> users) =>
+{
+    var user = await users.GetUserAsync(principal);
+    if (user is null)
+        return Results.Json(new { error = "Not signed in." }, statusCode: StatusCodes.Status401Unauthorized);
+    var logins = await users.GetLoginsAsync(user);
+    var match = logins.FirstOrDefault(l => string.Equals(l.LoginProvider, provider, StringComparison.OrdinalIgnoreCase));
+    if (match is null)
+        return Results.NotFound(new { error = "That provider isn't connected." });
+    if (logins.Count <= 1)
+        return Results.BadRequest(new { error = "You can't remove your only sign-in method." });
+    await users.RemoveLoginAsync(user, match.LoginProvider, match.ProviderKey);
     return Results.Ok(await ToDto(users, user));
 }).RequireAuthorization();
 
@@ -541,12 +639,13 @@ if (app.Environment.IsDevelopment() && config.GetValue("Auth:AllowDevLogin", tru
 
 app.Run();
 
-record UserDto(string Id, string Email, string DisplayName, string Theme, string[] Roles);
+record UserDto(string Id, string Email, string DisplayName, string Theme, string[] Roles,
+    string? LinkedInUrl, string? WebsiteUrl, string[] Connections);
 record SessionDto(string Id, DateTime CreatedUtc, DateTime LastSeenUtc, string UserAgent, string Ip, bool Current);
 record RoleDto(string Name, bool System);
 record CreateRoleRequest(string? Name);
 record SetRoleRequest(string? Role, bool Assigned);
-record UpdateProfileRequest(string? DisplayName, string? Theme);
+record UpdateProfileRequest(string? DisplayName, string? Theme, string? LinkedInUrl, string? WebsiteUrl);
 record DevLoginRequest(string? Email, string? DisplayName);
 
 // exposes the entry point to WebApplicationFactory in the integration tests

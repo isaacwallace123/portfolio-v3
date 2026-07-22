@@ -9,6 +9,7 @@ import {
   type SessionUser,
 } from "@iw/core";
 import { SettingsModal } from "@iw/ui";
+import AppearanceSettings from "@/widgets/AppearanceSettings";
 import SiteSettings from "@/widgets/SiteSettings";
 
 // Account menu for the nav, in the ops-console idiom. Opens on click AND hover, but click +
@@ -148,6 +149,7 @@ export default function UserMenu() {
           user={user}
           onUser={setUser}
           onClose={() => setSettingsOpen(false)}
+          appearanceTab={<AppearanceSettings />}
           siteTab={<SiteSettings />}
         />
       )}
