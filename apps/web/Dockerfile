@@ -12,7 +12,6 @@ COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
 COPY packages/ui/package.json packages/ui/
 COPY apps/web/package.json apps/web/
-COPY apps/auth/package.json apps/auth/
 COPY apps/admin/package.json apps/admin/
 COPY apps/cyberlab/package.json apps/cyberlab/
 # npm install (not ci): the lockfile is authored on Windows but this image is alpine/musl —
