@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { adoptAccountTheme, AUTH_URL, getMe, type SessionUser } from "@iw/core";
+import {
+  adoptAccountTheme,
+  AUTH_URL,
+  getMe,
+  loginHref,
+  type SessionUser,
+} from "@iw/core";
 import Shell from "./Shell";
 
 // Client-side gate: renders the console only for a signed-in admin. This is UX, not the security
@@ -21,8 +27,13 @@ export default function AdminGate({ children }: { children: React.ReactNode }) {
     getMe().then((user) => {
       if (!alive) return;
       if (user) adoptAccountTheme(user.theme); // follow the account's saved theme on this device
-      if (!user) setState({ status: "anon" });
-      else if (!user.roles.includes("admin"))
+      if (!user) {
+        // Not signed in: go straight to the identity portal — no interstitial. `replace` so the
+        // back button doesn't bounce the user into a redirect loop.
+        if (typeof window !== "undefined")
+          window.location.replace(loginHref(window.location.href));
+        setState({ status: "anon" });
+      } else if (!user.roles.includes("admin"))
         setState({ status: "forbidden", user });
       else setState({ status: "ok", user });
     });
