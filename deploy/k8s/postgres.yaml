@@ -34,8 +34,14 @@ spec:
     spec:
       nodeSelector:
         node-role.kubernetes.io/apps: "true"
+      # Run as the "postgres" user (uid 999) so the image entrypoint skips its root-only chown of the
+      # data dir — with capabilities dropped, a root entrypoint can't chown and crashes. fsGroup lets
+      # uid 999 write the Longhorn volume.
       securityContext:
-        fsGroup: 999 # postgres user in the official image; lets it own the Longhorn volume
+        runAsUser: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+        fsGroup: 999
       containers:
         - name: postgres
           image: postgres:17-alpine
