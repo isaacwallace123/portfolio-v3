@@ -1,0 +1,125 @@
+{
+  "schema": "cyberlab-recording/1",
+  "id": "example-local-recon-20260720-213556",
+  "scenario": {
+    "id": "example-local-recon",
+    "title": "Example capture — local host recon"
+  },
+  "created": "2026-07-20T21:35:45Z",
+  "host": {
+    "os": "nt",
+    "node": "DESKTOP-6HKKFTQ"
+  },
+  "actors": [
+    {
+      "id": "attacker",
+      "role": "attacker",
+      "title": "black hat — example capture",
+      "prompt": "PS lab> ",
+      "shell": "powershell"
+    }
+  ],
+  "duration": 11.515,
+  "events": [
+    {
+      "t": 0.0,
+      "step": 0,
+      "actor": "attacker",
+      "kind": "narration",
+      "text": "Establish where we are before touching a target."
+    },
+    {
+      "t": 1.551,
+      "step": 1,
+      "actor": "attacker",
+      "kind": "command",
+      "text": "hostname",
+      "shell": "powershell"
+    },
+    {
+      "t": 1.672,
+      "step": 1,
+      "actor": "attacker",
+      "kind": "output",
+      "stream": "stdout",
+      "text": "DESKTOP-6HKKFTQ"
+    },
+    {
+      "t": 1.672,
+      "step": 1,
+      "actor": "attacker",
+      "kind": "exit",
+      "code": 0,
+      "duration": 0.121
+    },
+    {
+      "t": 2.872,
+      "step": 2,
+      "actor": "attacker",
+      "kind": "narration",
+      "text": "Enumerate our own IPv4 addressing."
+    },
+    {
+      "t": 4.423,
+      "step": 3,
+      "actor": "attacker",
+      "kind": "command",
+      "text": "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne '127.0.0.1' } | Select-Object -First 3 -ExpandProperty IPAddress",
+      "shell": "powershell"
+    },
+    {
+      "t": 5.227,
+      "step": 3,
+      "actor": "attacker",
+      "kind": "output",
+      "stream": "stdout",
+      "text": "169.254.60.112\n169.254.252.120\n169.254.219.225"
+    },
+    {
+      "t": 5.227,
+      "step": 3,
+      "actor": "attacker",
+      "kind": "exit",
+      "code": 0,
+      "duration": 0.804
+    },
+    {
+      "t": 6.428,
+      "step": 4,
+      "actor": "attacker",
+      "kind": "narration",
+      "text": "Confirm loopback reachability (stand-in for a target liveness check)."
+    },
+    {
+      "t": 7.979,
+      "step": 5,
+      "actor": "attacker",
+      "kind": "command",
+      "text": "ping -n 2 127.0.0.1",
+      "shell": "powershell"
+    },
+    {
+      "t": 9.114,
+      "step": 5,
+      "actor": "attacker",
+      "kind": "output",
+      "stream": "stdout",
+      "text": "\nPinging 127.0.0.1 with 32 bytes of data:\nReply from 127.0.0.1: bytes=32 time<1ms TTL=128\nReply from 127.0.0.1: bytes=32 time<1ms TTL=128\n\nPing statistics for 127.0.0.1:\n    Packets: Sent = 2, Received = 2, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+    },
+    {
+      "t": 9.114,
+      "step": 5,
+      "actor": "attacker",
+      "kind": "exit",
+      "code": 0,
+      "duration": 1.135
+    },
+    {
+      "t": 10.314,
+      "step": 6,
+      "actor": "attacker",
+      "kind": "narration",
+      "text": "Recon complete. On a real run this is where the SOC would light up."
+    }
+  ]
+}

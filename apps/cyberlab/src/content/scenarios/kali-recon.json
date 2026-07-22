@@ -1,0 +1,89 @@
+{
+  "id": "kali-recon",
+  "title": "Kali Recon of the Linux Web Victim",
+  "summary": "A single-terminal reconnaissance run: the Kali attacker fingerprints the persistent Linux web victim at 10.93.0.10 — the loud nmap sweep and HTTP probes the SOC is meant to catch.",
+  "purpose": "The baseline attacker workflow — establish position, confirm the target is up, enumerate services, fingerprint the web stack. It's the 'loud' activity a monitoring stack should surface, and the starting point most engagements build from.",
+  "tags": ["single-actor", "reconnaissance", "nmap", "web"],
+  "durationSec": 42,
+  "terminals": [
+    {
+      "id": "attacker",
+      "role": "attacker",
+      "title": "black hat — cyb-atk-kali-01",
+      "prompt": "┌──(cyber@cyb-atk-kali-01)-[~]\n└─$ ",
+      "speed": 26,
+      "geometry": "128x34+0+0"
+    }
+  ],
+  "steps": [
+    {
+      "terminal": "attacker",
+      "say": "Confirm who and where we are on the attacker network (10.91.0.0/24)."
+    },
+    {
+      "terminal": "attacker",
+      "run": "hostname && ip -4 addr show scope global | awk '/inet/{print $2}'",
+      "out": ["cyb-atk-kali-01", "10.91.0.10/24"]
+    },
+    {
+      "terminal": "attacker",
+      "say": "Target: the persistent Linux web victim at 10.93.0.10. Is it up?"
+    },
+    {
+      "terminal": "attacker",
+      "run": "ping -c 2 10.93.0.10",
+      "pause_after": 1.4,
+      "out": [
+        "PING 10.93.0.10 (10.93.0.10) 56(84) bytes of data.",
+        "64 bytes from 10.93.0.10: icmp_seq=1 ttl=64 time=0.43 ms",
+        "64 bytes from 10.93.0.10: icmp_seq=2 ttl=64 time=0.39 ms",
+        "2 packets transmitted, 2 received, 0% packet loss"
+      ]
+    },
+    {
+      "terminal": "attacker",
+      "say": "Service + version scan of the top ports (the loud step the SOC should catch)."
+    },
+    {
+      "terminal": "attacker",
+      "run": "nmap -sV -T4 --top-ports 50 10.93.0.10",
+      "pause_after": 1.8,
+      "out": [
+        "Nmap scan report for 10.93.0.10",
+        "PORT   STATE SERVICE VERSION",
+        "22/tcp open  ssh     OpenSSH 9.6p1 Ubuntu",
+        "§80/tcp open  http    nginx 1.24.0§",
+        "Nmap done: 1 host up scanned in 7.41s"
+      ]
+    },
+    { "terminal": "attacker", "say": "Fingerprint the web stack." },
+    {
+      "terminal": "attacker",
+      "run": "whatweb -a1 http://10.93.0.10 || curl -sSI http://10.93.0.10",
+      "out": [
+        "§http://10.93.0.10§ [200 OK] nginx[1.24.0], Country[RESERVED]",
+        "HTTPServer[nginx/1.24.0], Title[OWASP Juice Shop]"
+      ]
+    },
+    {
+      "terminal": "attacker",
+      "say": "Pull the landing page to confirm reachability end to end."
+    },
+    {
+      "terminal": "attacker",
+      "run": "curl -s http://10.93.0.10 | head -n 20",
+      "pause_after": 1.2,
+      "out": [
+        "<!doctype html>",
+        "<html lang=\"en\">",
+        "  <head><title>OWASP Juice Shop</title></head>",
+        "  <body><app-root></app-root></body>",
+        "</html>"
+      ]
+    },
+    {
+      "terminal": "attacker",
+      "say": "Recon complete. In Wazuh this run surfaces the nmap sweep and the HTTP probes."
+    }
+  ]
+}

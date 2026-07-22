@@ -1,0 +1,97 @@
+name: publish
+
+# Build the auth service, the general-API stub, and the site images, and push to GHCR on every push
+# to main (and on version tags).
+# ArgoCD Image Updater in the homelab cluster rolls the :latest digest out automatically; a tag
+# push also produces an immutable :vX.Y.Z you can pin.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          # The .NET services are self-contained builds → each its own dir is the context.
+          - name: portfolio-auth-service
+            context: apps/auth-service
+            dockerfile: apps/auth-service/Dockerfile
+            build_args: ""
+          - name: portfolio-api
+            context: apps/api
+            dockerfile: apps/api/Dockerfile
+            build_args: ""
+          # The Next apps are a monorepo workspace: the build context is the REPO ROOT so the
+          # shared @iw/* packages are in scope; the Dockerfile lives under the app dir.
+          - name: portfolio-web
+            context: .
+            dockerfile: apps/web/Dockerfile
+            build_args: |
+              NEXT_PUBLIC_API_URL=https://api.isaacwallace.dev
+              NEXT_PUBLIC_AUTH_API_URL=https://auth.isaacwallace.dev
+              NEXT_PUBLIC_AUTH_URL=https://auth.isaacwallace.dev
+              NEXT_PUBLIC_ADMIN_URL=https://admin.isaacwallace.dev
+          - name: portfolio-admin
+            context: .
+            dockerfile: apps/admin/Dockerfile
+            build_args: |
+              NEXT_PUBLIC_API_URL=https://api.isaacwallace.dev
+              NEXT_PUBLIC_AUTH_API_URL=https://auth.isaacwallace.dev
+              NEXT_PUBLIC_AUTH_URL=https://auth.isaacwallace.dev
+          - name: portfolio-auth
+            context: .
+            dockerfile: apps/auth/Dockerfile
+            build_args: |
+              NEXT_PUBLIC_API_URL=https://api.isaacwallace.dev
+              NEXT_PUBLIC_AUTH_API_URL=https://auth.isaacwallace.dev
+              NEXT_PUBLIC_HOME_URL=https://isaacwallace.dev
+              NEXT_PUBLIC_ADMIN_URL=https://admin.isaacwallace.dev
+          # cyberlab.isaacwallace.dev — moved into this monorepo (was the cyberlab repo).
+          - name: cyberlab-web
+            context: .
+            dockerfile: apps/cyberlab/Dockerfile
+            build_args: |
+              NEXT_PUBLIC_API_URL=https://api.isaacwallace.dev
+              NEXT_PUBLIC_AUTH_API_URL=https://auth.isaacwallace.dev
+              NEXT_PUBLIC_AUTH_URL=https://auth.isaacwallace.dev
+              NEXT_PUBLIC_ADMIN_URL=https://admin.isaacwallace.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=,format=short
+            type=semver,pattern=v{{version}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: ${{ matrix.build_args }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

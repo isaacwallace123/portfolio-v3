@@ -1,0 +1,13 @@
+{
+  "name": "isaacwallace",
+  "private": true,
+  "version": "0.0.0",
+  "description": "isaacwallace.dev network monorepo — websites (apps/*), shared packages (packages/*), and the .NET API.",
+  "workspaces": [
+    "packages/*",
+    "apps/web",
+    "apps/auth",
+    "apps/admin",
+    "apps/cyberlab"
+  ]
+}

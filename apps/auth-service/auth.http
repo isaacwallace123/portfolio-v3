@@ -1,0 +1,28 @@
+### Manual smoke tests — run from VS Code (REST Client) or Rider. Docs UI: {{host}}/scalar
+### Identity comes from an external provider (Google/GitHub); in Development you can also use
+### /auth/dev-login (email only, no password).
+@host = http://localhost:5170
+
+### health
+GET {{host}}/health
+
+### which providers are wired up (+ whether dev-login is available)
+GET {{host}}/auth/providers
+
+### dev login (Development only) — sets the session cookie
+POST {{host}}/auth/dev-login
+Content-Type: application/json
+
+{ "email": "test@example.com", "displayName": "Tester" }
+
+### who am I
+GET {{host}}/auth/me
+
+### start the real OAuth flow (opens the provider) — visit in a browser
+GET {{host}}/auth/login/google?returnUrl=http://localhost:3000
+
+### my signed-in devices
+GET {{host}}/auth/sessions
+
+### logout (revokes this device's session)
+POST {{host}}/auth/logout

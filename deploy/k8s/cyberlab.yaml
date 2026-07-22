@@ -1,0 +1,83 @@
+# cyberlab.isaacwallace.dev — the public, read-only case-study + live view. Stateless; the
+# NEXT_PUBLIC_* API/auth/admin URLs are baked at image-build time in CI (see publish.yml). Uses the
+# same shared session cookie as every other *.isaacwallace.dev site (the account lives on the main
+# portfolio site). The image is now built from this monorepo (apps/cyberlab), but the site keeps its
+# own isolated `cyberlab` namespace.
+#
+# NOTE: this is the sanitised WEBSITE only. The cyber range itself (Kali/victim/SOC/Windows/AD/
+# scenario VMs) stays on Proxmox + Terraform and never runs in this cluster.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cyberlab
+  labels:
+    app.kubernetes.io/part-of: portfolio-network
+    pod-security.kubernetes.io/enforce: baseline
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cyberlab-web
+  namespace: cyberlab
+  labels:
+    app: cyberlab-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cyberlab-web
+  template:
+    metadata:
+      labels:
+        app: cyberlab-web
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/apps: "true"
+      containers:
+        - name: web
+          image: ghcr.io/isaacwallace123/cyberlab-web:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - containerPort: 3000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 96Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cyberlab-web
+  namespace: cyberlab
+  labels:
+    app: cyberlab-web
+spec:
+  selector:
+    app: cyberlab-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000

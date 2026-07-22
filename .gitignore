@@ -1,0 +1,20 @@
+# node
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# dotnet
+bin/
+obj/
+*.user
+
+# data & secrets
+*.db
+*.db-*
+.env
+.env.*
+!.env.example
+# unsealed k8s secrets — only the sealed output (deploy/k8s/sealed-secret.yaml) is safe to commit
+deploy/secrets/*.yaml
+!deploy/secrets/*.example.yaml

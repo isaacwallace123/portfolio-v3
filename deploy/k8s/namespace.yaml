@@ -1,0 +1,10 @@
+# The public portfolio tier (main site + shared API + its database). This is the SANITISED,
+# public-facing web layer — it is NOT the cyberlab range. The range's attacker/victim/SOC/scenario
+# VMs stay on Proxmox/Terraform per the lab-isolation strategy; only stateless public sites live here.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: portfolio
+  labels:
+    app.kubernetes.io/part-of: portfolio-network
+    pod-security.kubernetes.io/enforce: baseline

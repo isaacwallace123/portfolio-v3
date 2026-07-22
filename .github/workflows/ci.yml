@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  dotnet:
+    name: dotnet — build + auth integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      # builds the auth service, the general-API stub, and the test project
+      - run: dotnet build IsaacWallace.sln
+      - run: dotnet test apps/auth-tests/Auth.Tests.csproj
+
+  web:
+    name: ${{ matrix.app }} — lint + typecheck + build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [web, admin, auth, cyberlab]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      # One workspace install at the root (npm nests each app's deps + links the @iw/* packages).
+      # `install`, not `ci`: the lockfile is Windows-authored and its native-binding optional-dep
+      # tree differs on linux, which `npm ci`'s strict check rejects.
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint -w apps/${{ matrix.app }}
+      - run: npm run format:check -w apps/${{ matrix.app }}
+      - run: npm run typecheck -w apps/${{ matrix.app }}
+      - run: npm run build -w apps/${{ matrix.app }}
+
+  docker:
+    name: docker — images build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The .NET services are each their own context; the Next apps build from the repo root
+      # (workspace) with the Dockerfile under the app dir.
+      - run: docker build apps/auth-service
+      - run: docker build apps/api
+      - run: docker build -f apps/web/Dockerfile .
+      - run: docker build -f apps/admin/Dockerfile .
+      - run: docker build -f apps/auth/Dockerfile .
+      - run: docker build -f apps/cyberlab/Dockerfile .

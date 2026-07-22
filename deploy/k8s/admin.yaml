@@ -1,0 +1,70 @@
+# admin.isaacwallace.dev — the control plane. Stateless Next.js; admin gating is client-side UX,
+# server-side role checks in the API, and (in production) Cloudflare Access at the edge in front of
+# the whole hostname. NEXT_PUBLIC_* baked at build time in CI.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin
+  namespace: portfolio
+  labels:
+    app: admin
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: admin
+  template:
+    metadata:
+      labels:
+        app: admin
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/apps: "true"
+      containers:
+        - name: admin
+          image: ghcr.io/isaacwallace123/portfolio-admin:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - containerPort: 3000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 96Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin
+  namespace: portfolio
+  labels:
+    app: admin
+spec:
+  selector:
+    app: admin
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000

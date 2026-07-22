@@ -1,0 +1,284 @@
+/* ── isaacwallace.dev design system ─────────────────────────────────────────
+   The hub of the portfolio network. Deliberately the opposite of the labs:
+   where cyberlab is a dark ops console, the main site is calm, light, and
+   editorial — paper ground, ink type, one indigo accent, and each lab card
+   carrying its own subdomain's colour.
+
+   Token architecture: raw palette (:root) → @theme inline. The SHARED design
+   contract (radius/type/control/shadow/motion scales — see DESIGN.md) uses
+   identical names and values across every app in the network; only the
+   palette differs. */
+
+@import "tailwindcss";
+
+/* generate utilities used by the shared @iw/ui components (outside this app's tree) */
+@source "../../../../packages/ui/src";
+
+:root {
+  color-scheme: light;
+
+  --paper: #faf9f6;
+  --paper-2: #f1efe9;
+  --card: #ffffff;
+  --line: #e4e1d8;
+  --line-2: #d3cfc3;
+
+  --ink: #191b1f;
+  --ink-mid: #575c66;
+  --ink-dim: #8b8f98;
+
+  --accent: #3b5bdb;
+  --danger: #c23b3b;
+
+  /* one colour per subdomain — how the network reads as one system */
+  --lab-cyber: #0891b2;
+  --lab-homelab: #059669;
+  --lab-ailab: #7c3aed;
+  --lab-main: #3b5bdb;
+
+  --sans:
+    var(--font-inter), system-ui, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  --display: var(--font-fraunces), Charter, "Iowan Old Style", Georgia, serif;
+  --mono: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+
+  /* ── shared contract: surfaces (portable aliases) ── */
+  --surface: var(--card);
+  --surface-2: var(--paper-2);
+
+  /* ── shared contract: radius scale ── */
+  --radius: 12px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 18px;
+
+  /* ── shared contract: control + type scales ── */
+  --ctl-sm: 32px;
+  --ctl: 40px;
+  --ctl-lg: 44px;
+  --fs-hero: clamp(32px, 5.6vw, 60px);
+  --fs-h1: clamp(22px, 3.2vw, 32px);
+  --fs-h2: clamp(19px, 2.4vw, 24px);
+  --fs-body: 15px;
+  --fs-small: 13px;
+  --fs-micro: 11px;
+
+  /* ── shared contract: elevation (same geometry, ink-tinted for paper) ── */
+  --shadow-1: 0 1px 2px rgba(25, 27, 31, 0.06);
+  --shadow-2: 0 18px 40px -18px rgba(25, 27, 31, 0.25);
+  --shadow-3:
+    0 24px 60px -20px rgba(25, 27, 31, 0.28),
+    0 8px 24px -12px rgba(25, 27, 31, 0.18);
+
+  /* ── shared contract: motion ── */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+  --dur-reveal: 640ms;
+}
+
+/* ── Dark editorial: the same paper layout after dusk ────────────────────────
+   Only the palette changes — every scale, radius, and motion token above is
+   shared. The pre-paint script in <head> sets html[data-theme] from the cookie,
+   so this applies before first paint (no flash); a no-JS visitor keeps light. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --paper: #101218;
+  --paper-2: #191c24;
+  --card: #171a21;
+  --line: #2a2e39;
+  --line-2: #3a3f4d;
+
+  --ink: #ecedf2;
+  --ink-mid: #a7acba;
+  --ink-dim: #6c7280;
+
+  --accent: #6c7cff; /* the network indigo, lifted for a dark ground */
+  --danger: #fb6a6a;
+
+  --lab-cyber: #22b8cf;
+  --lab-homelab: #34d399;
+  --lab-ailab: #a586ff;
+  --lab-main: #6c7cff;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-2: 0 18px 40px -18px rgba(0, 0, 0, 0.7);
+  --shadow-3:
+    0 24px 60px -20px rgba(0, 0, 0, 0.82), 0 8px 24px -12px rgba(0, 0, 0, 0.66);
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-card: var(--card);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-ink: var(--ink);
+  --color-ink-mid: var(--ink-mid);
+  --color-ink-dim: var(--ink-dim);
+  --color-accent: var(--accent);
+  --color-brand: var(
+    --accent
+  ); /* uniform brand token shared components use (ring-brand, bg-brand) */
+  --color-danger: var(--danger);
+  --color-lab-cyber: var(--lab-cyber);
+  --color-lab-homelab: var(--lab-homelab);
+  --color-lab-ailab: var(--lab-ailab);
+  --color-lab-main: var(--lab-main);
+
+  --font-sans: var(--sans);
+  --font-display: var(--display);
+  --font-mono: var(--mono);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+}
+
+@layer base {
+  html {
+    /* fluid anchored navigation — killed by both reduced-motion switches below */
+    scroll-behavior: smooth;
+  }
+
+  * {
+    border-color: var(--line);
+  }
+
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--paper);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.6;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+}
+
+@layer components {
+  .shell {
+    margin-inline: auto;
+    width: 100%;
+    max-width: 1200px;
+    padding-inline: clamp(20px, 4vw, 48px);
+  }
+
+  .eyebrow {
+    font: 700 var(--fs-micro) / 1 var(--mono);
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* named entrance: rise via scroll (elements stay visible without JS) */
+  html[data-reveal-ready] .reveal {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  html[data-reveal-ready] .reveal.in {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity var(--dur-reveal) var(--ease-out),
+      transform var(--dur-reveal) var(--ease-out);
+    transition-delay: var(--reveal-delay, 0ms);
+  }
+
+  /* named entrance: pop — dropdowns, modals */
+  .pop-in {
+    animation: pop-in var(--dur-base) var(--ease-spring);
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+
+  /* named entrance: rise as a mount animation — the hero's signature.
+     Stagger with --rise-delay. */
+  .rise-in {
+    animation: rise-in var(--dur-reveal) var(--ease-out) both;
+    animation-delay: var(--rise-delay, 0ms);
+  }
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+  }
+
+  /* named entrance: draw — the hero underline sweeps in once the line lands */
+  .draw-underline {
+    position: relative;
+  }
+  .draw-underline::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -8px;
+    height: 3px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+    transform-origin: left center;
+    animation: draw var(--dur-reveal) var(--ease-out) 620ms both;
+  }
+  @keyframes draw {
+    from {
+      transform: scaleX(0);
+    }
+  }
+}
+
+/* both reduced-motion switches: the OS setting AND the per-site preference
+   (html[data-reduce-motion], set from the settings modal). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  html {
+    scroll-behavior: auto !important;
+  }
+}
+html[data-reduce-motion] *,
+html[data-reduce-motion] *::before,
+html[data-reduce-motion] *::after {
+  animation-duration: 0.001ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+html[data-reduce-motion] {
+  scroll-behavior: auto !important;
+}

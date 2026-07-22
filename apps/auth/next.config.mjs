@@ -1,0 +1,19 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
+
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  output: "standalone",
+  // @iw/core ships as TypeScript source (monorepo workspace) — let Next compile it
+  transpilePackages: ["@iw/core"],
+  // trace files from the repo root so the standalone bundle includes the workspace package
+  outputFileTracingRoot: repoRoot,
+};
+
+export default nextConfig;

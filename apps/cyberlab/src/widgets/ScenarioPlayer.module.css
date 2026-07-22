@@ -1,0 +1,456 @@
+.root {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 18px;
+  align-items: start;
+}
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* ── Stage ─────────────────────────────────────────────────────────────── */
+.stageWrap {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(
+      1000px 500px at 50% -30%,
+      rgba(69, 201, 221, 0.05),
+      transparent 70%
+    ),
+    linear-gradient(180deg, #0a1018, #070c12);
+  padding: clamp(10px, 2vw, 22px);
+  overflow: hidden;
+}
+.stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: var(--stage-ar, 16 / 9);
+  max-height: 62vh;
+  margin: 0 auto;
+}
+
+.term {
+  /* a terminal is a screen — it stays a dark console in either site theme, so
+     its text tokens are pinned to the dark scale (otherwise --ink flips dark in
+     light mode → unreadable dark-on-dark). */
+  --ink: #d7e2ee;
+  --ink-mid: #8ea1b5;
+  --ink-dim: #5b6c7e;
+  --line: #223041;
+  --line-soft: #18222e;
+
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #0c131b, #090f16);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  filter: saturate(0.7) brightness(0.72);
+  transition:
+    filter 0.5s ease,
+    border-color 0.5s ease,
+    box-shadow 0.5s ease;
+}
+.term.active {
+  filter: none;
+  z-index: 5;
+  border-color: color-mix(in srgb, var(--role) 60%, var(--line));
+  box-shadow:
+    var(--shadow),
+    0 0 0 1px color-mix(in srgb, var(--role) 45%, transparent),
+    0 0 34px -6px color-mix(in srgb, var(--role) 55%, transparent);
+}
+.termBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 11px;
+  background: color-mix(in srgb, var(--role) 10%, #0b1119);
+  border-bottom: 1px solid var(--line-soft);
+}
+.lights {
+  display: flex;
+  gap: 6px;
+}
+.lights i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #33414f;
+  display: block;
+}
+.term.active .lights i:nth-child(1) {
+  background: #ff5f57;
+}
+.term.active .lights i:nth-child(2) {
+  background: #febc2e;
+}
+.term.active .lights i:nth-child(3) {
+  background: #28c840;
+}
+.termTitle {
+  font: 600 11px var(--mono);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.roleChip {
+  margin-left: auto;
+  font: 700 8.5px/1 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 4px 6px;
+  border-radius: 5px;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--role) 88%, #fff);
+  background: color-mix(in srgb, var(--role) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--role) 40%, transparent);
+}
+.termBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 9px 12px 12px;
+  font: 12px/1.5 var(--mono);
+  color: var(--ink);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+  /* faint CRT scanlines — the console motif, kept just under notice */
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.015) 0 1px,
+    transparent 1px 3px
+  );
+}
+
+.ln {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.say {
+  color: var(--ink-dim);
+  font-style: italic;
+  margin-top: 5px;
+}
+.prompt {
+  color: color-mix(in srgb, var(--role) 85%, var(--ink));
+}
+.typed {
+  color: #eaf2fb;
+}
+.out {
+  color: var(--ink-mid);
+}
+.hi {
+  color: color-mix(in srgb, var(--role) 82%, #fff);
+  font-weight: 600;
+}
+.caret {
+  display: inline-block;
+  width: 8px;
+  height: 1.05em;
+  background: var(--active);
+  vertical-align: text-bottom;
+  margin-left: 1px;
+  animation: blink 1s steps(1) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ── Narration ─────────────────────────────────────────────────────────── */
+.narration {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px 15px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--active);
+  border-radius: 10px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--active) 9%, var(--panel)),
+    var(--panel)
+  );
+  transition:
+    border-color 0.4s,
+    background 0.4s;
+}
+.narration.idle .txt {
+  color: var(--ink-dim);
+}
+.who {
+  font: 700 10px/1 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--active);
+  white-space: nowrap;
+}
+.txt {
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+/* ── Controls ──────────────────────────────────────────────────────────── */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.btns {
+  display: flex;
+  gap: 8px;
+}
+.speed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.speed label {
+  font: 600 10px var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.seg {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.seg button {
+  background: var(--panel);
+  color: var(--ink-mid);
+  border: 0;
+  border-right: 1px solid var(--line);
+  padding: 7px 10px;
+  font: 600 12px var(--mono);
+  cursor: pointer;
+}
+.seg button:last-child {
+  border-right: 0;
+}
+.seg button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--active) 24%, var(--panel));
+  color: color-mix(in srgb, var(--active) 92%, #fff);
+}
+.counter {
+  margin-left: auto;
+  font: 600 12px var(--mono);
+  color: var(--ink-mid);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Director timeline ─────────────────────────────────────────────────── */
+.timeline {
+  display: flex;
+  gap: 4px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  overflow-x: auto;
+}
+.tick {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 14px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--tick) 14%, var(--panel-2));
+  cursor: pointer;
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
+}
+.tick::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--tick);
+  opacity: 0.5;
+}
+.tick:hover {
+  transform: translateY(-2px);
+}
+.tick.done {
+  background: color-mix(in srgb, var(--tick) 30%, var(--panel-2));
+}
+.tick.current {
+  box-shadow:
+    0 0 0 1px var(--tick),
+    0 0 16px -4px var(--tick);
+  background: color-mix(in srgb, var(--tick) 42%, var(--panel-2));
+  animation: tick-glow 1.6s ease-in-out infinite;
+}
+@keyframes tick-glow {
+  50% {
+    box-shadow:
+      0 0 0 1px var(--tick),
+      0 0 24px -2px var(--tick);
+  }
+}
+.tick.current::after {
+  opacity: 1;
+}
+
+/* ── Steps panel ───────────────────────────────────────────────────────── */
+.steps {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  max-height: min(74vh, 720px);
+  overflow: hidden;
+}
+.stepsHead {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  font: 700 10px/1 var(--mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  display: flex;
+  justify-content: space-between;
+}
+.stepsList {
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.stepItem {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 10px;
+  padding: 10px 11px;
+  border-radius: 9px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: var(--panel-2);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    opacity 0.2s;
+}
+.stepItem:hover {
+  border-color: color-mix(in srgb, var(--role) 45%, var(--line));
+}
+.stepItem.current {
+  border-color: var(--role);
+  background: color-mix(in srgb, var(--role) 12%, var(--panel-2));
+  box-shadow: inset 3px 0 0 var(--role);
+}
+.stepItem.done {
+  opacity: 0.6;
+}
+.stepItem.done.current {
+  opacity: 1;
+}
+.stepNum {
+  font: 700 11px/1.6 var(--mono);
+  color: var(--role);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.stepBody {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.stepActor {
+  font: 700 9px/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--role);
+}
+.stepText {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.stepCmd {
+  font: 11.5px/1.4 var(--mono);
+  color: var(--ink-mid);
+  background: var(--panel-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  padding: 5px 7px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.stepCmd::before {
+  content: "$ ";
+  color: color-mix(in srgb, var(--role) 80%, var(--ink));
+}
+.stepDetect {
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--victim) 85%, var(--ink));
+}
+
+.legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: 600 11px var(--mono);
+  color: var(--ink-mid);
+}
+.legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--role);
+}
+
+@media (max-width: 940px) {
+  .root {
+    grid-template-columns: 1fr;
+  }
+  .steps {
+    max-height: 380px;
+  }
+  .stage {
+    aspect-ratio: auto;
+    max-height: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .term {
+    position: static !important;
+    width: auto !important;
+    height: 280px !important;
+    left: auto !important;
+    top: auto !important;
+    filter: none;
+  }
+}

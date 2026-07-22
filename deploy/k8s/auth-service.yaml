@@ -1,0 +1,123 @@
+# The dedicated auth service → auth.isaacwallace.dev (path-routed: /auth/*, /signin-* reach this
+# service; the identity portal `auth` serves the rest of the host). Its own image, wholly separate
+# from the general app API. Production config comes from appsettings.Production.json baked into the
+# image (cookie domain .isaacwallace.dev, prod CORS origins) plus the env below.
+#
+# replicas: 1 deliberately — Data Protection keys (which sign the SSO cookie) are persisted to a
+# ReadWriteOnce Longhorn volume, which binds to one node. To scale out, switch that PVC to
+# ReadWriteMany (NFS) so all replicas share the keyring; nothing else needs to change.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: auth-service-dpkeys
+  namespace: portfolio
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: portfolio
+  labels:
+    app: auth-service
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # RWO dpkeys volume can't be double-mounted during a rollout
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/apps: "true"
+      securityContext:
+        fsGroup: 1654 # the non-root "app" user in the .NET image → can write the dpkeys volume
+      containers:
+        - name: auth-service
+          image: ghcr.io/isaacwallace123/portfolio-auth-service:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Production
+            - name: DataProtection__KeyPath
+              value: /keys
+            - name: Auth__AdminEmails__0
+              value: goosewal@gmail.com
+            - name: ConnectionStrings__Postgres
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: ConnectionStrings__Postgres
+            # OAuth client credentials — the only login path in production (no passwords stored).
+            - name: Auth__Google__ClientId
+              valueFrom:
+                secretKeyRef: { name: portfolio-secrets, key: Auth__Google__ClientId }
+            - name: Auth__Google__ClientSecret
+              valueFrom:
+                secretKeyRef: { name: portfolio-secrets, key: Auth__Google__ClientSecret }
+            - name: Auth__GitHub__ClientId
+              valueFrom:
+                secretKeyRef: { name: portfolio-secrets, key: Auth__GitHub__ClientId }
+            - name: Auth__GitHub__ClientSecret
+              valueFrom:
+                secretKeyRef: { name: portfolio-secrets, key: Auth__GitHub__ClientSecret }
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: dpkeys
+              mountPath: /keys
+      volumes:
+        - name: dpkeys
+          persistentVolumeClaim:
+            claimName: auth-service-dpkeys
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: portfolio
+  labels:
+    app: auth-service
+spec:
+  selector:
+    app: auth-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

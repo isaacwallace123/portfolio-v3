@@ -1,0 +1,11 @@
+# Root build context is the monorepo — keep heavy/irrelevant trees out of it.
+**/node_modules
+**/.next
+**/.git
+**/.turbo
+**/dist
+**/bin
+**/obj
+**/*.tsbuildinfo
+**/.env
+**/.env.*

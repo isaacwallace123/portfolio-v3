@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build-dotnet",
+      "type": "shell",
+      "command": "dotnet build IsaacWallace.sln",
+      "group": "build",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "dev: web (:3000)",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": { "cwd": "${workspaceFolder}/apps/web" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "dev: db (docker)",
+      "type": "shell",
+      "command": "docker compose up -d db",
+      "problemMatcher": []
+    }
+  ]
+}

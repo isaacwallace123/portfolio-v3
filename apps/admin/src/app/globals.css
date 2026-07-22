@@ -1,0 +1,199 @@
+/* ── admin.isaacwallace.dev — control-plane identity ────────────────────────
+   Distinct from both the light portfolio and cyberlab's ops-console: a dense,
+   dark "mission control" surface — graphite ground, signal-violet accent, and
+   status colours (green/amber/red) for state. It should feel like a cockpit. */
+
+@import "tailwindcss";
+
+/* generate utilities used by the shared @iw/ui components (outside this app's tree) */
+@source "../../../../packages/ui/src";
+
+:root {
+  color-scheme: dark;
+
+  --bg: #0a0c10;
+  --bg-2: #0e1116;
+  --panel: #14181f;
+  --panel-2: #1a1f28;
+  --line: #262c37;
+  --line-soft: #1d222b;
+
+  --ink: #e7ebf2;
+  --ink-mid: #9aa4b4;
+  --ink-dim: #5f6976;
+
+  --accent: #7c6cff; /* signal violet */
+  --accent-bright: #9d90ff;
+
+  --ok: #34d399;
+  --warn: #f5b942;
+  --danger: #fb6a6a;
+
+  --sans: system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono:
+    ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* ── shared contract (see ../../DESIGN.md): identical across the network ── */
+  --surface: var(--panel);
+  --surface-2: var(--panel-2);
+
+  --radius: 12px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 18px;
+
+  --ctl-sm: 32px;
+  --ctl: 40px;
+  --ctl-lg: 44px;
+  --fs-hero: clamp(32px, 5.6vw, 60px);
+  --fs-h1: clamp(22px, 3.2vw, 32px);
+  --fs-h2: clamp(19px, 2.4vw, 24px);
+  --fs-body: 15px;
+  --fs-small: 13px;
+  --fs-micro: 11px;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 18px 40px -18px rgba(0, 0, 0, 0.6);
+  --shadow-3:
+    0 24px 60px -20px rgba(0, 0, 0, 0.75), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+  --dur-reveal: 640ms;
+}
+
+/* ── Daylight mission control — the same cockpit, lit. Graphite dark is the
+   native identity (:root above); this is the light override the shared theme
+   switches in. The pre-paint script sets html[data-theme] from the cookie. ── */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f4f5f8;
+  --bg-2: #eceef3;
+  --panel: #ffffff;
+  --panel-2: #f6f7fa;
+  --line: #dde0e8;
+  --line-soft: #e8eaf1;
+
+  --ink: #171a21;
+  --ink-mid: #565d6c;
+  --ink-dim: #8a92a1;
+
+  --accent: #5b4bd6; /* signal violet, darkened for contrast on light */
+  --accent-bright: #6d5cff;
+
+  --ok: #0f9d6a;
+  --warn: #b5760f;
+  --danger: #c23b3b;
+
+  --shadow-1: 0 1px 2px rgba(23, 26, 33, 0.06);
+  --shadow-2: 0 18px 40px -18px rgba(23, 26, 33, 0.22);
+  --shadow-3:
+    0 24px 60px -20px rgba(23, 26, 33, 0.26),
+    0 8px 24px -12px rgba(23, 26, 33, 0.16);
+}
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--ink);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-ink: var(--ink);
+  --color-ink-mid: var(--ink-mid);
+  --color-ink-dim: var(--ink-dim);
+  --color-accent: var(--accent);
+  --color-brand: var(
+    --accent
+  ); /* uniform brand token shared components use (ring-brand, bg-brand) */
+  --color-accent-bright: var(--accent-bright);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+}
+
+@layer base {
+  * {
+    border-color: var(--line);
+  }
+
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background:
+      radial-gradient(1100px 700px at 88% -12%, #131826, transparent 60%),
+      radial-gradient(820px 560px at -4% 108%, #10131c, transparent 58%),
+      var(--bg);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.55;
+  }
+  /* the ambient cockpit wash, lit for the light theme */
+  :root[data-theme="light"] body {
+    background:
+      radial-gradient(1100px 700px at 88% -12%, #edeff6, transparent 60%),
+      radial-gradient(820px 560px at -4% 108%, #eceef5, transparent 58%),
+      var(--bg);
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 32%, transparent);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+  }
+}
+
+@layer components {
+  .kicker {
+    font: 700 10px/1 var(--mono);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+}
+
+/* both reduced-motion switches: the OS setting AND a per-site preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+html[data-reduce-motion] *,
+html[data-reduce-motion] *::before,
+html[data-reduce-motion] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}

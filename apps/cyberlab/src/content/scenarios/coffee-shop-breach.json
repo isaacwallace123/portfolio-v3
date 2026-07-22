@@ -1,0 +1,133 @@
+{
+  "id": "coffee-shop-breach",
+  "title": "Coffee-Shop Breach — black hat vs white hat vs red hat",
+  "summary": "An attacker breaches a café point-of-sale on open WiFi, the SOC detects and contains it, and the red team closes the hole — three actors, one choreographed timeline.",
+  "purpose": "Shows a full attack-detect-respond-harden loop the way a real range exercise plays out: the same event seen from three perspectives at once. It demonstrates why detection and response matter — the attacker succeeds, then is contained, then permanently locked out after hardening.",
+  "tags": [
+    "multi-actor",
+    "network",
+    "detection",
+    "incident-response",
+    "hardening"
+  ],
+  "durationSec": 64,
+  "terminals": [
+    {
+      "id": "attacker",
+      "role": "attacker",
+      "title": "black hat — kali",
+      "prompt": "┌──(cyber@cyb-atk-kali-01)-[~]\n└─$ ",
+      "speed": 26,
+      "geometry": "104x24+0+0"
+    },
+    {
+      "id": "responder",
+      "role": "responder",
+      "title": "white hat — IR / SOC",
+      "prompt": "ir@cyb-ir-01:~$ ",
+      "speed": 30,
+      "geometry": "104x24+900+0"
+    },
+    {
+      "id": "hardener",
+      "role": "hardener",
+      "title": "red hat — hardening",
+      "prompt": "harden@cyb-red-01:~$ ",
+      "speed": 30,
+      "geometry": "104x22+450+560"
+    }
+  ],
+  "steps": [
+    {
+      "terminal": "attacker",
+      "say": "On the open café WiFi. Inventory the clients (10.95.0.0/24).",
+      "run": "nmap -sn 10.95.0.0/24",
+      "out": [
+        "Starting Nmap 7.95 ( https://nmap.org )",
+        "Nmap scan report for 10.95.0.1  (cafe-gw)     Host is up (0.0011s).",
+        "Nmap scan report for 10.95.0.20 (pos-till)    Host is up (0.0009s).",
+        "Nmap scan report for 10.95.0.31 (guest-phone) Host is up (0.0024s).",
+        "Nmap done: 256 addresses (3 hosts up) scanned in 2.14s"
+      ]
+    },
+    {
+      "terminal": "attacker",
+      "say": "There's a POS till host. Fingerprint its services.",
+      "run": "nmap -sV -T4 --top-ports 50 10.95.0.20",
+      "pause_after": 1.6,
+      "out": [
+        "Nmap scan report for 10.95.0.20",
+        "PORT     STATE SERVICE VERSION",
+        "22/tcp   open  ssh     OpenSSH 9.6p1 Ubuntu",
+        "§8080/tcp open  http    Werkzeug/3.0 Python/3.11 (POS admin)§",
+        "Nmap done: 1 host up scanned in 6.02s"
+      ]
+    },
+    {
+      "terminal": "responder",
+      "say": "SOC side: the sweep just lit up Wazuh. Watch the alerts.",
+      "run": "wazuh-alerts --tail",
+      "out": [
+        "§[rule 5710] level 10  nmap service scan  10.95.0.10 → 10.95.0.20§",
+        "[rule 2501] level  5  repeated connections from 10.95.0.10"
+      ]
+    },
+    {
+      "terminal": "attacker",
+      "say": "Try the POS admin panel with default creds.",
+      "run": "curl -s -m5 http://10.95.0.20:8080/login -d 'user=admin&pass=admin'",
+      "pause_after": 1.4,
+      "out": [
+        "HTTP/1.1 200 OK",
+        "§{\"status\":\"ok\",\"role\":\"admin\",\"token\":\"eyJhbGciOi...\"}§   ← default creds accepted"
+      ]
+    },
+    {
+      "terminal": "responder",
+      "say": "Confirmed intrusion. Isolate the POS and block the attacker.",
+      "run": "echo 'isolating 10.95.0.20; blocking 10.95.0.10 at café gateway'",
+      "out": ["isolating 10.95.0.20; blocking 10.95.0.10 at café gateway"]
+    },
+    {
+      "terminal": "responder",
+      "run": "sudo nft add rule inet filter forward ip saddr 10.95.0.10 drop",
+      "out": [
+        "§[+] drop rule installed — 10.95.0.10 severed from the till segment§"
+      ]
+    },
+    {
+      "terminal": "hardener",
+      "say": "Red hat: close the hole for good. Lock the POS to the till VLAN only.",
+      "run": "echo 'baseline: default-deny inbound, allow only till-VLAN → POS:8080/TLS'",
+      "out": [
+        "baseline: default-deny inbound, allow only till-VLAN → POS:8080/TLS"
+      ]
+    },
+    {
+      "terminal": "hardener",
+      "run": "sudo nft -f /etc/cyberlab/hardening/pos-firewall.nft",
+      "out": ["§[+] pos-firewall.nft loaded — 1 accept, 42 drop rules active§"]
+    },
+    {
+      "terminal": "hardener",
+      "run": "pos-admin rotate-credential --disable-default",
+      "out": ["rotated POS admin credential; default 'admin' account disabled"]
+    },
+    {
+      "terminal": "attacker",
+      "say": "Re-try the attack path.",
+      "run": "curl -s -m5 http://10.95.0.20:8080/login || echo 'blocked — no route to POS'",
+      "pause_after": 1.4,
+      "out": [
+        "curl: (28) Connection timed out after 5001 ms",
+        "§blocked — no route to POS§"
+      ]
+    },
+    {
+      "terminal": "responder",
+      "say": "Attacker contained, POS hardened. All three timelines captured.",
+      "run": "echo 'incident closed; evidence + 3-actor timeline exported'",
+      "out": ["incident closed; evidence + 3-actor timeline exported"]
+    }
+  ]
+}
