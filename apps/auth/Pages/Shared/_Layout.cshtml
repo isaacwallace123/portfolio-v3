@@ -1,0 +1,46 @@
+@*
+    The shell for the identity pages, mirroring the old Next portal's layout: an inline pre-paint
+    theme script (no light/dark flash), the isaacwallace mark, a centered card slot, and the network
+    footer. The theme rides the shared iw_theme cookie on .isaacwallace.dev, so the choice made on
+    any site is already applied here.
+*@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>@(ViewData["Title"] ?? "Sign in") · isaacwallace.dev</title>
+    @* Render-blocking: set html[data-theme] from the cookie BEFORE first paint (ported verbatim
+       from @@iw/core THEME_INIT_SCRIPT) so there is never a flash of the wrong theme. *@
+    <script>
+        (function () {
+            try {
+                var m = document.cookie.match(/(?:^|;\s*)iw_theme=(light|dark|system)/);
+                var c = m ? m[1] : 'system';
+                var d = c === 'dark' || (c !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+                var r = document.documentElement;
+                r.dataset.theme = d ? 'dark' : 'light';
+                r.dataset.themeChoice = c;
+            } catch (e) { }
+        })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body>
+    <header class="site-header">
+        <span class="brand">
+            <span class="brand-dot" aria-hidden="true"></span>
+            <span class="brand-name">isaacwallace</span>
+        </span>
+    </header>
+    <main class="site-main">
+        @RenderBody()
+    </main>
+    <footer class="site-footer">one account · every *.isaacwallace.dev site</footer>
+</body>
+</html>

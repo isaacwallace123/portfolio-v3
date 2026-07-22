@@ -6,8 +6,8 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build-dotnet",
-      "program": "${workspaceFolder}/apps/auth-service/bin/Debug/net9.0/Auth.dll",
-      "cwd": "${workspaceFolder}/apps/auth-service",
+      "program": "${workspaceFolder}/apps/auth/bin/Debug/net9.0/Auth.dll",
+      "cwd": "${workspaceFolder}/apps/auth",
       "env": {
         "ASPNETCORE_ENVIRONMENT": "Development",
         "ASPNETCORE_URLS": "http://localhost:5170"

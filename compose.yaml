@@ -24,7 +24,7 @@ services:
   # The dedicated identity service (auth.isaacwallace.dev) — its own image; issues the SSO cookie and
   # runs the OAuth flow. This is what every site calls for sign-in, /auth/me, sessions, and roles.
   auth-service:
-    build: ./apps/auth-service
+    build: ./apps/auth
     init: true
     ports:
       - "${AUTH_SERVICE_PORT:-5170}:8080"
@@ -62,7 +62,6 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5180}
         NEXT_PUBLIC_AUTH_API_URL: ${NEXT_PUBLIC_AUTH_API_URL:-http://localhost:5170}
-        NEXT_PUBLIC_AUTH_URL: ${NEXT_PUBLIC_AUTH_URL:-http://localhost:3005}
         NEXT_PUBLIC_ADMIN_URL: ${NEXT_PUBLIC_ADMIN_URL:-http://localhost:3004}
     init: true
     ports:
@@ -84,7 +83,6 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5180}
         NEXT_PUBLIC_AUTH_API_URL: ${NEXT_PUBLIC_AUTH_API_URL:-http://localhost:5170}
-        NEXT_PUBLIC_AUTH_URL: ${NEXT_PUBLIC_AUTH_URL:-http://localhost:3005}
         NEXT_PUBLIC_ADMIN_URL: ${NEXT_PUBLIC_ADMIN_URL:-http://localhost:3004}
     init: true
     ports:
@@ -106,35 +104,12 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5180}
         NEXT_PUBLIC_AUTH_API_URL: ${NEXT_PUBLIC_AUTH_API_URL:-http://localhost:5170}
-        NEXT_PUBLIC_AUTH_URL: ${NEXT_PUBLIC_AUTH_URL:-http://localhost:3005}
     init: true
     ports:
       - "${ADMIN_PORT:-3004}:3000"
     healthcheck:
       # admin returns 200 even for anon (the gate is client-side), so / is a fine liveness probe
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
-      interval: 15s
-      timeout: 3s
-      start_period: 10s
-      retries: 5
-    depends_on:
-      auth-service:
-        condition: service_healthy
-
-  auth:
-    build:
-      context: .
-      dockerfile: apps/auth/Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5180}
-        NEXT_PUBLIC_AUTH_API_URL: ${NEXT_PUBLIC_AUTH_API_URL:-http://localhost:5170}
-        NEXT_PUBLIC_HOME_URL: ${NEXT_PUBLIC_HOME_URL:-http://localhost:3000}
-        NEXT_PUBLIC_ADMIN_URL: ${NEXT_PUBLIC_ADMIN_URL:-http://localhost:3004}
-    init: true
-    ports:
-      - "${AUTH_PORT:-3005}:3000"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/login"]
       interval: 15s
       timeout: 3s
       start_period: 10s

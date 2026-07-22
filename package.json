@@ -6,7 +6,6 @@
   "workspaces": [
     "packages/*",
     "apps/web",
-    "apps/auth",
     "apps/admin",
     "apps/cyberlab"
   ]

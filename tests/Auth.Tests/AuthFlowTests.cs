@@ -244,6 +244,25 @@ public class AuthFlowTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.Equal(HttpStatusCode.Forbidden, (await member.PostAsync("/auth/roles", Json(new { name = "x" }))).StatusCode);
     }
 
+    // ── the server-rendered sign-in page (folded in from the old Next portal) ──
+
+    [Fact]
+    public async Task Login_RendersSignInPage_Anonymously()
+    {
+        var res = await factory.CreateClient().GetAsync("/login");
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        Assert.Contains("Sign in", await res.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Root_RedirectsToLogin()
+    {
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var res = await client.GetAsync("/");
+        Assert.Equal(HttpStatusCode.Redirect, res.StatusCode);
+        Assert.Equal("/login", res.Headers.Location?.OriginalString);
+    }
+
     private record ProvidersDto(string[] Providers, bool DevLogin);
     private record RoleDto(string Name, bool System);
 }

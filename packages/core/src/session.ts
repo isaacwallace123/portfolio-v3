@@ -41,10 +41,9 @@ export const AUTH_API_URL =
   process.env.NEXT_PUBLIC_AUTH_API_URL ??
   (isDev ? "http://localhost:5170" : "https://auth.isaacwallace.dev");
 
-/** The identity portal (sign-in UI). auth.isaacwallace.dev in prod, :3005 in dev. */
-export const AUTH_URL =
-  process.env.NEXT_PUBLIC_AUTH_URL ??
-  (isDev ? "http://localhost:3005" : "https://auth.isaacwallace.dev");
+/** The sign-in UI now lives in the auth service itself (server-rendered /login), so the "portal"
+    origin is just the auth service. Kept as a named alias so callers reading AUTH_URL don't churn. */
+export const AUTH_URL = AUTH_API_URL;
 
 export const ADMIN_URL =
   process.env.NEXT_PUBLIC_ADMIN_URL ??

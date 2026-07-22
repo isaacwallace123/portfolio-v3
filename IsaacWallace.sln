@@ -5,11 +5,11 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "apps", "apps", "{1787FE1D-075E-9E68-7218-25F1BD1BBEAB}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "auth-service", "auth-service", "{07BEBAB7-45C7-B0FC-1AE8-F272EB770074}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "auth", "auth", "{07BEBAB7-45C7-B0FC-1AE8-F272EB770074}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Auth", "apps\auth-service\Auth.csproj", "{EC8F8329-456A-4E62-BDAC-84CF4129B091}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Auth", "apps\auth\Auth.csproj", "{EC8F8329-456A-4E62-BDAC-84CF4129B091}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Auth.Tests", "apps\auth-tests\Auth.Tests.csproj", "{D9657212-98BE-42AB-90D8-621F41BAD544}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Auth.Tests", "tests\Auth.Tests\Auth.Tests.csproj", "{D9657212-98BE-42AB-90D8-621F41BAD544}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Api", "apps\api\Api.csproj", "{A0AB1F05-99DB-4105-94AA-5186F74EBCE4}"
 EndProject

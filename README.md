@@ -9,7 +9,7 @@ backend every subdomain uses.
 | --- | --- | --- |
 | `isaacwallace.dev` | **this repo** (`apps/web`) | Main portfolio — the hub that links the labs |
 | `api.isaacwallace.dev` | **this repo** (`apps/api`) | Shared API: auth/SSO for every subdomain |
-| `auth.isaacwallace.dev` | **this repo** (`apps/auth`) | Identity portal — the one sign-in + account page for the network |
+| `auth.isaacwallace.dev` | **this repo** (`apps/auth`) | Identity service — server-rendered sign-in (`/login`) + OAuth + the SSO cookie for the network |
 | `admin.isaacwallace.dev` | **this repo** (`apps/admin`) | Control plane — users, roles, and (planned) servers/projects/cyberlab/AI |
 | `cyberlab.isaacwallace.dev` | `cyberlab` repo (`web/`) | Cybersecurity portfolio — cyber range case studies + live view |
 | `homelab.isaacwallace.dev` | `homelab` repo | DevOps portfolio (planned) |
@@ -52,15 +52,16 @@ Endpoints: `GET /auth/providers`, `GET /auth/login/{provider}`, `GET /auth/compl
 `Auth:AdminEmails` get the `admin` role (seeded at startup + applied on every sign-in); admins can
 then create roles and assign them to anyone from the admin console.
 
-**Where the UI lives:** the sign-in + account pages live only on the identity portal
-`auth.isaacwallace.dev` (`apps/auth`); every other site — including the main portfolio — is a pure
-consumer that reads `/auth/me` and links to the portal, with no login code of its own. `admin` is a
+**Where the UI lives:** the sign-in page is **server-rendered by the auth service itself**
+(`apps/auth`, a Razor page at `auth.isaacwallace.dev/login`) — no separate frontend. Account settings
+live in each site's own modal against `/auth/*`; every other site — including the main portfolio — is
+a pure consumer that reads `/auth/me` and links to `/login`, with no login code of its own. `admin` is a
 protected system role (can't be deleted; you can't remove it from yourself); the admin console at
 `admin.isaacwallace.dev` manages users/roles and is additionally gated by Cloudflare Access in
 production (see DEPLOYMENT.md).
 
 **Local dev:** cookies ignore ports, so everything runs on `localhost` and SSO just works —
-auth service `:5170`, api `:5180`, main `:3000`, cyberlab `:3001`, admin `:3004`, auth portal `:3005`
+auth service + sign-in `:5170`, api `:5180`, main `:3000`, cyberlab `:3001`, admin `:3004`
 (homelab `:3002`, ailab `:3003` reserved).
 OAuth is optional locally: a Development-only `POST /auth/dev-login` (email, no provider, no password)
 keeps the loop fast and is never mapped outside Development. To exercise real OAuth locally, fill the
@@ -109,7 +110,7 @@ run bare with `dotnet run`.
 - CI (`.github/workflows/ci.yml`): API tests, web lint/format/typecheck/build, and Docker image
   builds on every push/PR. The cyberlab repo has the same for `web/` (`web-ci.yml`).
 - Auth service extras: interactive docs at `http://localhost:5170/scalar` (dev only), manual requests
-  in `apps/auth-service/auth.http`, and fixed-window rate limiting on the sign-in entry points
+  in `apps/auth/auth.http`, and fixed-window rate limiting on the sign-in entry points
   (`/auth/dev-login`, 10/min per IP; `/auth/me` and the OAuth redirect dance are unthrottled).
 
 ## Deploy (Cloudflare)

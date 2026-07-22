@@ -16,10 +16,8 @@ COPY packages ./packages
 COPY apps/admin ./apps/admin
 ARG NEXT_PUBLIC_API_URL=http://localhost:5180
 ARG NEXT_PUBLIC_AUTH_API_URL=http://localhost:5170
-ARG NEXT_PUBLIC_AUTH_URL=http://localhost:3005
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_AUTH_API_URL=$NEXT_PUBLIC_AUTH_API_URL
-ENV NEXT_PUBLIC_AUTH_URL=$NEXT_PUBLIC_AUTH_URL
 RUN npm run build -w apps/admin
 
 FROM node:22-alpine

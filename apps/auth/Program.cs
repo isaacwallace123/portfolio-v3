@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Threading.RateLimiting;
+using IsaacWallace.Auth;
 using IsaacWallace.Auth.Data;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
@@ -176,6 +177,13 @@ builder.Services.AddRateLimiter(o =>
 
 builder.Services.AddOpenApi();
 
+// The server-rendered sign-in page lives here now (folded in from the old Next portal). What it needs
+// to render — the wired providers, whether dev-login exists, and the allow-lists the sign-in helpers
+// consult — is captured once and shared with the /auth/providers endpoint.
+var devLoginEnabled = builder.Environment.IsDevelopment() && config.GetValue("Auth:AllowDevLogin", true);
+builder.Services.AddSingleton(new AuthUi(providers, devLoginEnabled, adminEmails, corsOrigins));
+builder.Services.AddRazorPages();
+
 // Behind cloudflared + Cloudflare: honour X-Forwarded-Proto/For so the app knows the real client
 // scheme and IP (rate limiting partitions on IP; auth cares about https).
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
@@ -189,6 +197,9 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 var app = builder.Build();
 
 app.UseForwardedHeaders();
+
+// The login page's stylesheet (wwwroot/css/site.css) — public, so serve it before auth.
+app.UseStaticFiles();
 
 // Create the schema + seed the admin role/allow-list on startup. (EnsureCreated is fine while the
 // schema is just Identity; switch to EF migrations before the first real schema change.)
@@ -262,14 +273,17 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// The sign-in UI: server-rendered Razor page at /login; bare root bounces to it (the portal's old
+// job). Everything else on this host is the auth API below.
+app.MapRazorPages();
+app.MapGet("/", () => Results.Redirect("/login"));
+
 // Interactive API reference in dev: /scalar (spec at /openapi/v1.json).
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
     app.MapScalarApiReference();
 }
-
-static string Trunc(string s) => s.Length <= 40 ? s : s[..40];
 
 static async Task<UserDto> ToDto(UserManager<AppUser> users, AppUser user) =>
     new(user.Id, user.Email ?? "", user.DisplayName, NormalizeTheme(user.ThemePreference), [.. await users.GetRolesAsync(user)]);
@@ -278,61 +292,15 @@ static async Task<UserDto> ToDto(UserManager<AppUser> users, AppUser user) =>
 static string NormalizeTheme(string? t) =>
     t is "light" or "dark" or "system" ? t : "system";
 
-// Only allow redirecting the browser back to a known site origin — never an attacker-supplied URL.
-static string SafeReturn(string? url, string[] allowed)
-{
-    var fallback = allowed.FirstOrDefault() ?? "/";
-    if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var abs))
-        return fallback;
-    var origin = $"{abs.Scheme}://{abs.Authority}";
-    return allowed.Any(a => string.Equals(a.TrimEnd('/'), origin, StringComparison.OrdinalIgnoreCase))
-        ? url
-        : fallback;
-}
-
-// Grant admin to any allow-listed email; used on every sign-in so the list is authoritative.
-async Task ApplyAdminAllowlist(UserManager<AppUser> users, AppUser user)
-{
-    if (user.Email is not null
-        && adminEmails.Any(a => string.Equals(a, user.Email, StringComparison.OrdinalIgnoreCase))
-        && !await users.IsInRoleAsync(user, "admin"))
-        await users.AddToRoleAsync(user, "admin");
-}
-
-// Sign in AND open a revocable server-side session: the row is created first, then its id rides in
-// the cookie as the "iw:sid" claim that OnValidatePrincipal re-checks on every request.
-static async Task SignInWithSession(HttpContext ctx, SignInManager<AppUser> signIn, AppDbContext db, AppUser user)
-{
-    var now = DateTime.UtcNow;
-    var ua = ctx.Request.Headers.UserAgent.ToString();
-    var session = new UserSession
-    {
-        UserId = user.Id,
-        CreatedUtc = now,
-        LastSeenUtc = now,
-        UserAgent = ua.Length <= 256 ? ua : ua[..256],
-        Ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "",
-    };
-    db.UserSessions.Add(session);
-    // opportunistic hygiene: drop this user's long-dead rows so the table never needs a janitor
-    var deadRevoked = now.AddDays(-30);
-    var deadIdle = now.AddDays(-60);
-    var dead = await db.UserSessions
-        .Where(s => s.UserId == user.Id
-            && ((s.RevokedUtc != null && s.RevokedUtc < deadRevoked) || s.LastSeenUtc < deadIdle))
-        .ToListAsync();
-    db.UserSessions.RemoveRange(dead);
-    await db.SaveChangesAsync();
-    await signIn.SignInWithClaimsAsync(user, isPersistent: true, [new Claim("iw:sid", session.Id)]);
-}
-
 app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "isaacwallace-auth" }));
 
 // What the sign-in UI should render: which providers are wired up, and whether dev-login exists.
-app.MapGet("/auth/providers", () => Results.Ok(new
+// The login page renders this server-side; the endpoint stays for programmatic callers, reading the
+// same AuthUi so the two never disagree.
+app.MapGet("/auth/providers", (AuthUi ui) => Results.Ok(new
 {
-    providers,
-    devLogin = app.Environment.IsDevelopment() && config.GetValue("Auth:AllowDevLogin", true),
+    providers = ui.Providers,
+    devLogin = ui.DevLoginEnabled,
 }));
 
 // Step 1: bounce the browser to the provider. returnUrl is where we send them once signed in.
@@ -341,7 +309,7 @@ app.MapGet("/auth/login/{provider}", (string provider, string? returnUrl, SignIn
     var scheme = providers.FirstOrDefault(p => string.Equals(p, provider, StringComparison.OrdinalIgnoreCase));
     if (scheme is null)
         return Results.BadRequest(new { error = $"Unknown or unconfigured provider '{provider}'." });
-    var target = SafeReturn(returnUrl, corsOrigins);
+    var target = AuthOps.SafeReturn(returnUrl, corsOrigins);
     var callback = $"/auth/complete?returnUrl={Uri.EscapeDataString(target)}";
     var props = signIn.ConfigureExternalAuthenticationProperties(scheme, callback);
     return Results.Challenge(props, [scheme]);
@@ -352,7 +320,7 @@ app.MapGet("/auth/login/{provider}", (string provider, string? returnUrl, SignIn
 // back to the site. Redirects (never JSON) because a browser is following this.
 app.MapGet("/auth/complete", async (string? returnUrl, HttpContext ctx, SignInManager<AppUser> signIn, UserManager<AppUser> users, AppDbContext db) =>
 {
-    var target = SafeReturn(returnUrl, corsOrigins);
+    var target = AuthOps.SafeReturn(returnUrl, corsOrigins);
     var info = await signIn.GetExternalLoginInfoAsync();
     if (info is null) return Results.Redirect(target);
 
@@ -369,15 +337,15 @@ app.MapGet("/auth/complete", async (string? returnUrl, HttpContext ctx, SignInMa
             {
                 UserName = email ?? $"{info.LoginProvider}:{info.ProviderKey}",
                 Email = email,
-                DisplayName = Trunc(name),
+                DisplayName = AuthOps.Trunc(name),
             };
             await users.CreateAsync(user); // no password — external identity only
         }
         await users.AddLoginAsync(user, info);
     }
 
-    await ApplyAdminAllowlist(users, user);
-    await SignInWithSession(ctx, signIn, db, user);
+    await AuthOps.ApplyAdminAllowlist(users, user, adminEmails);
+    await AuthOps.SignInWithSession(ctx, signIn, db, user);
     await ctx.SignOutAsync(IdentityConstants.ExternalScheme); // drop the temporary external cookie
     return Results.Redirect(target);
 });
@@ -421,7 +389,7 @@ app.MapPost("/auth/profile", async (UpdateProfileRequest req, UserManager<AppUse
         var name = req.DisplayName.Trim();
         if (name.Length == 0)
             return Results.BadRequest(new { error = "Display name can't be empty." });
-        user.DisplayName = Trunc(name);
+        user.DisplayName = AuthOps.Trunc(name);
     }
 
     if (req.Theme is not null)
@@ -561,12 +529,12 @@ if (app.Environment.IsDevelopment() && config.GetValue("Auth:AllowDevLogin", tru
             {
                 UserName = email,
                 Email = email,
-                DisplayName = Trunc(string.IsNullOrWhiteSpace(req.DisplayName) ? email.Split('@')[0] : req.DisplayName.Trim()),
+                DisplayName = AuthOps.Trunc(string.IsNullOrWhiteSpace(req.DisplayName) ? email.Split('@')[0] : req.DisplayName.Trim()),
             };
             await users.CreateAsync(user);
         }
-        await ApplyAdminAllowlist(users, user);
-        await SignInWithSession(ctx, signIn, db, user);
+        await AuthOps.ApplyAdminAllowlist(users, user, adminEmails);
+        await AuthOps.SignInWithSession(ctx, signIn, db, user);
         return Results.Ok(await ToDto(users, user));
     }).RequireRateLimiting("auth");
 }

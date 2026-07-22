@@ -1,0 +1,362 @@
+/* ── auth.isaacwallace.dev — identity pages ─────────────────────────────────
+   Hand-written but keyed to the SAME design tokens as the rest of the network
+   (see portfolio/DESIGN.md and the old portal's globals.css): paper ground, ink
+   type, one indigo accent, Fraunces for the display. Light default; the pre-paint
+   script in <head> sets html[data-theme] from the shared iw_theme cookie, and the
+   dark block below mirrors the main site after dusk. Kept plain CSS on purpose —
+   the auth service stays free of a Node/Tailwind build for one screen. */
+
+:root {
+  color-scheme: light;
+
+  --bg: #faf9f6;
+  --bg-2: #f1efe9;
+  --card: #ffffff;
+  --line: #e4e1d8;
+  --line-soft: #eeece5;
+
+  --ink: #191b1f;
+  --ink-mid: #575c66;
+  --ink-dim: #8b8f98;
+
+  --accent: #3b5bdb; /* the network indigo — same as the main site */
+  --accent-bright: #4a67e6;
+
+  --danger: #c23b3b;
+
+  --font-inter: "Inter";
+  --font-fraunces: "Fraunces";
+  --sans:
+    var(--font-inter), system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --display: var(--font-fraunces), Charter, "Iowan Old Style", Georgia, serif;
+  --mono: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+
+  --surface: var(--card);
+  --surface-2: var(--bg-2);
+
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  --ctl-lg: 44px;
+
+  --shadow-3:
+    0 24px 60px -20px rgba(25, 27, 31, 0.28),
+    0 8px 24px -12px rgba(25, 27, 31, 0.18);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+}
+
+/* ── Dark editorial: the same palette the main site uses after dusk. ── */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #101218;
+  --bg-2: #191c24;
+  --card: #171a21;
+  --line: #2a2e39;
+  --line-soft: #23262f;
+
+  --ink: #ecedf2;
+  --ink-mid: #a7acba;
+  --ink-dim: #6c7280;
+
+  --accent: #6c7cff; /* indigo lifted for a dark ground */
+  --accent-bright: #8b96ff;
+
+  --danger: #fb6a6a;
+
+  --shadow-3:
+    0 24px 60px -20px rgba(0, 0, 0, 0.82),
+    0 8px 24px -12px rgba(0, 0, 0, 0.66);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* a single, gentle accent glow behind the card — tints correctly in both themes */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -30%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(40% 32% at 50% 16%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
+    radial-gradient(34% 30% at 78% 74%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 72%);
+  filter: blur(40px);
+  animation: aurora 30s var(--ease-in-out) infinite alternate;
+}
+@keyframes aurora {
+  0% { transform: translate3d(-1%, -1%, 0) scale(1); }
+  100% { transform: translate3d(1%, 2%, 0) scale(1.04); }
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* ── shell ── */
+.site-header {
+  display: flex;
+  justify-content: center;
+  padding: 2.25rem 0 0.5rem;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+.brand-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+}
+.brand-name {
+  font: 700 0.875rem/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.site-main {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 2rem 1.25rem;
+}
+@media (min-width: 640px) {
+  .site-main { align-items: center; }
+}
+.site-footer {
+  padding-bottom: 1.75rem;
+  text-align: center;
+  font: 400 10px/1 var(--mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* ── card ── */
+.card {
+  width: 100%;
+  max-width: 28rem;
+  padding: 1.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--card) 86%, transparent);
+  box-shadow: var(--shadow-3);
+  backdrop-filter: blur(12px);
+}
+.card--center { text-align: center; }
+
+.card-title {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+.card-title--lg {
+  font-size: 1.5rem;
+  letter-spacing: -0.01em;
+}
+.card-sub {
+  margin: 0.375rem 0 1.5rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--ink-mid);
+}
+.card-email {
+  margin: 0.25rem 0 0;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-foot {
+  margin: 1.25rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  margin: 0 auto 0.75rem;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, var(--accent), #8b5cf6);
+  color: #fff;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+/* ── controls ── */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.card--center .stack { margin-top: 1.25rem; }
+.stack form { width: 100%; margin: 0; }
+
+.btn {
+  width: 100%;
+  height: var(--ctl-lg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.625rem;
+  padding: 0 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  outline: none;
+  transition:
+    border-color var(--dur-fast),
+    background-color var(--dur-fast),
+    opacity var(--dur-fast),
+    transform var(--dur-fast);
+}
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover { opacity: 0.9; }
+
+.btn-provider {
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--ink);
+}
+.btn-provider:hover {
+  background: var(--card);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink-mid);
+}
+.btn-ghost:hover { color: var(--ink); }
+
+.glyph {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.25rem 0;
+  font: 400 10px/1 var(--mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.divider span {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.field {
+  width: 100%;
+  height: var(--ctl-lg);
+  padding: 0 0.875rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 15px;
+  outline: none;
+  transition: border-color var(--dur-fast);
+}
+.field::placeholder { color: var(--ink-dim); }
+.field:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.error {
+  margin: 1rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  font-size: 0.875rem;
+  color: var(--danger);
+}
+
+.lock-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 1.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-dim);
+}
+.lock-note svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* named entrance: pop — the sign-in card */
+.pop-in {
+  animation: pop-in var(--dur-base) var(--ease-spring);
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* OS reduced-motion: freeze the glow and entrance (the per-site pref that the old
+   portal also honoured lived in localStorage/JS; the OS switch covers the essence). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

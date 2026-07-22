@@ -95,20 +95,17 @@ public hostnames are added in the Cloudflare Zero Trust dashboard (Networks → 
 | --- | --- | --- |
 | `isaacwallace.dev` | | `http://web.portfolio.svc.cluster.local:80` |
 | `www.isaacwallace.dev` | | `http://web.portfolio.svc.cluster.local:80` |
-| `auth.isaacwallace.dev` | `/auth/*` | `http://auth-service.portfolio.svc.cluster.local:80` |
-| `auth.isaacwallace.dev` | `/signin-*` | `http://auth-service.portfolio.svc.cluster.local:80` |
-| `auth.isaacwallace.dev` | *(default)* | `http://auth.portfolio.svc.cluster.local:80` |
+| `auth.isaacwallace.dev` | | `http://auth-service.portfolio.svc.cluster.local:80` |
 | `api.isaacwallace.dev` | | `http://api.portfolio.svc.cluster.local:80` |
 | `admin.isaacwallace.dev` | | `http://admin.portfolio.svc.cluster.local:80` |
 | `cyberlab.isaacwallace.dev` | | `http://cyberlab-web.cyberlab.svc.cluster.local:80` |
 
-**The auth domain is path-routed.** `auth.isaacwallace.dev` is the single public face of identity: the
-dedicated auth service (`apps/auth-service`, its own image) handles the API (`/auth/*`) and the OAuth
-callbacks (`/signin-google`, `/signin-github`), while the Next portal (`apps/auth`) serves the sign-in
-UI on the same host. In the Cloudflare dashboard, public-hostname rules are evaluated top-down, so add
-the two `auth.isaacwallace.dev` **path** rules (→ `auth-service`) *above* the catch-all
-`auth.isaacwallace.dev` rule (→ `auth`). Because the SSO cookie is scoped to `.isaacwallace.dev`, every
-other site keeps working unchanged. `api.isaacwallace.dev` now serves the general-API stub (no auth).
+**One service owns the whole auth domain.** `auth.isaacwallace.dev` is a single catch-all rule to the
+dedicated auth service (`apps/auth`, its own image, k8s Service still named `auth-service`): it
+server-renders the sign-in page (`/login`), exposes the API (`/auth/*`), and handles the OAuth
+callbacks (`/signin-google`, `/signin-github`) — all on the one host, no path-routing. Because the SSO
+cookie is scoped to `.isaacwallace.dev`, every other site keeps working unchanged.
+`api.isaacwallace.dev` serves the general-API stub (no auth).
 
 The OAuth provider **callback URLs** are therefore on the auth domain — register
 `https://auth.isaacwallace.dev/signin-google` and `https://auth.isaacwallace.dev/signin-github` (plus

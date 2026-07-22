@@ -16,14 +16,14 @@ jobs:
           dotnet-version: "9.0.x"
       # builds the auth service, the general-API stub, and the test project
       - run: dotnet build IsaacWallace.sln
-      - run: dotnet test apps/auth-tests/Auth.Tests.csproj
+      - run: dotnet test tests/Auth.Tests/Auth.Tests.csproj
 
   web:
     name: ${{ matrix.app }} — lint + typecheck + build
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: [web, admin, auth, cyberlab]
+        app: [web, admin, cyberlab]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -47,9 +47,8 @@ jobs:
       - uses: actions/checkout@v4
       # The .NET services are each their own context; the Next apps build from the repo root
       # (workspace) with the Dockerfile under the app dir.
-      - run: docker build apps/auth-service
+      - run: docker build apps/auth
       - run: docker build apps/api
       - run: docker build -f apps/web/Dockerfile .
       - run: docker build -f apps/admin/Dockerfile .
-      - run: docker build -f apps/auth/Dockerfile .
       - run: docker build -f apps/cyberlab/Dockerfile .

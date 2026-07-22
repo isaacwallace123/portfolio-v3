@@ -4,7 +4,7 @@ using Scalar.AspNetCore;
 // api.isaacwallace.dev — the general application API for the portfolio network.
 //
 // Identity is NOT here: sign-in, sessions, roles, and the SSO cookie live in the dedicated auth
-// service (apps/auth-service → auth.isaacwallace.dev). This project is the home for the network's
+// service (apps/auth → auth.isaacwallace.dev). This project is the home for the network's
 // real, non-auth application data as it grows. It ships as its own image so the two concerns scale
 // and deploy independently.
 //
