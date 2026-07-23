@@ -1,7 +1,7 @@
 # Build context: the repo ROOT (monorepo). Builds the cyberlab app + its workspace dep @iw/core.
 # Run via compose (context: ., dockerfile: apps/cyberlab/Dockerfile). See apps/web/Dockerfile for notes.
 
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
@@ -33,7 +33,7 @@ ENV NEXT_PUBLIC_HOMELAB_URL=$NEXT_PUBLIC_HOMELAB_URL
 ENV NEXT_PUBLIC_AILAB_URL=$NEXT_PUBLIC_AILAB_URL
 RUN npm run build -w apps/cyberlab
 
-FROM node:22-alpine
+FROM node:26-alpine
 WORKDIR /repo
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
