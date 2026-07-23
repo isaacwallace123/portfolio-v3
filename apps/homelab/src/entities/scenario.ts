@@ -10,6 +10,33 @@ export const trafficSpikeScenario: LabScenario = {
   durationMs: 48_000,
   difficulty: "operator",
   resourceClass: "standard",
+  // Deterministic model the run engine's encoder turns into sanitized telemetry. Reproduces the
+  // incident shape: healthy baseline → 8× surge at 15s → SLO burn until mitigated → recovery.
+  telemetry: {
+    kind: "traffic-spike",
+    incidentStartMs: 15_000,
+    incidentEndMs: 39_000,
+    hpaAutoScaleAtMs: 31_000,
+    latencyTargetMs: 120,
+    baseline: {
+      requestsPerSec: 118,
+      p95LatencyMs: 43,
+      errorRatePct: 0.02,
+      apiReplicas: 3,
+      postgresCpuPct: 34,
+    },
+    surgeRequestsPerSec: 942,
+    recoveredRequestsPerSec: 684,
+    scaledReplicas: 6,
+    pressureLatencyMs: 684,
+    cachedLatencyMs: 71,
+    scaledLatencyMs: 104,
+    nominalLatencyMs: 116,
+    pressureErrorRatePct: 7.8,
+    rollbackErrorRatePct: 0.08,
+    nominalErrorRatePct: 0.21,
+    pressurePostgresCpuPct: 86,
+  },
   decisions: [
     {
       id: "scale",

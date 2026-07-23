@@ -1,3 +1,5 @@
+import type { TelemetryModel } from "./contract";
+
 export type LabKind = "cyberlab" | "homelab" | "ailab";
 
 export type RunStatus =
@@ -39,6 +41,9 @@ export interface LabScenario {
   resourceClass: "light" | "standard" | "heavy";
   events: RunEvent[];
   decisions: ScenarioDecision[];
+  // Optional deterministic telemetry model consumed by the run engine's encoder. Scenarios without
+  // one (e.g. ailab experiments) simply report a flat baseline projection.
+  telemetry?: TelemetryModel;
 }
 
 export interface RunSnapshot {
@@ -79,3 +84,7 @@ export function formatRunClock(elapsedMs: number): string {
     .toString()
     .padStart(2, "0")}`;
 }
+
+// Public run-controller contract + reference engine.
+export * from "./contract";
+export * from "./engine";
