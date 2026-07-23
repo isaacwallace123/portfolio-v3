@@ -38,6 +38,8 @@ builder.Services.AddSingleton<IKubernetes>(_ =>
     return new Kubernetes(kube);
 });
 builder.Services.AddScoped<RunBroker>();
+// Enforces run TTLs (deletes runs whose tab was closed without teardown), freeing capacity slots.
+builder.Services.AddHostedService<RunReaper>();
 
 builder.Services.AddOpenApi(options =>
 {
