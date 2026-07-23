@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { liveEnabled, liveFetch } from "@/shared/lib/liveApi";
+import { toLiveRunView } from "@/shared/lib/liveView";
 
 // POST /api/live/runs/{runId}/decisions — apply an operator decision. Body: { decisionId }.
 export const dynamic = "force-dynamic";
@@ -24,5 +25,6 @@ export async function POST(
     body: JSON.stringify({ decisionId: String(body.decisionId ?? "") }),
   });
   const payload = await res.json().catch(() => ({}));
-  return NextResponse.json(payload, { status: res.status });
+  if (!res.ok) return NextResponse.json(payload, { status: res.status });
+  return NextResponse.json(toLiveRunView(payload), { status: res.status });
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { liveEnabled, liveFetch } from "@/shared/lib/liveApi";
+import { toLiveRunView } from "@/shared/lib/liveView";
 
 // POST /api/live/runs — provision a real run on the homelab cluster. Body: { scenarioId }.
 // Forwards to the real API's POST /v1/runs with the server-side runs:write key.
@@ -27,7 +28,10 @@ export async function POST(req: Request) {
   });
 
   const payload = await res.json().catch(() => ({}));
-  return NextResponse.json(payload, {
+  if (!res.ok) {
+    return NextResponse.json(payload, { status: res.status });
+  }
+  return NextResponse.json(toLiveRunView(payload), {
     status: res.status,
     headers: { "Cache-Control": "no-store" },
   });

@@ -14,25 +14,25 @@ import {
   Play,
   RotateCcw,
   TimerReset,
+  Trash2,
   Waves,
   Zap,
 } from "lucide-react";
 import {
   formatRunClock,
   isTerminalPhase,
-  type AfterActionReport,
   type EventSeverity,
   type RunTelemetry,
-  type RunView,
-  type ScenarioCatalog,
 } from "@iw/lab-runtime";
 import { trafficSpikeScenario, upcomingDrills } from "@/entities/scenario";
 import {
-  createRun,
-  fetchCatalog,
-  submitDecision,
-  subscribeToRun,
-} from "@/shared/lib/runClient";
+  createLiveRun,
+  fetchLiveStatus,
+  getLiveRun,
+  liveDecision,
+  teardownLiveRun,
+  type LiveRunView,
+} from "@/shared/lib/liveClient";
 
 const severityClass: Record<EventSeverity, string> = {
   info: "event-info",
@@ -98,52 +98,51 @@ function StatusChip({ status }: { status: string }) {
 
 export default function OperationsArena() {
   const scenario = trafficSpikeScenario;
-  const [catalog, setCatalog] = useState<ScenarioCatalog | null>(null);
-  const [run, setRun] = useState<RunView | null>(null);
-  const [report, setReport] = useState<AfterActionReport | null>(null);
+  const [liveEnabled, setLiveEnabled] = useState<boolean | null>(null);
+  const [run, setRun] = useState<LiveRunView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const pollRef = useRef<number | null>(null);
 
-  // Capacity read for the platform console + the run-slot gate.
   useEffect(() => {
-    let alive = true;
-    fetchCatalog()
-      .then((c) => alive && setCatalog(c))
-      .catch(() => {
-        /* console keeps its static defaults */
-      });
-    return () => {
-      alive = false;
-    };
+    fetchLiveStatus()
+      .then((s) => setLiveEnabled(s.enabled))
+      .catch(() => setLiveEnabled(false));
   }, []);
 
-  useEffect(() => () => unsubscribeRef.current?.(), []);
-
-  const loadReport = useCallback((runId: string) => {
-    fetch(`/api/v1/runs/${runId}/report`, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((r) => r && setReport(r as AfterActionReport))
-      .catch(() => {
-        /* report stays null; evidence panel degrades gracefully */
-      });
+  const stopPolling = useCallback(() => {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
   }, []);
+
+  useEffect(() => stopPolling, [stopPolling]);
+
+  const startPolling = useCallback(
+    (runId: string) => {
+      stopPolling();
+      pollRef.current = window.setInterval(async () => {
+        try {
+          const view = await getLiveRun(runId);
+          setRun(view);
+          if (isTerminalPhase(view.status)) stopPolling();
+        } catch {
+          stopPolling();
+        }
+      }, 2000);
+    },
+    [stopPolling],
+  );
 
   const startRun = useCallback(async () => {
     if (busy) return;
     setBusy(true);
     setError(null);
-    setReport(null);
-    unsubscribeRef.current?.();
     try {
-      const idempotencyKey =
-        globalThis.crypto?.randomUUID?.() ?? `run-${Date.now()}`;
-      const initial = await createRun(scenario.id, idempotencyKey);
-      setRun(initial);
-      unsubscribeRef.current = subscribeToRun(initial.runId, {
-        onSnapshot: (view) => setRun(view),
-        onDone: () => loadReport(initial.runId),
-      });
+      const created = await createLiveRun(scenario.id);
+      setRun(created);
+      startPolling(created.runId);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Could not queue the drill.",
@@ -151,14 +150,14 @@ export default function OperationsArena() {
     } finally {
       setBusy(false);
     }
-  }, [busy, loadReport, scenario.id]);
+  }, [busy, scenario.id, startPolling]);
 
   const intervene = useCallback(
     async (decisionId: string) => {
       if (!run) return;
+      setError(null);
       try {
-        const updated = await submitDecision(run.runId, decisionId);
-        setRun(updated);
+        setRun(await liveDecision(run.runId, decisionId));
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Decision was not accepted.",
@@ -167,6 +166,21 @@ export default function OperationsArena() {
     },
     [run],
   );
+
+  const teardown = useCallback(async () => {
+    if (!run) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await teardownLiveRun(run.runId);
+      stopPolling();
+      setRun(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Teardown failed.");
+    } finally {
+      setBusy(false);
+    }
+  }, [run, stopPolling]);
 
   const status = run?.status ?? "idle";
   const active = run !== null && !isTerminalPhase(run.status);
@@ -182,8 +196,10 @@ export default function OperationsArena() {
   const pressure = tel.errorRatePct > 1;
   const cached = tel.cacheActive;
   const latency = tel.p95LatencyMs;
+  const namespace = run?.namespace ?? "run-hl-idle";
+  const pods = run?.podCount ?? null;
 
-  const slotsFree = catalog ? catalog.capacity.slotsAvailable : 1;
+  const canStart = liveEnabled === true && !busy && !active;
 
   return (
     <div className="site-frame">
@@ -197,30 +213,39 @@ export default function OperationsArena() {
               Don&apos;t tour the infrastructure. <em>Operate it.</em>
             </h1>
             <p className="hero-lede">
-              Enter a disposable production incident running on a real
-              Kubernetes platform. Read the signals, make the call, and leave
-              with the evidence.
+              Queue a disposable production incident on the{" "}
+              <strong>live homelab Kubernetes cluster</strong>. A real isolated
+              namespace and workload spin up; read the signals, make the call,
+              and tear it down.
             </p>
             <div className="hero-actions">
               <button
                 className="primary-button"
                 onClick={startRun}
-                disabled={busy || active || (!active && slotsFree === 0)}
+                disabled={!canStart}
               >
                 <Play size={17} fill="currentColor" />{" "}
                 {busy
-                  ? "Queueing…"
+                  ? "Provisioning…"
                   : active
                     ? "Drill in progress"
-                    : run
-                      ? "Run it again"
-                      : slotsFree === 0
-                        ? "All slots busy"
-                        : "Queue live drill"}
+                    : liveEnabled === false
+                      ? "Live control offline"
+                      : "Queue live drill"}
               </button>
-              <a className="text-link" href="#arena">
-                Explore the control room <ArrowRight size={15} />
-              </a>
+              {active ? (
+                <button
+                  className="text-link"
+                  onClick={teardown}
+                  disabled={busy}
+                >
+                  <Trash2 size={15} /> Tear down
+                </button>
+              ) : (
+                <a className="text-link" href="#arena">
+                  Explore the control room <ArrowRight size={15} />
+                </a>
+              )}
             </div>
             {error && (
               <p className="hero-error" role="alert">
@@ -236,7 +261,7 @@ export default function OperationsArena() {
           >
             <div className="console-top">
               <span>PLATFORM / NOW</span>
-              <span className="live-dot">LIVE READ MODEL</span>
+              <span className="live-dot">LIVE CLUSTER</span>
             </div>
             <div
               className="capacity-ring"
@@ -252,13 +277,13 @@ export default function OperationsArena() {
                 <b>3</b> nodes ready
               </span>
               <span>
-                <b>42</b> workloads
+                <b>{pods ?? "—"}</b> run pods
               </span>
               <span>
                 <b>99.98%</b> platform SLO
               </span>
               <span>
-                <b>{slotsFree}</b> drill slot{slotsFree === 1 ? "" : "s"}
+                <b>1</b> drill slot
               </span>
             </div>
             <p>
@@ -269,7 +294,7 @@ export default function OperationsArena() {
         </section>
 
         <section className="arena-section" id="arena">
-          <div className="section-heading" data-lab-reveal>
+          <div className="section-heading">
             <div>
               <p className="kicker">
                 <Activity size={15} /> Operations theatre
@@ -282,9 +307,7 @@ export default function OperationsArena() {
                 {formatRunClock(elapsedMs)} /{" "}
                 {formatRunClock(scenario.durationMs)}
               </span>
-              <span>
-                {run?.runId ?? scenario.resourceClass} · 4 vCPU · 6 GiB
-              </span>
+              <span>{scenario.resourceClass} · 4 vCPU · 6 GiB</span>
             </div>
           </div>
 
@@ -293,16 +316,12 @@ export default function OperationsArena() {
           </div>
 
           <div className="arena-grid">
-            <section
-              className="panel topology-panel"
-              data-lab-reveal
-              data-lab-delay="60"
-            >
+            <section className="panel topology-panel">
               <div className="panel-title">
                 <span>
                   <CloudCog size={16} /> Runtime topology
                 </span>
-                <small>namespace / {run?.runId ?? "run-hl-idle"}</small>
+                <small>namespace / {namespace}</small>
               </div>
               <div className="topology-flow">
                 <div className="topology-node edge">
@@ -374,11 +393,7 @@ export default function OperationsArena() {
               </div>
             </section>
 
-            <aside
-              className="panel decision-panel"
-              data-lab-reveal
-              data-lab-delay="120"
-            >
+            <aside className="panel decision-panel">
               <div className="panel-title">
                 <span>
                   <CircleGauge size={16} /> Operator console
@@ -386,8 +401,9 @@ export default function OperationsArena() {
                 <small>{phaseLabel}</small>
               </div>
               <p className="decision-intro">
-                Interventions become available when the incident begins. Every
-                decision is added to the evidence timeline.
+                Interventions become available when the incident begins. Each
+                decision changes the <strong>real</strong> workload —
+                replicas scale, the cache tier comes up.
               </p>
               <div className="decision-list">
                 {scenario.decisions.map((decision) => {
@@ -419,30 +435,30 @@ export default function OperationsArena() {
                   <TimerReset size={22} />
                   <b>No active drill</b>
                   <span>
-                    Queue the scenario to provision its isolated namespace.
+                    {liveEnabled === false
+                      ? "Live provisioning is currently offline."
+                      : "Queue the scenario to provision its isolated namespace."}
                   </span>
                 </div>
               )}
-              {run?.reportReady && (
+              {active && (
                 <div className="evidence-ready">
                   <Check size={18} />
                   <span>
-                    <b>After-action report ready</b>
+                    <b>Live on the cluster</b>
                     <small>
-                      {report
-                        ? `${report.outcome} · score ${report.score} · SLO held ${report.sloHeldPct}%`
-                        : `${acceptedDecisions.length} operator decisions · ${scenario.events.length} platform events`}
+                      namespace {namespace}
+                      {pods !== null ? ` · ${pods} pods` : ""}
+                      {run?.cpuMillicores != null
+                        ? ` · ${run.cpuMillicores}m CPU`
+                        : ""}
                     </small>
                   </span>
                 </div>
               )}
             </aside>
 
-            <section
-              className="panel timeline-panel"
-              data-lab-reveal
-              data-lab-delay="80"
-            >
+            <section className="panel timeline-panel">
               <div className="panel-title">
                 <span>
                   <Activity size={16} /> Correlated event stream
@@ -481,18 +497,14 @@ export default function OperationsArena() {
                     <div>
                       <span>operator</span>
                       <b>{decision.label}</b>
-                      <p>Action accepted by the scoped run controller.</p>
+                      <p>Applied to the live workload.</p>
                     </div>
                   </article>
                 ))}
               </div>
             </section>
 
-            <section
-              className="panel trace-panel"
-              data-lab-reveal
-              data-lab-delay="140"
-            >
+            <section className="panel trace-panel">
               <div className="panel-title">
                 <span>
                   <GitBranch size={16} /> Request trace
@@ -533,7 +545,7 @@ export default function OperationsArena() {
         </section>
 
         <section className="drills-section" id="drills">
-          <div className="section-heading" data-lab-reveal>
+          <div className="section-heading">
             <div>
               <p className="kicker">
                 <RotateCcw size={15} /> Scenario catalogue
@@ -547,11 +559,7 @@ export default function OperationsArena() {
           </div>
           <div className="drill-grid">
             {upcomingDrills.map((drill, index) => (
-              <article
-                key={drill.title}
-                data-lab-reveal
-                data-lab-delay={index * 80}
-              >
+              <article key={drill.title}>
                 <span>0{index + 2}</span>
                 <small>{drill.tag}</small>
                 <h3>{drill.title}</h3>
@@ -562,7 +570,7 @@ export default function OperationsArena() {
           </div>
         </section>
 
-        <section className="platform-strip" id="platform" data-lab-reveal>
+        <section className="platform-strip" id="platform">
           <span>PROXMOX</span>
           <span>K3S</span>
           <span>ARGO CD</span>

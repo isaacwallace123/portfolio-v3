@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { liveEnabled, liveFetch } from "@/shared/lib/liveApi";
+import { toLiveRunView } from "@/shared/lib/liveView";
 
 // GET /api/live/runs/{runId} — the real run merged with its live telemetry.
 // DELETE /api/live/runs/{runId} — tear the run down.
@@ -28,10 +29,9 @@ export async function GET(
     /* leave telemetry null */
   }
 
-  return NextResponse.json(
-    { ...run, telemetry },
-    { headers: { "Cache-Control": "no-store" } },
-  );
+  return NextResponse.json(toLiveRunView({ ...run, telemetry }), {
+    headers: { "Cache-Control": "no-store" },
+  });
 }
 
 export async function DELETE(
