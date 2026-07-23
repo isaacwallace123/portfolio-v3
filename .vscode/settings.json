@@ -5,7 +5,13 @@
     "editor.defaultFormatter": "ms-dotnettools.csharp",
     "editor.formatOnSave": true
   },
-  "eslint.workingDirectories": ["apps/web"],
+  "eslint.workingDirectories": [
+    "apps/web",
+    "apps/admin",
+    "apps/cyberlab",
+    "apps/homelab",
+    "apps/ailab"
+  ],
   "prettier.requireConfig": true,
   "tailwindCSS.experimental.classRegex": [
     ["cva\\(((?:[^()]|\\([^()]*\\))*)\\)", "[\"'`]([^\"'`]*).*?[\"'`]"],

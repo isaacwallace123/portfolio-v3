@@ -2,13 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { prefersReducedMotion } from "@/shared/lib/prefs";
+import { AILAB_URL, CYBERLAB_URL, HOMELAB_URL } from "@iw/core";
 
 // Interactive diagram of the four-site network. Pure SVG + CSS — every site is a
 // node wired to the shared API; a session "packet" travels the wires to make the
 // SSO story visible. Hovering (or focusing) a node lights up its wire. Reduced
 // motion shows the same diagram, static.
-
-const DEV = process.env.NODE_ENV === "development";
 
 interface Node {
   id: string;
@@ -36,7 +35,7 @@ const NODES: Node[] = [
     x: 120,
     y: 250,
     color: "var(--lab-cyber)",
-    href: DEV ? "http://localhost:3001" : "https://cyberlab.isaacwallace.dev",
+    href: CYBERLAB_URL,
   },
   {
     id: "homelab",
@@ -45,7 +44,7 @@ const NODES: Node[] = [
     x: 360,
     y: 274,
     color: "var(--lab-homelab)",
-    href: "https://homelab.isaacwallace.dev",
+    href: HOMELAB_URL,
   },
   {
     id: "ailab",
@@ -54,7 +53,7 @@ const NODES: Node[] = [
     x: 600,
     y: 250,
     color: "var(--lab-ailab)",
-    href: "https://ailab.isaacwallace.dev",
+    href: AILAB_URL,
   },
 ];
 

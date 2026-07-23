@@ -18,6 +18,9 @@ spec:
       labels:
         app: web
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       nodeSelector:
         node-role.kubernetes.io/apps: "true"
       containers:
@@ -25,6 +28,9 @@ spec:
           image: ghcr.io/isaacwallace123/portfolio-web:latest
           securityContext:
             allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
             capabilities:
               drop: ["ALL"]
           ports:

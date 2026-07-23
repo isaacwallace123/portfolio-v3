@@ -42,7 +42,7 @@ export function SettingRow({
   children: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-line bg-surface-2 px-3.5 py-3">
+    <div className="flex items-center justify-between gap-4 rounded-xl border border-line bg-surface-2/48 px-3.5 py-3 backdrop-blur-md">
       <div className="min-w-0">
         <label htmlFor={htmlFor} className="block text-sm font-medium text-ink">
           {title}
@@ -110,7 +110,7 @@ export function Segmented<T extends string | number>({
     <div
       role="group"
       aria-label={ariaLabel}
-      className="flex gap-1 rounded-lg border border-line bg-surface p-1"
+      className="flex gap-1 rounded-lg border border-line bg-surface-2/42 p-1"
     >
       {options.map((o) => {
         const active = o.value === value;

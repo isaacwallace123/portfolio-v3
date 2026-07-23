@@ -2,8 +2,7 @@ import Hero from "@/widgets/Hero";
 import NetworkDiagram from "@/widgets/NetworkDiagram";
 import Parallax from "@/shared/ui/Parallax";
 import ScrollReveal from "@/shared/ui/ScrollReveal";
-
-const DEV = process.env.NODE_ENV === "development";
+import { AILAB_URL, CYBERLAB_URL, HOMELAB_URL } from "@iw/core";
 
 // One card per site in the network. In dev the links point at local ports (SSO works there too —
 // cookies ignore ports); in production they point at the real subdomains.
@@ -12,7 +11,7 @@ const LABS = [
     key: "cyber",
     name: "cyberlab",
     domain: "cyberlab.isaacwallace.dev",
-    href: DEV ? "http://localhost:3001" : "https://cyberlab.isaacwallace.dev",
+    href: CYBERLAB_URL,
     color: "var(--lab-cyber)",
     status: "live",
     blurb:
@@ -22,21 +21,21 @@ const LABS = [
     key: "homelab",
     name: "homelab",
     domain: "homelab.isaacwallace.dev",
-    href: "https://homelab.isaacwallace.dev",
+    href: HOMELAB_URL,
     color: "var(--lab-homelab)",
-    status: "building",
+    status: "live",
     blurb:
-      "The DevOps portfolio: the infrastructure that runs everything else — Proxmox, Terraform, Ansible, Packer, monitoring — documented as a working system, not a résumé line.",
+      "An interactive SRE arena on the infrastructure that runs everything else. Enter a disposable Kubernetes incident, read live signals, operate the platform, and inspect the evidence.",
   },
   {
     key: "ailab",
     name: "ailab",
     domain: "ailab.isaacwallace.dev",
-    href: "https://ailab.isaacwallace.dev",
+    href: AILAB_URL,
     color: "var(--lab-ailab)",
-    status: "building",
+    status: "live",
     blurb:
-      "The AI portfolio: agents, evaluation, and applied LLM systems — run on the same self-hosted infrastructure as the rest of the network.",
+      "A visual local-model workbench: configure dual-agent experiments, inspect tool traces and GPU telemetry, compare artifacts, and audit the evaluation pipeline.",
   },
 ] as const;
 
@@ -83,7 +82,7 @@ const DISCIPLINES = [
       "Healthchecked containers; compose locally, Kubernetes in prod",
       "Sealed Secrets — plaintext never touches git",
     ],
-    hint: "The homelab runs this very page",
+    hint: "Operate a production incident in HomeOps",
   },
   {
     key: "ai",
@@ -96,7 +95,7 @@ const DISCIPLINES = [
       "Same platform standards as every lab — containerised, GitOps-deployed",
       "GPU workloads stay off-cluster, reached like the cyber range: narrowly",
     ],
-    hint: "ailab is the next lab to go live",
+    hint: "Run a dual-agent evaluation in AI Lab",
   },
 ] as const;
 
@@ -123,7 +122,7 @@ export default function Home() {
             <ScrollReveal key={lab.key} y={56} className="h-full">
               <a
                 href={lab.href}
-                className="group flex h-full flex-col gap-3 rounded-lg border border-line bg-card p-6 shadow-(--shadow-1) transition-[border-color,box-shadow,transform] duration-(--dur-base) ease-(--ease-out) outline-none hover:translate-y-[-4px] hover:border-(--lab) hover:shadow-(--shadow-2) focus-visible:ring-2 focus-visible:ring-accent/50"
+                className="group relative flex h-full flex-col gap-3 overflow-hidden rounded-xl border border-line bg-card p-6 shadow-(--shadow-1) transition-[border-color,box-shadow,transform] duration-(--dur-base) ease-(--ease-out) before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:origin-left before:scale-x-30 before:bg-(--lab) before:transition-transform before:duration-(--dur-slow) hover:translate-y-[-5px] hover:border-(--lab) hover:shadow-(--shadow-2) hover:before:scale-x-100 focus-visible:ring-2 focus-visible:ring-accent/50"
                 style={{ ["--lab" as string]: lab.color }}
               >
                 <div className="flex items-center gap-2.5">
@@ -209,7 +208,7 @@ export default function Home() {
           {DISCIPLINES.map((d) => (
             <ScrollReveal key={d.key} y={56} className="h-full">
               <div
-                className="group flex h-full flex-col gap-3 rounded-lg border border-line bg-card p-6 shadow-(--shadow-1) transition-[border-color,box-shadow,transform] duration-(--dur-base) hover:translate-y-[-4px] hover:border-(--pillar) hover:shadow-(--shadow-2)"
+                className="group flex h-full flex-col gap-3 rounded-xl border border-line bg-card p-6 shadow-(--shadow-1) transition-[border-color,box-shadow,transform] duration-(--dur-base) hover:translate-y-[-4px] hover:border-(--pillar) hover:shadow-(--shadow-2)"
                 style={{ ["--pillar" as string]: d.color }}
               >
                 <div className="flex items-center gap-2.5">

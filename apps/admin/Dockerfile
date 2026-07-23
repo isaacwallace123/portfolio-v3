@@ -6,9 +6,12 @@ WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
 COPY packages/ui/package.json packages/ui/
+COPY packages/lab-runtime/package.json packages/lab-runtime/
 COPY apps/web/package.json apps/web/
 COPY apps/admin/package.json apps/admin/
 COPY apps/cyberlab/package.json apps/cyberlab/
+COPY apps/homelab/package.json apps/homelab/
+COPY apps/ailab/package.json apps/ailab/
 RUN npm install --no-audit --no-fund
 
 COPY packages ./packages
@@ -26,5 +29,9 @@ ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 COPY --from=build /repo/apps/admin/.next/standalone ./
 COPY --from=build /repo/apps/admin/.next/static ./apps/admin/.next/static
+RUN addgroup --system --gid 1001 nodejs \
+    && adduser --system --uid 1001 --ingroup nodejs nextjs \
+    && chown -R nextjs:nodejs /repo
+USER nextjs
 EXPOSE 3000
 CMD ["node", "apps/admin/server.js"]

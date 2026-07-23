@@ -31,7 +31,7 @@
   --danger: #c23b3b;
 
   /* one colour per subdomain — how the network reads as one system */
-  --lab-cyber: #0891b2;
+  --lab-cyber: #c45b1b;
   --lab-homelab: #059669;
   --lab-ailab: #7c3aed;
   --lab-main: #3b5bdb;
@@ -101,7 +101,7 @@
   --accent: #6c7cff; /* the network indigo, lifted for a dark ground */
   --danger: #fb6a6a;
 
-  --lab-cyber: #22b8cf;
+  --lab-cyber: #ff9450;
   --lab-homelab: #34d399;
   --lab-ailab: #a586ff;
   --lab-main: #6c7cff;

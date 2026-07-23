@@ -1,6 +1,6 @@
 # The whole portfolio network with one command: `make up` (or `docker compose up -d --build`).
-# Configuration comes from `.env` (copy `.env.example`). The cyberlab image builds from its own
-# repo, expected as a sibling directory (override CYBERLAB_DIR in .env if yours lives elsewhere).
+# Configuration comes from `.env` (copy `.env.example`). Public frontend images build from this
+# monorepo; their private lab controllers remain separately deployed behind narrow contracts.
 
 name: isaacwallace
 
@@ -16,7 +16,11 @@ services:
     volumes:
       - dbdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iw} -d ${POSTGRES_DB:-iw}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-iw} -d ${POSTGRES_DB:-iw}",
+        ]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -63,6 +67,10 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5180}
         NEXT_PUBLIC_AUTH_API_URL: ${NEXT_PUBLIC_AUTH_API_URL:-http://localhost:5170}
         NEXT_PUBLIC_ADMIN_URL: ${NEXT_PUBLIC_ADMIN_URL:-http://localhost:3004}
+        NEXT_PUBLIC_HOME_URL: ${NEXT_PUBLIC_HOME_URL:-http://localhost:3000}
+        NEXT_PUBLIC_CYBERLAB_URL: ${NEXT_PUBLIC_CYBERLAB_URL:-http://localhost:3001}
+        NEXT_PUBLIC_HOMELAB_URL: ${NEXT_PUBLIC_HOMELAB_URL:-http://localhost:3002}
+        NEXT_PUBLIC_AILAB_URL: ${NEXT_PUBLIC_AILAB_URL:-http://localhost:3003}
     init: true
     ports:
       - "${WEB_PORT:-3000}:3000"
@@ -84,9 +92,63 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5180}
         NEXT_PUBLIC_AUTH_API_URL: ${NEXT_PUBLIC_AUTH_API_URL:-http://localhost:5170}
         NEXT_PUBLIC_ADMIN_URL: ${NEXT_PUBLIC_ADMIN_URL:-http://localhost:3004}
+        NEXT_PUBLIC_HOME_URL: ${NEXT_PUBLIC_HOME_URL:-http://localhost:3000}
+        NEXT_PUBLIC_CYBERLAB_URL: ${NEXT_PUBLIC_CYBERLAB_URL:-http://localhost:3001}
+        NEXT_PUBLIC_HOMELAB_URL: ${NEXT_PUBLIC_HOMELAB_URL:-http://localhost:3002}
+        NEXT_PUBLIC_AILAB_URL: ${NEXT_PUBLIC_AILAB_URL:-http://localhost:3003}
     init: true
     ports:
       - "${CYBERLAB_PORT:-3001}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    depends_on:
+      auth-service:
+        condition: service_healthy
+
+  homelab:
+    build:
+      context: .
+      dockerfile: apps/homelab/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5180}
+        NEXT_PUBLIC_AUTH_API_URL: ${NEXT_PUBLIC_AUTH_API_URL:-http://localhost:5170}
+        NEXT_PUBLIC_ADMIN_URL: ${NEXT_PUBLIC_ADMIN_URL:-http://localhost:3004}
+        NEXT_PUBLIC_HOME_URL: ${NEXT_PUBLIC_HOME_URL:-http://localhost:3000}
+        NEXT_PUBLIC_CYBERLAB_URL: ${NEXT_PUBLIC_CYBERLAB_URL:-http://localhost:3001}
+        NEXT_PUBLIC_HOMELAB_URL: ${NEXT_PUBLIC_HOMELAB_URL:-http://localhost:3002}
+        NEXT_PUBLIC_AILAB_URL: ${NEXT_PUBLIC_AILAB_URL:-http://localhost:3003}
+    init: true
+    ports:
+      - "${HOMELAB_PORT:-3002}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    depends_on:
+      auth-service:
+        condition: service_healthy
+
+  ailab:
+    build:
+      context: .
+      dockerfile: apps/ailab/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5180}
+        NEXT_PUBLIC_AUTH_API_URL: ${NEXT_PUBLIC_AUTH_API_URL:-http://localhost:5170}
+        NEXT_PUBLIC_ADMIN_URL: ${NEXT_PUBLIC_ADMIN_URL:-http://localhost:3004}
+        NEXT_PUBLIC_HOME_URL: ${NEXT_PUBLIC_HOME_URL:-http://localhost:3000}
+        NEXT_PUBLIC_CYBERLAB_URL: ${NEXT_PUBLIC_CYBERLAB_URL:-http://localhost:3001}
+        NEXT_PUBLIC_HOMELAB_URL: ${NEXT_PUBLIC_HOMELAB_URL:-http://localhost:3002}
+        NEXT_PUBLIC_AILAB_URL: ${NEXT_PUBLIC_AILAB_URL:-http://localhost:3003}
+    init: true
+    ports:
+      - "${AILAB_PORT:-3003}:3000"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
       interval: 15s

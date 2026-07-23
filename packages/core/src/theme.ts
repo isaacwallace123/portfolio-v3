@@ -2,7 +2,7 @@
 // *.isaacwallace.dev site: it rides a cookie on the parent domain (so switching on one site changes
 // them all in this browser) and is mirrored to the account (so it follows you to a new device).
 
-import { API_URL } from "./session";
+import { AUTH_API_URL } from "./session";
 
 export type ThemeChoice = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
@@ -23,6 +23,13 @@ export function readThemeChoice(): ThemeChoice {
   if (typeof document === "undefined") return "system";
   const m = document.cookie.match(/(?:^|;\s*)iw_theme=(light|dark|system)/);
   return (m?.[1] as ThemeChoice) ?? "system";
+}
+
+export function hasThemeCookie(): boolean {
+  return (
+    typeof document !== "undefined" &&
+    /(?:^|;\s*)iw_theme=(?:light|dark|system)(?:;|$)/.test(document.cookie)
+  );
 }
 
 export function writeThemeCookie(choice: ThemeChoice): void {
@@ -65,7 +72,7 @@ export async function setThemeChoice(
   applyTheme(choice);
   if (!persist) return;
   try {
-    await fetch(`${API_URL}/auth/profile`, {
+    await fetch(`${AUTH_API_URL}/auth/profile`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -79,6 +86,7 @@ export async function setThemeChoice(
 /** Adopt the account's saved theme when it differs from this browser's cookie (e.g. the first
     visit on a new device). Updates the cookie + <html>; no API write-back. */
 export function adoptAccountTheme(accountTheme: ThemeChoice): void {
+  if (hasThemeCookie()) return;
   if (accountTheme === readThemeChoice()) return;
   writeThemeCookie(accountTheme);
   applyTheme(accountTheme);

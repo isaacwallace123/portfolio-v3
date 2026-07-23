@@ -13,5 +13,8 @@
     "@iw/core": "*",
     "react": ">=19",
     "react-dom": ">=19"
+  },
+  "dependencies": {
+    "lucide-react": "^1.25.0"
   }
 }

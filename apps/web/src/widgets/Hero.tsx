@@ -119,7 +119,7 @@ export default function Hero() {
 
       {/* stat band — pinned to the bottom of the hero */}
       <div className="shell relative z-10 mt-[clamp(40px,7vw,88px)]">
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-8 border-t border-line pt-8 md:grid-cols-4">
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-8 rounded-xl border border-line bg-card/72 p-[clamp(18px,3vw,28px)] shadow-(--shadow-2) backdrop-blur-md md:grid-cols-4">
           {STATS.map((s) => (
             <div key={s.label}>
               <dt className="sr-only">{s.label}</dt>

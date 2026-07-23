@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import AdminGate from "@/widgets/AdminGate";
-import ThemeBoot from "@/shared/boot/ThemeBoot";
-import { THEME_INIT_SCRIPT } from "@iw/core";
+import { NETWORK_PREFERENCES_INIT_SCRIPT, THEME_INIT_SCRIPT } from "@iw/core";
+import { NetworkPreferencesBoot } from "@iw/ui";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,9 +22,14 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: NETWORK_PREFERENCES_INIT_SCRIPT,
+          }}
+        />
       </head>
       <body>
-        <ThemeBoot />
+        <NetworkPreferencesBoot />
         <AdminGate>{children}</AdminGate>
       </body>
     </html>

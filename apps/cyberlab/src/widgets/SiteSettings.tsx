@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Segmented, SettingRow } from "@iw/ui";
+import { SectionHeader, Segmented, SettingRow } from "@iw/ui";
 import {
   getPrefs,
   setPrefs,
@@ -18,7 +18,7 @@ export default function SiteSettings() {
   const [prefs, setLocal] = useState<CyberlabPrefs | null>(null);
 
   useEffect(() => {
-    setLocal(getPrefs());
+    queueMicrotask(() => setLocal(getPrefs()));
   }, []);
 
   if (!prefs) return null;
@@ -28,9 +28,10 @@ export default function SiteSettings() {
   return (
     <div className="flex flex-col gap-5">
       <section className="flex flex-col gap-3">
-        <div className="font-mono text-[10px] font-bold tracking-[0.18em] text-ink-dim uppercase">
-          Console
-        </div>
+        <SectionHeader
+          title="Console"
+          description="Preferences unique to Cyberlab playback and live feeds."
+        />
 
         <SettingRow
           title="Activity feed density"
@@ -66,8 +67,8 @@ export default function SiteSettings() {
       </section>
 
       <p className="text-[13px] leading-relaxed text-ink-dim">
-        Stored in this browser only — each site in the network keeps its own
-        cosmetic preferences.
+        These two controls stay local to Cyberlab; appearance and accessibility
+        follow the entire network.
       </p>
     </div>
   );

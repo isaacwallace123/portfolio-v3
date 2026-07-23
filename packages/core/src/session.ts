@@ -66,6 +66,71 @@ export const HOME_URL =
   process.env.NEXT_PUBLIC_HOME_URL ??
   (isDev ? "http://localhost:3000" : "https://isaacwallace.dev");
 
+export const CYBERLAB_URL =
+  process.env.NEXT_PUBLIC_CYBERLAB_URL ??
+  (isDev ? "http://localhost:3001" : "https://cyberlab.isaacwallace.dev");
+
+export const HOMELAB_URL =
+  process.env.NEXT_PUBLIC_HOMELAB_URL ??
+  (isDev ? "http://localhost:3002" : "https://homelab.isaacwallace.dev");
+
+export const AILAB_URL =
+  process.env.NEXT_PUBLIC_AILAB_URL ??
+  (isDev ? "http://localhost:3003" : "https://ailab.isaacwallace.dev");
+
+export type PortfolioSiteId = "main" | "cyberlab" | "homelab" | "ailab";
+
+export interface PortfolioSite {
+  id: PortfolioSiteId;
+  name: string;
+  label: string;
+  domain: string;
+  description: string;
+  href: string;
+  color: string;
+}
+
+/** One source of truth for cross-site navigation. The CSS variable fallbacks keep the switcher
+    legible in every app while still allowing each theme to lift or darken the lab colours. */
+export const PORTFOLIO_SITES: readonly PortfolioSite[] = [
+  {
+    id: "main",
+    name: "Isaac Wallace",
+    label: "Portfolio",
+    domain: "isaacwallace.dev",
+    description: "The network overview",
+    href: HOME_URL,
+    color: "var(--lab-main, #6c7cff)",
+  },
+  {
+    id: "cyberlab",
+    name: "SecOps",
+    label: "Security",
+    domain: "cyberlab.isaacwallace.dev",
+    description: "Attack and defend real VMs",
+    href: CYBERLAB_URL,
+    color: "var(--lab-cyber, #ff9450)",
+  },
+  {
+    id: "homelab",
+    name: "HomeOps",
+    label: "Platform",
+    domain: "homelab.isaacwallace.dev",
+    description: "Operate real cloud workloads",
+    href: HOMELAB_URL,
+    color: "var(--lab-homelab, #54e8a1)",
+  },
+  {
+    id: "ailab",
+    name: "AIOps",
+    label: "Intelligence",
+    domain: "ailab.isaacwallace.dev",
+    description: "Run and inspect local models",
+    href: AILAB_URL,
+    color: "var(--lab-ailab, #a586ff)",
+  },
+] as const;
+
 /** The shared fetch wrapper — cookie-credentialed, JSON, throws on !ok. `base` selects the service. */
 async function request<T>(
   base: string,
@@ -96,17 +161,38 @@ export const api = <T>(path: string, init?: RequestInit): Promise<T> =>
 export const authApi = <T>(path: string, init?: RequestInit): Promise<T> =>
   request<T>(AUTH_API_URL, path, init);
 
-/** The signed-in user, or null. Never throws on 401. */
-export async function getMe(): Promise<SessionUser | null> {
-  try {
-    return await authApi<SessionUser>("/auth/me");
-  } catch {
-    return null;
+const SESSION_CACHE_MS = 5_000;
+let sessionCache: { value: SessionUser | null; at: number } | null = null;
+let sessionRequest: Promise<SessionUser | null> | null = null;
+
+/** The signed-in user, or null. Concurrent consumers share one request, and the short cache avoids
+    duplicate `/auth/me` calls from independently mounted navigation and preference controls. */
+export function getMe(): Promise<SessionUser | null> {
+  if (sessionCache && Date.now() - sessionCache.at < SESSION_CACHE_MS) {
+    return Promise.resolve(sessionCache.value);
   }
+  if (sessionRequest) return sessionRequest;
+
+  sessionRequest = authApi<SessionUser>("/auth/me")
+    .catch(() => null)
+    .then((value) => {
+      sessionCache = { value, at: Date.now() };
+      return value;
+    })
+    .finally(() => {
+      sessionRequest = null;
+    });
+  return sessionRequest;
+}
+
+export function invalidateSessionCache(): void {
+  sessionCache = null;
+  sessionRequest = null;
 }
 
 export async function logout(): Promise<void> {
   await authApi("/auth/logout", { method: "POST" });
+  invalidateSessionCache();
 }
 
 /** Update the shared profile — display name and/or the public links. */

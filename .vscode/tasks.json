@@ -17,6 +17,48 @@
       "problemMatcher": []
     },
     {
+      "label": "dev: secops (:3001)",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": { "cwd": "${workspaceFolder}/apps/cyberlab" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "dev: homeops (:3002)",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": { "cwd": "${workspaceFolder}/apps/homelab" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "dev: aiops (:3003)",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": { "cwd": "${workspaceFolder}/apps/ailab" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "dev: admin (:3004)",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": { "cwd": "${workspaceFolder}/apps/admin" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "verify: all",
+      "type": "shell",
+      "command": "npm run verify && dotnet build IsaacWallace.sln && dotnet test tests/Auth.Tests/Auth.Tests.csproj",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": ["$eslint-stylish", "$tsc", "$msCompile"]
+    },
+    {
       "label": "dev: db (docker)",
       "type": "shell",
       "command": "docker compose up -d db",

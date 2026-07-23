@@ -11,9 +11,12 @@ WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
 COPY packages/ui/package.json packages/ui/
+COPY packages/lab-runtime/package.json packages/lab-runtime/
 COPY apps/web/package.json apps/web/
 COPY apps/admin/package.json apps/admin/
 COPY apps/cyberlab/package.json apps/cyberlab/
+COPY apps/homelab/package.json apps/homelab/
+COPY apps/ailab/package.json apps/ailab/
 # npm install (not ci): the lockfile is authored on Windows but this image is alpine/musl —
 # native bindings differ per platform, which npm ci's strict check rejects.
 RUN npm install --no-audit --no-fund
@@ -25,9 +28,17 @@ COPY apps/web ./apps/web
 ARG NEXT_PUBLIC_API_URL=http://localhost:5180
 ARG NEXT_PUBLIC_AUTH_API_URL=http://localhost:5170
 ARG NEXT_PUBLIC_ADMIN_URL=http://localhost:3004
+ARG NEXT_PUBLIC_HOME_URL=http://localhost:3000
+ARG NEXT_PUBLIC_CYBERLAB_URL=http://localhost:3001
+ARG NEXT_PUBLIC_HOMELAB_URL=http://localhost:3002
+ARG NEXT_PUBLIC_AILAB_URL=http://localhost:3003
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_AUTH_API_URL=$NEXT_PUBLIC_AUTH_API_URL
 ENV NEXT_PUBLIC_ADMIN_URL=$NEXT_PUBLIC_ADMIN_URL
+ENV NEXT_PUBLIC_HOME_URL=$NEXT_PUBLIC_HOME_URL
+ENV NEXT_PUBLIC_CYBERLAB_URL=$NEXT_PUBLIC_CYBERLAB_URL
+ENV NEXT_PUBLIC_HOMELAB_URL=$NEXT_PUBLIC_HOMELAB_URL
+ENV NEXT_PUBLIC_AILAB_URL=$NEXT_PUBLIC_AILAB_URL
 RUN npm run build -w apps/web
 
 FROM node:22-alpine
@@ -39,5 +50,9 @@ ENV PORT=3000
 # contains apps/web/server.js, the needed node_modules, and packages/core.
 COPY --from=build /repo/apps/web/.next/standalone ./
 COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
+RUN addgroup --system --gid 1001 nodejs \
+    && adduser --system --uid 1001 --ingroup nodejs nextjs \
+    && chown -R nextjs:nodejs /repo
+USER nextjs
 EXPOSE 3000
 CMD ["node", "apps/web/server.js"]

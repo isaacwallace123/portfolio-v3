@@ -45,8 +45,11 @@ export default function LiveView({
   // shared-cookie SSO: if they're signed in anywhere on the network, attribute their queue requests
   useEffect(() => {
     let alive = true;
-    getMe().then((u) => alive && setUser(u));
-    setDensity(getPrefs().feedDensity); // cosmetic pref — feed chrome only
+    getMe().then((u) => {
+      if (!alive) return;
+      setUser(u);
+      setDensity(getPrefs().feedDensity); // cosmetic pref — feed chrome only
+    });
     return () => {
       alive = false;
     };

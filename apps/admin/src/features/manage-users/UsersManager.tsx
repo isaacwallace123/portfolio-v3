@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { getMe, type SessionUser } from "@iw/core";
 import {
   listRoles,
@@ -16,20 +16,24 @@ export default function UsersManager() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
 
-  const load = useCallback(() => {
-    setError(null);
+  useEffect(() => {
+    let active = true;
     Promise.all([listUsers(), listRoles(), getMe()])
       .then(([u, r, me]) => {
+        if (!active) return;
         setUsers(u);
         setRoles(r);
         setMeId(me?.id ?? "");
       })
-      .catch((e) =>
-        setError(e instanceof Error ? e.message : "Failed to load."),
+      .catch(
+        (e) =>
+          active &&
+          setError(e instanceof Error ? e.message : "Failed to load."),
       );
+    return () => {
+      active = false;
+    };
   }, []);
-
-  useEffect(() => load(), [load]);
 
   const toggle = async (user: SessionUser, role: string) => {
     const key = `${user.id}:${role}`;

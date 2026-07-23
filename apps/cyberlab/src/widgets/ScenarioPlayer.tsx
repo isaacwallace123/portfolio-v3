@@ -97,7 +97,7 @@ export default function ScenarioPlayer({ study }: { study: CaseStudy }) {
   // cosmetic pref: the speed the player STARTS at (chrome, not engine — the
   // run loop only ever reads multRef, exactly as with the manual buttons)
   useEffect(() => {
-    setMult(getPrefs().replaySpeed);
+    queueMicrotask(() => setMult(getPrefs().replaySpeed));
   }, []);
 
   const wait = useCallback(

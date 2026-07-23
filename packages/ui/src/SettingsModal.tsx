@@ -17,18 +17,20 @@ import {
   type SessionUser,
 } from "@iw/core";
 import { ThemeControl } from "./ThemeControl";
+import { NetworkAccessibilitySettings } from "./NetworkAccessibilitySettings";
 
 // The full in-app settings surface, shared across every site. Structure is identical everywhere;
 // each app wears its own palette via the design-contract tokens (surface / ink / brand / danger).
 // The account tabs (Profile, Security, Sessions) talk to the shared API; Appearance carries the
-// network theme PLUS the app's own cosmetic controls (passed as `appearanceTab`); `siteTab` is an
-// optional extra panel for genuinely site-specific prefs. Portaled to <body> because the navbar's
+// network theme and accessibility controls; `siteTab` is an optional extra panel for genuinely
+// site-specific prefs. Portaled to <body> because the navbar's
 // backdrop-blur is a containing block that would trap position:fixed.
 
-type Tab = "profile" | "appearance" | "site" | "security" | "sessions";
+export type SettingsTab =
+  "profile" | "appearance" | "site" | "security" | "sessions";
 
 type TabMeta = {
-  id: Tab;
+  id: SettingsTab;
   label: string;
   title: string;
   blurb: string;
@@ -154,16 +156,15 @@ export function SettingsModal({
   user,
   onUser,
   onClose,
-  appearanceTab,
   siteTab,
+  initialTab,
 }: {
   user: SessionUser | null;
   onUser: (u: SessionUser) => void;
   onClose: () => void;
-  /** This app's cosmetic controls, shown in Appearance under the network theme (localStorage). */
-  appearanceTab?: React.ReactNode;
   /** Optional extra panel for genuinely site-specific prefs; the tab is hidden when omitted. */
   siteTab?: React.ReactNode;
+  initialTab?: SettingsTab;
 }) {
   const tabs = useMemo(
     () => TABS.filter((t) => t.id !== "site" || siteTab != null),
@@ -171,10 +172,13 @@ export function SettingsModal({
   );
   const groups = useMemo(
     () => [
-      { label: "Account", ids: ["profile", "security", "sessions"] as Tab[] },
+      {
+        label: "Account",
+        ids: ["profile", "security", "sessions"] as SettingsTab[],
+      },
       {
         label: "Preferences",
-        ids: (["appearance", "site"] as Tab[]).filter((id) =>
+        ids: (["appearance", "site"] as SettingsTab[]).filter((id) =>
           tabs.some((t) => t.id === id),
         ),
       },
@@ -182,7 +186,9 @@ export function SettingsModal({
     [tabs],
   );
 
-  const [tab, setTab] = useState<Tab>(user ? "profile" : "appearance");
+  const [tab, setTab] = useState<SettingsTab>(
+    initialTab ?? (user ? "profile" : "appearance"),
+  );
   const [here, setHere] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -220,12 +226,12 @@ export function SettingsModal({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Settings"
-        className="pop-in relative flex h-[min(620px,92vh)] w-full max-w-[720px] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-(--shadow-3)"
+        aria-label="Network settings"
+        className="pop-in relative flex h-[min(640px,92vh)] w-full max-w-[740px] flex-col overflow-hidden rounded-2xl border border-line bg-surface/88 shadow-(--shadow-3) backdrop-blur-2xl"
       >
         <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
           <span className="font-mono text-[11px] font-bold tracking-[0.2em] text-ink-mid uppercase">
-            Settings
+            Network settings
           </span>
           <button
             ref={closeRef}
@@ -249,7 +255,7 @@ export function SettingsModal({
         <div className="grid min-h-0 flex-1 sm:grid-cols-[204px_1fr]">
           <nav
             aria-label="Settings sections"
-            className="scrollbar-none flex gap-1 overflow-x-auto border-b border-line p-2.5 sm:flex-col sm:gap-0.5 sm:overflow-y-auto sm:border-r sm:border-b-0"
+            className="scrollbar-none flex gap-1 overflow-x-auto border-b border-line bg-surface-2/28 p-2.5 sm:flex-col sm:gap-0.5 sm:overflow-y-auto sm:border-r sm:border-b-0"
           >
             {user && (
               <div className="hidden items-center gap-2.5 rounded-lg px-2 py-2.5 sm:flex">
@@ -288,8 +294,8 @@ export function SettingsModal({
                       aria-current={active ? "page" : undefined}
                       className={`group flex shrink-0 cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] transition-colors duration-(--dur-fast) outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${
                         active
-                          ? "bg-surface-2 font-semibold text-ink"
-                          : "text-ink-mid hover:bg-surface-2 hover:text-ink"
+                          ? "bg-surface-2/65 font-semibold text-ink"
+                          : "text-ink-mid hover:bg-surface-2/48 hover:text-ink"
                       }`}
                     >
                       <span
@@ -342,7 +348,7 @@ export function SettingsModal({
                 {tab === "appearance" && (
                   <div className="flex flex-col gap-6">
                     <ThemeControl signedIn={!!user} />
-                    {appearanceTab}
+                    <NetworkAccessibilitySettings />
                   </div>
                 )}
                 {tab === "site" && siteTab}
@@ -362,7 +368,7 @@ export function SettingsModal({
 
 function SignInCard({ here }: { here: string }) {
   return (
-    <div className="rounded-lg border border-line bg-surface-2 p-5 text-center">
+    <div className="rounded-xl border border-line bg-surface-2/48 p-5 text-center backdrop-blur-md">
       <p className="text-sm text-ink-mid">
         Sign in to manage your shared account — one identity across every site
         in the network.
@@ -380,7 +386,7 @@ function SignInCard({ here }: { here: string }) {
 /* ── Profile: shared identity + public links + connected accounts ─────────── */
 
 const inputCls =
-  "h-(--ctl) w-full rounded-md border border-line bg-surface-2 px-3.5 text-[15px] text-ink transition-[border-color] duration-(--dur-fast) outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30";
+  "h-(--ctl) w-full rounded-md border border-line bg-surface-2/48 px-3.5 text-[15px] text-ink transition-[border-color] duration-(--dur-fast) outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30";
 
 function ProfileTab({
   user,
@@ -432,7 +438,7 @@ function ProfileTab({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center gap-3.5 rounded-lg border border-line bg-surface-2 p-3.5">
+      <div className="flex items-center gap-3.5 rounded-xl border border-line bg-surface-2/48 p-3.5 backdrop-blur-md">
         <span
           aria-hidden
           className="grid size-12 shrink-0 place-items-center rounded-full bg-brand text-xl font-bold text-white"
@@ -552,7 +558,7 @@ function LinkField({
   return (
     <label
       htmlFor={id}
-      className="flex h-(--ctl) items-center gap-2.5 rounded-md border border-line bg-surface-2 px-3 focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/30"
+      className="flex h-(--ctl) items-center gap-2.5 rounded-md border border-line bg-surface-2/48 px-3 focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/30"
     >
       <span aria-hidden className="shrink-0 text-ink-dim">
         {icon}
@@ -659,7 +665,7 @@ function ConnectedAccounts({
           return (
             <div
               key={key}
-              className="flex items-center gap-3 rounded-lg border border-line bg-surface-2 px-3.5 py-2.5"
+              className="flex items-center gap-3 rounded-xl border border-line bg-surface-2/48 px-3.5 py-2.5"
             >
               <span aria-hidden className="shrink-0">
                 {PROVIDER_ICON[key] ?? (
@@ -713,7 +719,7 @@ function ConnectedAccounts({
 
 function SecurityTab({ user }: { user: SessionUser }) {
   const row =
-    "flex items-center justify-between gap-4 rounded-lg border border-line bg-surface-2 px-3.5 py-2.5";
+    "flex items-center justify-between gap-4 rounded-xl border border-line bg-surface-2/48 px-3.5 py-2.5";
   return (
     <div className="flex flex-col gap-3 text-sm">
       <div className={row}>
@@ -726,7 +732,7 @@ function SecurityTab({ user }: { user: SessionUser }) {
         <span className="text-ink-mid">Password</span>
         <span className="text-ink-dim">None — OAuth only</span>
       </div>
-      <div className="rounded-lg border border-line bg-surface-2 px-3.5 py-2.5">
+      <div className="rounded-xl border border-line bg-surface-2/48 px-3.5 py-2.5">
         <span className="text-ink-mid">Roles</span>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           {(user.roles.length ? user.roles : ["member"]).map((r) => (
@@ -803,7 +809,7 @@ function SessionsTab() {
       {sessions?.map((s) => (
         <div
           key={s.id}
-          className="flex items-center gap-3 rounded-lg border border-line bg-surface-2 px-3.5 py-2.5"
+          className="flex items-center gap-3 rounded-xl border border-line bg-surface-2/48 px-3.5 py-2.5"
         >
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 text-sm font-medium text-ink">

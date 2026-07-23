@@ -6,6 +6,8 @@
     "bradlc.vscode-tailwindcss",
     "ms-azuretools.vscode-docker",
     "editorconfig.editorconfig",
-    "humao.rest-client"
+    "humao.rest-client",
+    "redhat.vscode-yaml",
+    "github.vscode-github-actions"
   ]
 }

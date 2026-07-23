@@ -22,6 +22,9 @@ spec:
       labels:
         app: api
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       nodeSelector:
         node-role.kubernetes.io/apps: "true"
       containers:
@@ -29,6 +32,9 @@ spec:
           image: ghcr.io/isaacwallace123/portfolio-api:latest
           securityContext:
             allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1654
+            runAsGroup: 1654
             capabilities:
               drop: ["ALL"]
           env:

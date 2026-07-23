@@ -41,11 +41,16 @@ spec:
         node-role.kubernetes.io/apps: "true"
       securityContext:
         fsGroup: 1654 # the non-root "app" user in the .NET image → can write the dpkeys volume
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: auth-service
           image: ghcr.io/isaacwallace123/portfolio-auth-service:latest
           securityContext:
             allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1654
+            runAsGroup: 1654
             capabilities:
               drop: ["ALL"]
           env:
@@ -63,16 +68,20 @@ spec:
             # OAuth client credentials — the only login path in production (no passwords stored).
             - name: Auth__Google__ClientId
               valueFrom:
-                secretKeyRef: { name: portfolio-secrets, key: Auth__Google__ClientId }
+                secretKeyRef:
+                  { name: portfolio-secrets, key: Auth__Google__ClientId }
             - name: Auth__Google__ClientSecret
               valueFrom:
-                secretKeyRef: { name: portfolio-secrets, key: Auth__Google__ClientSecret }
+                secretKeyRef:
+                  { name: portfolio-secrets, key: Auth__Google__ClientSecret }
             - name: Auth__GitHub__ClientId
               valueFrom:
-                secretKeyRef: { name: portfolio-secrets, key: Auth__GitHub__ClientId }
+                secretKeyRef:
+                  { name: portfolio-secrets, key: Auth__GitHub__ClientId }
             - name: Auth__GitHub__ClientSecret
               valueFrom:
-                secretKeyRef: { name: portfolio-secrets, key: Auth__GitHub__ClientSecret }
+                secretKeyRef:
+                  { name: portfolio-secrets, key: Auth__GitHub__ClientSecret }
           ports:
             - containerPort: 8080
               name: http

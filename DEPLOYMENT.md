@@ -25,45 +25,31 @@ Every app, regardless of lab, follows the same five rules:
    The homelab ApplicationSet auto-discovers it — no cluster access needed to add an app.
 4. **Manifests live in the app's repo** under `deploy/k8s/` (the descriptor's `repoURL` points
    there). For the portfolio network that repo is this monorepo — the main site, API, admin, auth,
-   **and the cyberlab website** (`deploy/k8s/cyberlab.yaml`, its own `cyberlab` namespace) are all
-   reconciled by the single `portfolio` ArgoCD app. The cyberlab *range* infra keeps its own repo.
+   **and all three lab websites** (`deploy/k8s/{cyberlab,homelab,ailab}.yaml`) are all
+   reconciled by the single `portfolio` ArgoCD app. The cyberlab _range_ infra keeps its own repo.
 5. **Exposed through the existing Cloudflare Tunnel**, never a port-forward.
 
 This is the "federated labs, shared platform standards" model from the homelab strategy doc: each
-lab keeps its repo, secrets, and boundary; they converge on one *way of shipping*, not one owner.
+lab keeps its repo, secrets, and boundary; they converge on one _way of shipping_, not one owner.
 
 ### What deploys here vs. what does not
 
 Only **stateless, sanitised, public websites** run in the cluster. The cyberlab **range** — Kali,
 victims, the SOC, Windows/AD, packet capture, disposable scenario VMs — stays on Proxmox/Terraform
-and never enters Kubernetes. The cyberlab *website* reaching the lab does so only over the narrow,
+and never enters Kubernetes. The cyberlab _website_ reaching the lab does so only over the narrow,
 read-only seam already designed for it (`liveSim` today → a scoped read-only Guacamole broker later).
 
 ## Per-lab conformance
 
-| Lab | Today | Under the standard |
-| --- | --- | --- |
-| **portfolio** (main + API + all lab sites) | Docker Compose (local dev) | ✅ `deploy/k8s/` + `publish.yml` — done |
-| **cyberlab** (website) | now **in this monorepo** (`apps/cyberlab`) | ✅ built + deployed from here — `deploy/k8s/cyberlab.yaml`, `cyberlab-web` image, its own `cyberlab` namespace |
-| **homelab** | already k3s + ArgoCD | it *is* the platform; nothing to migrate |
-| **ailab** | Docker Compose ("hopes and dreams") | 🔜 migration path below |
+| Lab                                        | Today                                      | Under the standard                                                                                             |
+| ------------------------------------------ | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| **portfolio** (main + API + all lab sites) | Docker Compose (local dev)                 | ✅ `deploy/k8s/` + `publish.yml` — done                                                                        |
+| **cyberlab** (website)                     | now **in this monorepo** (`apps/cyberlab`) | ✅ built + deployed from here — `deploy/k8s/cyberlab.yaml`, `cyberlab-web` image, its own `cyberlab` namespace |
+| **homelab / HomeOps**                      | public arena in `apps/homelab`             | ✅ `portfolio-homelab` image + `homelab-web` Deployment/Service                                                |
+| **ailab / AIOps**                          | public arena in `apps/ailab`               | ✅ `portfolio-ailab` image + `ailab-web` Deployment/Service                                                    |
 
-### Bringing ailab in
-
-ailab already has a `compose.yaml` and a `kubernetes/` folder — it's closer than it looks. The path
-is exactly what portfolio/cyberlab just did:
-
-1. Keep `compose.yaml` for local dev (it stays the fast inner loop for every lab).
-2. Add a `Dockerfile` per service that doesn't have one (the Python services already build in compose).
-3. Add `ailab/.github/workflows/publish.yml` pushing each service image to GHCR.
-4. Add `ailab/deploy/k8s/` manifests (namespace `ailab`, Deployments/Services; its Postgres becomes
-   a Longhorn StatefulSet exactly like portfolio's).
-5. Add an `ailab` AppProject to `homelab-k8s/categories/projects.yaml` and descriptors under
-   `argocd-apps/apps/portfolio/` (or a new `apps/ailab/` folder).
-6. Add the `ailab.isaacwallace.dev` public hostname to the tunnel.
-
-The GPU/model workloads can stay on their own VM and be reached the same way the cyberlab range is —
-the *dashboard* is the public container, the heavy compute is external.
+The AIOps GPU/model workloads stay on dedicated workers, reached through a narrow service contract;
+the public dashboard is stateless and contains no model credentials or privileged cluster access.
 
 ## First-time bootstrap (once per app)
 
@@ -91,14 +77,16 @@ The homelab's `cloudflared` runs in-cluster with a **dashboard-managed** tunnel 
 public hostnames are added in the Cloudflare Zero Trust dashboard (Networks → Tunnels → your tunnel
 → Public Hostnames). Adding a hostname auto-creates its DNS record. Add:
 
-| Public hostname | Path | Service (in-cluster URL) |
-| --- | --- | --- |
-| `isaacwallace.dev` | | `http://web.portfolio.svc.cluster.local:80` |
-| `www.isaacwallace.dev` | | `http://web.portfolio.svc.cluster.local:80` |
-| `auth.isaacwallace.dev` | | `http://auth-service.portfolio.svc.cluster.local:80` |
-| `api.isaacwallace.dev` | | `http://api.portfolio.svc.cluster.local:80` |
-| `admin.isaacwallace.dev` | | `http://admin.portfolio.svc.cluster.local:80` |
-| `cyberlab.isaacwallace.dev` | | `http://cyberlab-web.cyberlab.svc.cluster.local:80` |
+| Public hostname             | Path | Service (in-cluster URL)                             |
+| --------------------------- | ---- | ---------------------------------------------------- |
+| `isaacwallace.dev`          |      | `http://web.portfolio.svc.cluster.local:80`          |
+| `www.isaacwallace.dev`      |      | `http://web.portfolio.svc.cluster.local:80`          |
+| `auth.isaacwallace.dev`     |      | `http://auth-service.portfolio.svc.cluster.local:80` |
+| `api.isaacwallace.dev`      |      | `http://api.portfolio.svc.cluster.local:80`          |
+| `admin.isaacwallace.dev`    |      | `http://admin.portfolio.svc.cluster.local:80`        |
+| `cyberlab.isaacwallace.dev` |      | `http://cyberlab-web.cyberlab.svc.cluster.local:80`  |
+| `homelab.isaacwallace.dev`  |      | `http://homelab-web.portfolio.svc.cluster.local:80`  |
+| `ailab.isaacwallace.dev`    |      | `http://ailab-web.portfolio.svc.cluster.local:80`    |
 
 **One service owns the whole auth domain.** `auth.isaacwallace.dev` is a single catch-all rule to the
 dedicated auth service (`apps/auth`, its own image, k8s Service still named `auth-service`): it
@@ -113,11 +101,11 @@ the `http://localhost:5170/...` variants for local dev).
 
 ### Lock down the admin console at the edge (Cloudflare Access)
 
-`admin.isaacwallace.dev` is the control plane, so gate it *before* the app even loads with
+`admin.isaacwallace.dev` is the control plane, so gate it _before_ the app even loads with
 Cloudflare Access (Zero Trust → Access → Applications):
 
 1. Add a **self-hosted application** for `admin.isaacwallace.dev`.
-2. One **Allow** policy: *Emails* → your admin email(s) — the same addresses in `Auth:AdminEmails`.
+2. One **Allow** policy: _Emails_ → your admin email(s) — the same addresses in `Auth:AdminEmails`.
    (Cloudflare will send a one-time PIN or use Google login.)
 3. Everything else is blocked at Cloudflare — the public never reaches the container.
 
@@ -132,9 +120,9 @@ from cloudflared. TLS mode in Cloudflare should be **Full**.
 
 ### 3. Let ArgoCD sync
 
-Once the descriptors and `projects.yaml` change are on `homelab-k8s` `main`, the root app renders the
-`portfolio` AppProject and the two Applications, creates the `portfolio` and `cyberlab` namespaces,
-and syncs. Watch it: `kubectl -n argocd get applications` or the ArgoCD UI at `https://192.168.0.203`.
+The existing `portfolio` ArgoCD Application watches this repository's `main` branch and recursively
+reconciles `deploy/k8s/`, including the `portfolio` and `cyberlab` namespaces. Watch it with
+`kubectl -n argocd get application portfolio` or in the ArgoCD UI.
 
 ## Ongoing rollout
 

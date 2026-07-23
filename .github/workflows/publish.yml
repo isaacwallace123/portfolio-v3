@@ -1,5 +1,9 @@
 name: publish
 
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
 # Build the auth service, the general-API stub, and the site images, and push to GHCR on every push
 # to main (and on version tags).
 # ArgoCD Image Updater in the homelab cluster rolls the :latest digest out automatically; a tag
@@ -40,12 +44,21 @@ jobs:
               NEXT_PUBLIC_API_URL=https://api.isaacwallace.dev
               NEXT_PUBLIC_AUTH_API_URL=https://auth.isaacwallace.dev
               NEXT_PUBLIC_ADMIN_URL=https://admin.isaacwallace.dev
+              NEXT_PUBLIC_HOME_URL=https://isaacwallace.dev
+              NEXT_PUBLIC_CYBERLAB_URL=https://cyberlab.isaacwallace.dev
+              NEXT_PUBLIC_HOMELAB_URL=https://homelab.isaacwallace.dev
+              NEXT_PUBLIC_AILAB_URL=https://ailab.isaacwallace.dev
           - name: portfolio-admin
             context: .
             dockerfile: apps/admin/Dockerfile
             build_args: |
               NEXT_PUBLIC_API_URL=https://api.isaacwallace.dev
               NEXT_PUBLIC_AUTH_API_URL=https://auth.isaacwallace.dev
+              NEXT_PUBLIC_ADMIN_URL=https://admin.isaacwallace.dev
+              NEXT_PUBLIC_HOME_URL=https://isaacwallace.dev
+              NEXT_PUBLIC_CYBERLAB_URL=https://cyberlab.isaacwallace.dev
+              NEXT_PUBLIC_HOMELAB_URL=https://homelab.isaacwallace.dev
+              NEXT_PUBLIC_AILAB_URL=https://ailab.isaacwallace.dev
           # cyberlab.isaacwallace.dev — moved into this monorepo (was the cyberlab repo).
           - name: cyberlab-web
             context: .
@@ -54,6 +67,32 @@ jobs:
               NEXT_PUBLIC_API_URL=https://api.isaacwallace.dev
               NEXT_PUBLIC_AUTH_API_URL=https://auth.isaacwallace.dev
               NEXT_PUBLIC_ADMIN_URL=https://admin.isaacwallace.dev
+              NEXT_PUBLIC_HOME_URL=https://isaacwallace.dev
+              NEXT_PUBLIC_CYBERLAB_URL=https://cyberlab.isaacwallace.dev
+              NEXT_PUBLIC_HOMELAB_URL=https://homelab.isaacwallace.dev
+              NEXT_PUBLIC_AILAB_URL=https://ailab.isaacwallace.dev
+          - name: portfolio-homelab
+            context: .
+            dockerfile: apps/homelab/Dockerfile
+            build_args: |
+              NEXT_PUBLIC_API_URL=https://api.isaacwallace.dev
+              NEXT_PUBLIC_AUTH_API_URL=https://auth.isaacwallace.dev
+              NEXT_PUBLIC_ADMIN_URL=https://admin.isaacwallace.dev
+              NEXT_PUBLIC_HOME_URL=https://isaacwallace.dev
+              NEXT_PUBLIC_CYBERLAB_URL=https://cyberlab.isaacwallace.dev
+              NEXT_PUBLIC_HOMELAB_URL=https://homelab.isaacwallace.dev
+              NEXT_PUBLIC_AILAB_URL=https://ailab.isaacwallace.dev
+          - name: portfolio-ailab
+            context: .
+            dockerfile: apps/ailab/Dockerfile
+            build_args: |
+              NEXT_PUBLIC_API_URL=https://api.isaacwallace.dev
+              NEXT_PUBLIC_AUTH_API_URL=https://auth.isaacwallace.dev
+              NEXT_PUBLIC_ADMIN_URL=https://admin.isaacwallace.dev
+              NEXT_PUBLIC_HOME_URL=https://isaacwallace.dev
+              NEXT_PUBLIC_CYBERLAB_URL=https://cyberlab.isaacwallace.dev
+              NEXT_PUBLIC_HOMELAB_URL=https://homelab.isaacwallace.dev
+              NEXT_PUBLIC_AILAB_URL=https://ailab.isaacwallace.dev
     steps:
       - uses: actions/checkout@v4
 

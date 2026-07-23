@@ -1,11 +1,44 @@
 name: ci
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main]
   pull_request:
 
 jobs:
+  security:
+    name: security — secrets + dependency advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install --no-fund
+      - run: npm audit --audit-level=high
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - run: dotnet restore IsaacWallace.sln
+      - name: Fail on vulnerable NuGet packages
+        shell: bash
+        run: |
+          dotnet list IsaacWallace.sln package --vulnerable --include-transitive --format json > vulnerable.json
+          jq -e '[.projects[] | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]] | length == 0' vulnerable.json
+
   dotnet:
     name: dotnet — build + auth integration tests
     runs-on: ubuntu-latest
@@ -23,7 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: [web, admin, cyberlab]
+        app: [web, admin, cyberlab, homelab, ailab]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,6 +73,28 @@ jobs:
       - run: npm run typecheck -w apps/${{ matrix.app }}
       - run: npm run build -w apps/${{ matrix.app }}
 
+  shared:
+    name: shared runtime — typecheck + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install --no-audit --no-fund
+      - run: npm run typecheck -w packages/lab-runtime
+      - run: npm run test -w packages/lab-runtime
+
+  manifests:
+    name: kubernetes — schema validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: >-
+          docker run --rm -v "${{ github.workspace }}:/work" ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
+          -strict -summary -ignore-missing-schemas /work/deploy/k8s
+
   docker:
     name: docker — images build
     runs-on: ubuntu-latest
@@ -52,3 +107,5 @@ jobs:
       - run: docker build -f apps/web/Dockerfile .
       - run: docker build -f apps/admin/Dockerfile .
       - run: docker build -f apps/cyberlab/Dockerfile .
+      - run: docker build -f apps/homelab/Dockerfile .
+      - run: docker build -f apps/ailab/Dockerfile .

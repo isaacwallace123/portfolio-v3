@@ -1,0 +1,3 @@
+[allowlist]
+description = "Bitnami SealedSecret values are controller-bound ciphertext, not plaintext secrets"
+paths = ['''^deploy/k8s/sealed-secret\.yaml$''']

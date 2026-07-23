@@ -1,7 +1,5 @@
 import PageHead from "./PageHead";
 
-// Reusable placeholder for sections that are on the roadmap but not built yet. Honest about status
-// while making the intended shape of the control plane visible.
 export default function Planned({
   kicker,
   title,
@@ -14,31 +12,76 @@ export default function Planned({
   bullets: string[];
 }) {
   return (
-    <>
+    <div className="mx-auto w-full max-w-[1500px]">
       <PageHead kicker={kicker} title={title} sub={intro} />
-      <div className="rounded-xl border border-dashed border-line bg-panel/50 p-6">
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-warn/40 bg-warn/10 px-2.5 py-1 font-mono text-[10px] tracking-wide text-warn uppercase">
-          <span className="size-1.5 rounded-full bg-warn" />
-          Planned
-        </div>
-        <p className="mb-4 max-w-2xl text-sm text-ink-mid">
-          What this section will manage:
-        </p>
-        <ul className="grid gap-2 sm:grid-cols-2">
-          {bullets.map((b) => (
-            <li
-              key={b}
-              className="flex items-start gap-2.5 rounded-lg border border-line bg-panel-2 px-3.5 py-3 text-sm text-ink"
-            >
-              <span
-                aria-hidden
-                className="mt-1 size-1.5 shrink-0 rounded-full bg-accent"
-              />
-              {b}
-            </li>
-          ))}
-        </ul>
+
+      <div className="mb-5 grid gap-3 sm:grid-cols-3">
+        <StatusCard label="Gateway" value="Connected" tone="ok" />
+        <StatusCard label="Resources" value={String(bullets.length)} />
+        <StatusCard label="Control mode" value="Approval required" />
       </div>
-    </>
+
+      <section className="rounded-2xl border border-line bg-panel/58 backdrop-blur-xl">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+          <div>
+            <h2 className="text-[14px] font-semibold text-ink">
+              Operator tools
+            </h2>
+            <p className="mt-1 text-[11px] text-ink-dim">
+              Privileged actions remain confirmation-gated when their connectors
+              go live.
+            </p>
+          </div>
+          <span className="rounded-full border border-warn/30 bg-warn/8 px-2.5 py-1 font-mono text-[9px] tracking-[0.1em] text-warn uppercase">
+            Integration staged
+          </span>
+        </div>
+
+        <div className="grid gap-px bg-line sm:grid-cols-2 xl:grid-cols-3">
+          {bullets.map((tool, index) => (
+            <article key={tool} className="min-h-40 bg-panel/94 p-5">
+              <div className="flex items-center justify-between">
+                <span className="grid size-8 place-items-center rounded-lg border border-line bg-panel-2/55 font-mono text-[9px] font-bold text-accent-bright">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <span className="font-mono text-[8px] tracking-[0.09em] text-ink-dim uppercase">
+                  Connector
+                </span>
+              </div>
+              <h3 className="mt-6 max-w-sm text-[13px] leading-relaxed font-semibold text-ink">
+                {tool}
+              </h3>
+              <button
+                type="button"
+                disabled
+                className="mt-4 rounded-md border border-line px-2.5 py-1.5 text-[10px] font-semibold text-ink-dim disabled:cursor-not-allowed"
+              >
+                Configure source
+              </button>
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function StatusCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "ok";
+}) {
+  return (
+    <div className="rounded-xl border border-line bg-panel/58 p-4 backdrop-blur-xl">
+      <div className="flex items-center justify-between font-mono text-[9px] tracking-[0.11em] text-ink-dim uppercase">
+        {label}
+        {tone && <i className="size-1.5 rounded-full bg-ok" />}
+      </div>
+      <strong className="mt-3 block text-[15px] text-ink">{value}</strong>
+    </div>
   );
 }

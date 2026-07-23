@@ -431,6 +431,56 @@
   background: var(--role);
 }
 
+/* Daylight consoles use the same terminal hierarchy without dropping black
+   screens onto the parchment theme. The role colour still identifies the
+   active actor, while inactive terminals recede through opacity rather than
+   destructive brightness filtering. */
+:global(:root[data-theme="light"]) .stageWrap {
+  background:
+    radial-gradient(
+      900px 420px at 50% -24%,
+      color-mix(in srgb, var(--responder) 7%, transparent),
+      transparent 70%
+    ),
+    color-mix(in srgb, var(--panel-2) 58%, var(--bg));
+}
+:global(:root[data-theme="light"]) .term {
+  --ink: #33251d;
+  --ink-mid: #725f51;
+  --ink-dim: #9a8373;
+  --line: #d8c5b7;
+  --line-soft: #e8d9ce;
+
+  background: linear-gradient(180deg, #fffaf5, #f3e9e1);
+  box-shadow: 0 18px 42px -24px rgba(83, 50, 28, 0.34);
+  filter: saturate(0.68);
+  opacity: 0.58;
+}
+:global(:root[data-theme="light"]) .term.active {
+  filter: none;
+  opacity: 1;
+}
+:global(:root[data-theme="light"]) .termBar {
+  background: color-mix(in srgb, var(--role) 8%, #f5ebe3);
+}
+:global(:root[data-theme="light"]) .lights i {
+  background: #b9a89b;
+}
+:global(:root[data-theme="light"]) .roleChip,
+:global(:root[data-theme="light"]) .hi {
+  color: color-mix(in srgb, var(--role) 82%, var(--ink));
+}
+:global(:root[data-theme="light"]) .typed {
+  color: #3b2b22;
+}
+:global(:root[data-theme="light"]) .termBody {
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(57, 39, 28, 0.025) 0 1px,
+    transparent 1px 3px
+  );
+}
+
 @media (max-width: 940px) {
   .root {
     grid-template-columns: 1fr;

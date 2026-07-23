@@ -258,13 +258,28 @@ using (var scope = app.Services.CreateScope())
                 """ALTER TABLE "AspNetUsers" ADD COLUMN "ThemePreference" TEXT NOT NULL DEFAULT 'system';""");
     }
     // The nullable profile-link columns (LinkedIn / website), same EnsureCreated caveat as the theme
-    // column above. Column names are compile-time constants, so the interpolation is injection-safe.
-    foreach (var col in new[] { "LinkedInUrl", "WebsiteUrl" })
+    // column above. Keep complete statements constant so neither the SQL nor its identifiers are
+    // ever assembled from runtime input.
+    var profileColumns = new[]
+    {
+        new
+        {
+            Postgres = """ALTER TABLE "AspNetUsers" ADD COLUMN IF NOT EXISTS "LinkedInUrl" text NULL;""",
+            Probe = "SELECT 1 FROM pragma_table_info('AspNetUsers') WHERE name = 'LinkedInUrl';",
+            Sqlite = """ALTER TABLE "AspNetUsers" ADD COLUMN "LinkedInUrl" TEXT NULL;"""
+        },
+        new
+        {
+            Postgres = """ALTER TABLE "AspNetUsers" ADD COLUMN IF NOT EXISTS "WebsiteUrl" text NULL;""",
+            Probe = "SELECT 1 FROM pragma_table_info('AspNetUsers') WHERE name = 'WebsiteUrl';",
+            Sqlite = """ALTER TABLE "AspNetUsers" ADD COLUMN "WebsiteUrl" TEXT NULL;"""
+        }
+    };
+    foreach (var column in profileColumns)
     {
         if (isNpgsql)
         {
-            await db.Database.ExecuteSqlRawAsync(
-                $"""ALTER TABLE "AspNetUsers" ADD COLUMN IF NOT EXISTS "{col}" text NULL;""");
+            await db.Database.ExecuteSqlRawAsync(column.Postgres);
         }
         else
         {
@@ -273,11 +288,11 @@ using (var scope = app.Services.CreateScope())
             bool hasCol;
             await using (var cmd = conn2.CreateCommand())
             {
-                cmd.CommandText = $"SELECT 1 FROM pragma_table_info('AspNetUsers') WHERE name = '{col}';";
+                cmd.CommandText = column.Probe;
                 hasCol = await cmd.ExecuteScalarAsync() is not null;
             }
             if (!hasCol)
-                await db.Database.ExecuteSqlRawAsync($"""ALTER TABLE "AspNetUsers" ADD COLUMN "{col}" TEXT NULL;""");
+                await db.Database.ExecuteSqlRawAsync(column.Sqlite);
         }
     }
     var roles = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();

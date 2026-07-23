@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   createRole,
   deleteRole,
@@ -14,16 +14,19 @@ export default function RolesManager() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(() => {
-    setError(null);
+  useEffect(() => {
+    let active = true;
     listRoles()
-      .then(setRoles)
-      .catch((e) =>
-        setError(e instanceof Error ? e.message : "Failed to load roles."),
+      .then((next) => active && setRoles(next))
+      .catch(
+        (e) =>
+          active &&
+          setError(e instanceof Error ? e.message : "Failed to load roles."),
       );
+    return () => {
+      active = false;
+    };
   }, []);
-
-  useEffect(() => load(), [load]);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -1,0 +1,75 @@
+# homelab.isaacwallace.dev — public HomeOps operations arena. Privileged cluster actions stay
+# behind the authenticated admin control plane.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homelab-web
+  namespace: portfolio
+  labels:
+    app: homelab-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: homelab-web
+  template:
+    metadata:
+      labels:
+        app: homelab-web
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      nodeSelector:
+        node-role.kubernetes.io/apps: "true"
+      containers:
+        - name: web
+          image: ghcr.io/isaacwallace123/portfolio-homelab:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - containerPort: 3000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 96Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: homelab-web
+  namespace: portfolio
+  labels:
+    app: homelab-web
+spec:
+  selector:
+    app: homelab-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
