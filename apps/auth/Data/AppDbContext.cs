@@ -8,6 +8,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     : IdentityDbContext<AppUser, IdentityRole, string>(options)
 {
     public DbSet<UserSession> UserSessions => Set<UserSession>();
+    public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -17,6 +18,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(s => s.UserId);
             e.Property(s => s.UserAgent).HasMaxLength(256);
             e.Property(s => s.Ip).HasMaxLength(64);
+        });
+        builder.Entity<ApiKey>(e =>
+        {
+            e.HasIndex(k => k.Hash).IsUnique();
+            e.Property(k => k.Name).HasMaxLength(128);
+            e.Property(k => k.Hash).HasMaxLength(64);
         });
     }
 }

@@ -236,6 +236,39 @@ using (var scope = app.Services.CreateScope())
           );
           CREATE INDEX IF NOT EXISTS "IX_UserSessions_UserId" ON "UserSessions" ("UserId");
           """);
+    // API keys table — same idempotent CREATE IF NOT EXISTS story as UserSessions above.
+    await db.Database.ExecuteSqlRawAsync(isNpgsql
+        ? """
+          CREATE TABLE IF NOT EXISTS "ApiKeys" (
+              "Id" text NOT NULL CONSTRAINT "PK_ApiKeys" PRIMARY KEY,
+              "Name" character varying(128) NOT NULL,
+              "Hash" character varying(64) NOT NULL,
+              "Scopes" text NOT NULL,
+              "OwnerUserId" text NULL,
+              "RateLimitPerMinute" integer NOT NULL,
+              "Enabled" boolean NOT NULL,
+              "CreatedUtc" timestamp with time zone NOT NULL,
+              "LastUsedUtc" timestamp with time zone NULL,
+              "RevokedUtc" timestamp with time zone NULL
+          );
+          CREATE UNIQUE INDEX IF NOT EXISTS "IX_ApiKeys_Hash" ON "ApiKeys" ("Hash");
+          """
+        : """
+          CREATE TABLE IF NOT EXISTS "ApiKeys" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_ApiKeys" PRIMARY KEY,
+              "Name" TEXT NOT NULL,
+              "Hash" TEXT NOT NULL,
+              "Scopes" TEXT NOT NULL,
+              "OwnerUserId" TEXT NULL,
+              "RateLimitPerMinute" INTEGER NOT NULL,
+              "Enabled" INTEGER NOT NULL,
+              "CreatedUtc" TEXT NOT NULL,
+              "LastUsedUtc" TEXT NULL,
+              "RevokedUtc" TEXT NULL
+          );
+          CREATE UNIQUE INDEX IF NOT EXISTS "IX_ApiKeys_Hash" ON "ApiKeys" ("Hash");
+          """);
+
     // Same story for the theme column on the existing AspNetUsers table: EnsureCreated won't alter
     // it. Postgres has ADD COLUMN IF NOT EXISTS natively; SQLite doesn't, so probe pragma first.
     if (isNpgsql)
@@ -625,6 +658,115 @@ app.MapPost("/auth/users/{id}/roles", async (string id, SetRoleRequest req, User
     return Results.Ok(await ToDto(users, target));
 }).RequireAuthorization("admin");
 
+// ── API keys: machine-to-machine credentials for the resource servers (api.isaacwallace.dev) ─────
+// auth is the authority. It issues keys (returning the plaintext ONCE), stores only the hash, and
+// revokes them — admin-gated by the same cookie + role as the rest of the control plane. Resource
+// servers hold no key material; they validate a presented key through /auth/apikeys/introspect.
+
+app.MapGet("/auth/apikeys", async (AppDbContext db) =>
+{
+    var keys = await db.ApiKeys.OrderByDescending(k => k.CreatedUtc).ToListAsync();
+    return Results.Ok(keys.Select(k => new
+    {
+        id = k.Id,
+        name = k.Name,
+        scopes = ApiKeyOps.ParseScopes(k.Scopes),
+        ownerUserId = k.OwnerUserId,
+        rateLimitPerMinute = k.RateLimitPerMinute,
+        active = k.Enabled && k.RevokedUtc is null,
+        createdUtc = k.CreatedUtc,
+        lastUsedUtc = k.LastUsedUtc,
+        revokedUtc = k.RevokedUtc,
+    }));
+}).RequireAuthorization("admin");
+
+app.MapPost("/auth/apikeys", async (CreateApiKeyRequest req, ClaimsPrincipal principal, UserManager<AppUser> users, AppDbContext db) =>
+{
+    var name = req.Name?.Trim();
+    if (string.IsNullOrWhiteSpace(name))
+        return Results.BadRequest(new { error = "Name is required." });
+    var scopes = req.Scopes ?? [];
+    if (scopes.Length == 0)
+        return Results.BadRequest(new { error = "At least one scope is required." });
+    if (!ApiKeyOps.AreScopesKnown(scopes))
+        return Results.BadRequest(new { error = $"Unknown scope. Known scopes: {string.Join(", ", ApiKeyOps.KnownScopes)}." });
+
+    var plaintext = ApiKeyOps.Generate();
+    var key = new ApiKey
+    {
+        Name = name.Length <= 128 ? name : name[..128],
+        Hash = ApiKeyOps.Hash(plaintext),
+        Scopes = ApiKeyOps.NormalizeScopes(scopes),
+        OwnerUserId = users.GetUserId(principal),
+        RateLimitPerMinute = req.RateLimitPerMinute is int r and > 0 ? r : 120,
+        Enabled = true,
+        CreatedUtc = DateTime.UtcNow,
+    };
+    db.ApiKeys.Add(key);
+    await db.SaveChangesAsync();
+
+    // The plaintext is returned exactly once; only its hash was stored.
+    return Results.Ok(new
+    {
+        id = key.Id,
+        name = key.Name,
+        scopes = ApiKeyOps.ParseScopes(key.Scopes),
+        rateLimitPerMinute = key.RateLimitPerMinute,
+        key = plaintext,
+    });
+}).RequireAuthorization("admin");
+
+app.MapDelete("/auth/apikeys/{id}", async (string id, AppDbContext db) =>
+{
+    var key = await db.ApiKeys.FindAsync(id);
+    if (key is null) return Results.NotFound(new { error = "No such key." });
+    if (key.RevokedUtc is null)
+    {
+        key.RevokedUtc = DateTime.UtcNow;
+        key.Enabled = false;
+        await db.SaveChangesAsync();
+    }
+    return Results.Ok(new { ok = true });
+}).RequireAuthorization("admin");
+
+// Introspection for resource servers (server-to-server). NOT cookie-authenticated — it is guarded by
+// a shared internal token and fails closed when that token is not configured. Returns only the
+// sanitized identity a resource server needs; never the hash or owner.
+app.MapPost("/auth/apikeys/introspect", async (IntrospectRequest req, HttpContext ctx, IConfiguration cfg, AppDbContext db) =>
+{
+    var expected = cfg["Auth:IntrospectionToken"];
+    if (string.IsNullOrWhiteSpace(expected))
+        return Results.Json(new { error = "Introspection is not configured." }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    var presented = ctx.Request.Headers["X-Internal-Token"].ToString();
+    if (string.IsNullOrEmpty(presented) || !ApiKeyOps.ConstantTimeEquals(presented, expected))
+        return Results.Json(new { error = "Forbidden." }, statusCode: StatusCodes.Status401Unauthorized);
+
+    var candidate = req.Key?.Trim();
+    if (string.IsNullOrWhiteSpace(candidate))
+        return Results.Ok(new { active = false });
+
+    var hash = ApiKeyOps.Hash(candidate);
+    var key = await db.ApiKeys.FirstOrDefaultAsync(k => k.Hash == hash);
+    if (key is null || !key.Enabled || key.RevokedUtc is not null)
+        return Results.Ok(new { active = false });
+
+    // Touch last-used at most once a minute — enough for the audit view, cheap on the db.
+    if (key.LastUsedUtc is null || DateTime.UtcNow - key.LastUsedUtc > TimeSpan.FromMinutes(1))
+    {
+        key.LastUsedUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
+    return Results.Ok(new
+    {
+        active = true,
+        keyId = key.Id,
+        name = key.Name,
+        scopes = ApiKeyOps.ParseScopes(key.Scopes),
+        rateLimitPerMinute = key.RateLimitPerMinute,
+    });
+});
+
 // ── Development only: sign in with just an email so the local loop needs no OAuth setup. ─────────
 // Never mapped outside Development, so it cannot exist in the production image.
 if (app.Environment.IsDevelopment() && config.GetValue("Auth:AllowDevLogin", true))
@@ -662,6 +804,8 @@ record CreateRoleRequest(string? Name);
 record SetRoleRequest(string? Role, bool Assigned);
 record UpdateProfileRequest(string? DisplayName, string? Theme, string? LinkedInUrl, string? WebsiteUrl);
 record DevLoginRequest(string? Email, string? DisplayName);
+record CreateApiKeyRequest(string? Name, string[]? Scopes, int? RateLimitPerMinute);
+record IntrospectRequest(string? Key);
 
 // exposes the entry point to WebApplicationFactory in the integration tests
 public partial class Program { }

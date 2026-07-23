@@ -1,16 +1,15 @@
+using IsaacWallace.Api.Auth;
 using Microsoft.AspNetCore.HttpOverrides;
 using Scalar.AspNetCore;
 
-// api.isaacwallace.dev — the general application API for the portfolio network.
+// api.isaacwallace.dev — the general application API for the portfolio network, and the public,
+// key-authenticated front door to the homelab. Other projects (hosted here or anywhere) integrate
+// through this one surface.
 //
-// Identity is NOT here: sign-in, sessions, roles, and the SSO cookie live in the dedicated auth
-// service (apps/auth → auth.isaacwallace.dev). This project is the home for the network's
-// real, non-auth application data as it grows. It ships as its own image so the two concerns scale
-// and deploy independently.
-//
-// It already carries the shared cross-cutting setup — CORS credentialed to the known site origins
-// (so cookie-authenticated calls work), forwarded headers (Cloudflare terminates TLS), and the
-// Scalar API reference in Development — so the first data endpoint is the only thing left to add.
+// Two auth lanes share the service: browser calls from the known site origins are CORS-credentialed
+// (cookie SSO lives in apps/auth), while machine-to-machine callers present an API key — hashed,
+// scoped, and rate-limited (see Auth/). The first key-gated capability, the HomeOps run-broker, is
+// added in the next slice; this layer is the foundation it sits on.
 
 var builder = WebApplication.CreateBuilder(args);
 var config = builder.Configuration;
@@ -23,7 +22,13 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
     .AllowAnyMethod()
     .AllowCredentials()));
 
-builder.Services.AddOpenApi();
+// API-key authentication, scope authorization, and per-caller rate limiting.
+builder.Services.AddHomelabApiAuth(config);
+
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer<ApiKeySecuritySchemeTransformer>();
+});
 
 // Behind cloudflared + Cloudflare: honour X-Forwarded-Proto/For so the app sees the real client
 // scheme and IP. The in-cluster proxy chain is trusted; the network boundary is enforced upstream.
@@ -46,6 +51,19 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference();
 }
 
+// Auth resolves the key (populating HttpContext.Items) before the rate limiter partitions by it.
+app.UseAuthentication();
+app.UseRateLimiter();
+app.UseAuthorization();
+
 app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "isaacwallace-api" }));
+
+// Whoami — lets an integrator confirm their key, name, and granted scopes. Requires any valid key.
+app.MapGet("/v1/me", (HttpContext ctx) =>
+{
+    var record = (ApiKeyRecord)ctx.Items[ApiKeyAuthenticationHandler.RecordItemKey]!;
+    return Results.Ok(new { keyId = record.Id, name = record.Name, scopes = record.Scopes });
+})
+.RequireApiKey();
 
 app.Run();
