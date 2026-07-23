@@ -36,6 +36,14 @@
   --dur-fast: 120ms;
   --dur-base: 200ms;
   --dur-slow: 320ms;
+  --lab-motion-primary: #54e8a1;
+  --lab-motion-secondary: #b8ff6a;
+  --lab-pointer-x: 0px;
+  --lab-pointer-y: 0px;
+  --lab-pointer-rx: 0deg;
+  --lab-pointer-ry: 0deg;
+  --lab-scroll: 0;
+  --lab-scroll-shift: 0px;
 }
 
 :root[data-theme="light"] {
@@ -61,6 +69,8 @@
   --shadow-1: 0 1px 2px rgba(10, 48, 32, 0.08);
   --shadow-2: 0 18px 40px -18px rgba(10, 48, 32, 0.25);
   --shadow-3: 0 24px 60px -20px rgba(10, 48, 32, 0.3);
+  --lab-motion-primary: #087f51;
+  --lab-motion-secondary: #337d13;
 }
 
 @theme inline {
@@ -301,6 +311,18 @@ body::after {
   );
   box-shadow: 0 30px 100px rgba(0, 0, 0, 0.34);
   overflow: hidden;
+  transform: perspective(1100px)
+    translate3d(
+      var(--lab-pointer-x),
+      calc(var(--lab-pointer-y) + var(--lab-scroll-shift)),
+      0
+    )
+    rotateX(var(--lab-pointer-rx)) rotateY(var(--lab-pointer-ry));
+  transition:
+    transform 0.4s ease-out,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+  will-change: transform;
 }
 .hero-console::after {
   content: "";
@@ -551,6 +573,7 @@ body::after {
 .flow-arrow {
   flex: 0 0 auto;
   color: var(--ink-dim);
+  animation: home-flow-arrow 1.8s ease-in-out infinite;
 }
 .node-hot {
   border-color: var(--red);
@@ -575,6 +598,12 @@ body::after {
   border-radius: 2px;
   background: var(--mint);
   animation: podPulse 1.8s infinite alternate;
+}
+.pod-row i:nth-child(2n) {
+  animation-delay: -0.6s;
+}
+.pod-row i:nth-child(3n) {
+  animation-delay: -1.2s;
 }
 @keyframes podPulse {
   to {
@@ -891,6 +920,207 @@ body::after {
     800 10px/1 ui-monospace,
     monospace;
   letter-spacing: 0.14em;
+}
+
+/* ── Living infrastructure motion ───────────────────────────────────────── */
+.lab-ambient-scene {
+  position: fixed;
+  inset: 64px 0 0;
+  z-index: 0;
+  width: 100vw;
+  height: calc(100vh - 64px);
+  opacity: 0.3;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 0, 0, 0.26) 30%,
+    #000 58%,
+    rgba(0, 0, 0, 0.2) 100%
+  );
+}
+.lab-scroll-progress {
+  position: fixed;
+  inset: 0 auto auto 0;
+  z-index: 80;
+  width: 100%;
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--mint), var(--acid));
+  box-shadow: 0 0 18px color-mix(in srgb, var(--mint) 75%, transparent);
+  transform: scaleX(var(--lab-scroll));
+  transform-origin: left center;
+  will-change: transform;
+}
+body > .flex-1,
+body > footer {
+  position: relative;
+  z-index: 1;
+}
+.hero-copy,
+.arena-section,
+.drills-section,
+.platform-strip {
+  position: relative;
+}
+.hero-console:hover {
+  border-color: color-mix(in srgb, var(--mint) 42%, var(--line));
+  box-shadow:
+    0 38px 110px rgba(0, 0, 0, 0.38),
+    0 0 50px -30px var(--acid);
+}
+.capacity-ring {
+  animation: home-ring-breathe 4.8s ease-in-out infinite;
+}
+.capacity-ring::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border: 1px solid color-mix(in srgb, var(--acid) 32%, transparent);
+  border-radius: 50%;
+  border-right-color: var(--acid);
+  border-bottom-color: transparent;
+  animation: home-ring-orbit 9s linear infinite;
+}
+.progress-track span {
+  position: relative;
+  overflow: hidden;
+}
+.progress-track span::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 34%;
+  background: linear-gradient(90deg, transparent, #fff, transparent);
+  opacity: 0.55;
+  transform: translateX(-140%);
+  animation: home-signal-sweep 2.4s ease-in-out infinite;
+}
+.panel {
+  transition:
+    border-color 0.3s ease,
+    box-shadow 0.3s ease,
+    transform 0.3s ease;
+}
+.panel:hover {
+  border-color: color-mix(in srgb, var(--mint) 32%, var(--line));
+  box-shadow: 0 24px 64px -40px color-mix(in srgb, var(--mint) 35%, #000);
+  transform: translateY(-2px);
+}
+.topology-node {
+  overflow: hidden;
+}
+.topology-node::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    color-mix(in srgb, var(--mint) 16%, transparent) 48%,
+    transparent 66%
+  );
+  transform: translateX(-120%);
+  animation: home-node-scan 4.8s ease-in-out infinite;
+}
+.topology-node:hover {
+  border-color: color-mix(in srgb, var(--mint) 52%, var(--line));
+  box-shadow: 0 16px 36px -26px var(--mint);
+  transform: translateY(-4px);
+}
+.topology-flow > .topology-node:nth-of-type(2)::after,
+.data-stack .topology-node:last-child::after {
+  animation-delay: -2.1s;
+}
+.event-stream article,
+.evidence-ready {
+  animation: home-event-arrive 0.52s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.trace-waterfall i {
+  background-image: linear-gradient(
+    90deg,
+    var(--mint),
+    var(--acid),
+    var(--mint)
+  );
+  background-size: 220% 100%;
+  animation: home-trace-flow 2.8s linear infinite;
+}
+.drill-grid article {
+  transition:
+    transform 0.35s ease,
+    border-color 0.35s ease,
+    box-shadow 0.35s ease;
+}
+.drill-grid article:hover {
+  border-color: color-mix(in srgb, var(--acid) 35%, var(--line));
+  box-shadow: 0 28px 70px -48px var(--acid);
+  transform: translateY(-6px);
+}
+.platform-strip span {
+  animation: home-platform-float 4s ease-in-out infinite;
+}
+.platform-strip span:nth-child(2n) {
+  animation-delay: -1.3s;
+}
+.platform-strip span:nth-child(3n) {
+  animation-delay: -2.6s;
+}
+@keyframes home-flow-arrow {
+  50% {
+    color: var(--acid);
+    filter: drop-shadow(0 0 5px var(--mint));
+    transform: translateX(4px);
+  }
+}
+@keyframes home-ring-breathe {
+  50% {
+    filter: drop-shadow(
+      0 0 18px color-mix(in srgb, var(--acid) 26%, transparent)
+    );
+    transform: scale(1.025);
+  }
+}
+@keyframes home-ring-orbit {
+  to {
+    transform: rotate(1turn);
+  }
+}
+@keyframes home-signal-sweep {
+  55%,
+  100% {
+    transform: translateX(360%);
+  }
+}
+@keyframes home-node-scan {
+  45%,
+  100% {
+    transform: translateX(120%);
+  }
+}
+@keyframes home-event-arrive {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+}
+@keyframes home-trace-flow {
+  to {
+    background-position: -220% 0;
+  }
+}
+@keyframes home-platform-float {
+  50% {
+    color: var(--mint);
+    text-shadow: 0 0 14px color-mix(in srgb, var(--mint) 55%, transparent);
+    transform: translateY(-2px);
+  }
+}
+:root[data-theme="light"] .lab-ambient-scene {
+  opacity: 0.15;
+  mix-blend-mode: multiply;
 }
 .pop-in {
   animation: menu-in var(--dur-base) cubic-bezier(0.16, 1, 0.3, 1);

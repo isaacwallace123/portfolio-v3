@@ -97,6 +97,14 @@
   --dur-base: 200ms;
   --dur-slow: 320ms;
   --dur-reveal: 640ms;
+  --lab-motion-primary: #ff9a3c;
+  --lab-motion-secondary: #e6d65a;
+  --lab-pointer-x: 0px;
+  --lab-pointer-y: 0px;
+  --lab-pointer-rx: 0deg;
+  --lab-pointer-ry: 0deg;
+  --lab-scroll: 0;
+  --lab-scroll-shift: 0px;
 }
 
 /* ── Daylight console: the ops room with the lights on ───────────────────────
@@ -135,6 +143,8 @@
   --lab-cyber: #bd5b11;
   --lab-homelab: #087f51;
   --lab-ailab: #7145da;
+  --lab-motion-primary: #bd5b11;
+  --lab-motion-secondary: #827100;
 
   --shadow-1: 0 1px 2px rgba(22, 32, 43, 0.06);
   --shadow-2: 0 18px 40px -18px rgba(22, 32, 43, 0.22);
@@ -893,6 +903,227 @@
     .evidence-section {
       grid-template-columns: minmax(0, 1fr);
     }
+  }
+}
+
+/* Living range motion */
+.lab-ambient-scene {
+  position: fixed;
+  inset: 64px 0 0;
+  z-index: 0;
+  width: 100vw;
+  height: calc(100vh - 64px);
+  opacity: 0.28;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  mask-image: linear-gradient(
+    90deg,
+    transparent,
+    rgba(0, 0, 0, 0.18) 30%,
+    #000 64%,
+    rgba(0, 0, 0, 0.24)
+  );
+}
+.lab-scroll-progress {
+  position: fixed;
+  inset: 0 auto auto 0;
+  z-index: 80;
+  width: 100%;
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    var(--attacker),
+    var(--responder),
+    var(--hardener)
+  );
+  box-shadow: 0 0 18px color-mix(in srgb, var(--responder) 75%, transparent);
+  transform: scaleX(var(--lab-scroll));
+  transform-origin: left;
+  will-change: transform;
+}
+body > .flex-1,
+body > footer,
+body > main {
+  position: relative;
+  z-index: 1;
+}
+.cyber-bloom {
+  animation: sec-bloom-drift 11s ease-in-out infinite alternate;
+}
+.cyber-bloom-cyan {
+  animation-delay: -5s;
+  animation-direction: alternate-reverse;
+}
+.range-theatre {
+  transform: perspective(1100px)
+    translate3d(var(--lab-pointer-x), var(--lab-pointer-y), 0)
+    rotateX(var(--lab-pointer-rx)) rotateY(var(--lab-pointer-ry));
+  transform-style: preserve-3d;
+  transition:
+    transform 180ms ease-out,
+    border-color var(--dur-base),
+    box-shadow var(--dur-base);
+  will-change: transform;
+}
+.range-node {
+  transition:
+    transform var(--dur-base) var(--ease-out),
+    border-color var(--dur-base),
+    box-shadow var(--dur-base);
+  animation: sec-node-idle 5.2s ease-in-out infinite;
+}
+.range-node:nth-of-type(3) {
+  animation-delay: -1.8s;
+}
+.range-node:nth-of-type(5) {
+  animation-delay: -3.4s;
+}
+.range-node:hover {
+  z-index: 2;
+  border-color: color-mix(in srgb, var(--node) 65%, var(--line));
+  box-shadow: 0 18px 38px -24px var(--node);
+  transform: translateY(-5px) scale(1.025);
+}
+.range-link {
+  overflow: hidden;
+}
+.range-link i {
+  position: relative;
+  background-size: 220% 100%;
+  animation: sec-link-flow 2.4s linear infinite;
+}
+.range-link i::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--link);
+  box-shadow: 0 0 11px var(--link);
+  animation: sec-packet 2.4s ease-in-out infinite;
+}
+.range-terminal > div {
+  animation: sec-terminal-line 620ms var(--ease-out) both;
+}
+.range-terminal > div:nth-child(2) {
+  animation-delay: 130ms;
+}
+.range-terminal > div:nth-child(3) {
+  animation-delay: 260ms;
+}
+.perspective-card::after {
+  content: "";
+  position: absolute;
+  inset: -60% 56% -60% -25%;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent,
+    color-mix(in srgb, var(--role) 12%, transparent),
+    transparent
+  );
+  transform: translateX(-65%);
+  transition: transform 850ms var(--ease-out);
+}
+.perspective-card:hover::after {
+  transform: translateX(390%);
+}
+.evidence-pipeline {
+  position: relative;
+  transition:
+    transform var(--dur-base) var(--ease-out),
+    border-color var(--dur-base),
+    box-shadow var(--dur-base);
+}
+.evidence-pipeline:hover {
+  border-color: color-mix(in srgb, var(--responder) 38%, var(--line));
+  box-shadow:
+    var(--shadow-2),
+    0 0 55px -42px var(--responder);
+  transform: translateY(-3px);
+}
+.evidence-pipeline li > span {
+  animation: sec-evidence-pulse 3.4s ease-in-out infinite;
+}
+.evidence-pipeline li:nth-child(2) > span {
+  animation-delay: -0.7s;
+}
+.evidence-pipeline li:nth-child(3) > span {
+  animation-delay: -1.4s;
+}
+.evidence-pipeline li:nth-child(4) > span {
+  animation-delay: -2.1s;
+}
+.evidence-pipeline li:nth-child(5) > span {
+  animation-delay: -2.8s;
+}
+.evidence-pipeline li > i {
+  background-size: 100% 220%;
+  animation: sec-evidence-flow 2.6s linear infinite;
+}
+.cyber-stats div {
+  transition:
+    color var(--dur-base),
+    transform var(--dur-base) var(--ease-out);
+}
+.cyber-stats div:hover {
+  color: var(--responder);
+  transform: translateY(-4px);
+}
+:root[data-theme="light"] .lab-ambient-scene {
+  opacity: 0.14;
+  mix-blend-mode: multiply;
+}
+@keyframes sec-bloom-drift {
+  to {
+    opacity: 0.16;
+    transform: translate3d(44px, -24px, 0) scale(1.08);
+  }
+}
+@keyframes sec-node-idle {
+  50% {
+    transform: translateY(-3px);
+  }
+}
+@keyframes sec-link-flow {
+  to {
+    background-position: -220% 0;
+  }
+}
+@keyframes sec-packet {
+  from {
+    opacity: 0;
+    transform: translateX(0);
+  }
+  12%,
+  82% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(120px);
+  }
+}
+@keyframes sec-terminal-line {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+@keyframes sec-evidence-pulse {
+  50% {
+    color: var(--on-primary);
+    border-color: var(--responder);
+    background: var(--responder);
+    box-shadow: 0 0 20px color-mix(in srgb, var(--responder) 42%, transparent);
+  }
+}
+@keyframes sec-evidence-flow {
+  to {
+    background-position: 0 -220%;
   }
 }
 

@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import { NETWORK_PREFERENCES_INIT_SCRIPT, THEME_INIT_SCRIPT } from "@iw/core";
-import { NetworkFooter, NetworkNavbar, NetworkPreferencesBoot } from "@iw/ui";
+import {
+  LabMotion,
+  NetworkFooter,
+  NetworkNavbar,
+  NetworkPreferencesBoot,
+} from "@iw/ui";
 import { Toaster } from "@/shared/ui/sonner";
 import SiteSettings from "@/widgets/SiteSettings";
 import "./globals.css";
@@ -51,6 +56,7 @@ export default function RootLayout({
         />
       </head>
       <body className="flex min-h-screen flex-col">
+        <LabMotion variant="cyberlab" />
         <NetworkPreferencesBoot />
         <NetworkNavbar
           current="cyberlab"

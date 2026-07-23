@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import { NETWORK_PREFERENCES_INIT_SCRIPT, THEME_INIT_SCRIPT } from "@iw/core";
-import { NetworkFooter, NetworkNavbar, NetworkPreferencesBoot } from "@iw/ui";
+import {
+  LabMotion,
+  NetworkFooter,
+  NetworkNavbar,
+  NetworkPreferencesBoot,
+} from "@iw/ui";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -32,6 +37,7 @@ export default function RootLayout({
         />
       </head>
       <body className="flex min-h-screen flex-col">
+        <LabMotion variant="homelab" />
         <NetworkPreferencesBoot />
         <NetworkNavbar current="homelab" links={NAV_LINKS} />
         <div className="flex-1">{children}</div>

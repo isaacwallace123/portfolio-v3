@@ -13,3 +13,4 @@ export { NetworkNavbar, type NetworkNavLink } from "./NetworkNavbar";
 export { NetworkFooter } from "./NetworkFooter";
 export { NetworkPreferencesBoot } from "./NetworkPreferencesBoot";
 export { NetworkAccessibilitySettings } from "./NetworkAccessibilitySettings";
+export { LabMotion, type LabMotionVariant } from "./LabMotion";
