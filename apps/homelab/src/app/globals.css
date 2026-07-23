@@ -1275,3 +1275,108 @@ html[data-reduce-motion] *::after {
     min-height: 250px;
   }
 }
+
+/* ── Live cluster panel ──────────────────────────────────────────────────── */
+.live-section {
+  padding: 40px 0 90px;
+}
+.live-wrap {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 0 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.live-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: #34d399;
+}
+.live-badge i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
+  animation: livePulse 1.8s infinite;
+}
+@keyframes livePulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(52, 211, 153, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+  }
+}
+.live-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: flex-start;
+}
+.live-intro p {
+  max-width: 680px;
+  color: var(--muted, #9fb4ad);
+}
+.live-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.live-controls button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  transition:
+    border-color 0.15s,
+    opacity 0.15s;
+}
+.live-controls button:hover:not(:disabled) {
+  border-color: #34d399;
+}
+.live-controls button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.live-controls .live-teardown {
+  margin-left: auto;
+  border-color: rgba(248, 113, 113, 0.4);
+  color: #f87171;
+}
+.live-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  font-size: 12px;
+  color: var(--muted, #9fb4ad);
+}
+.live-facts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.live-offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted, #9fb4ad);
+}
