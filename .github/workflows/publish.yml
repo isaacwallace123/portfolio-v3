@@ -35,6 +35,11 @@ jobs:
             context: apps/api
             dockerfile: apps/api/Dockerfile
             build_args: ""
+          # checkout-demo — the real three-tier workload the HomeOps arena provisions.
+          - name: portfolio-checkout-demo
+            context: apps/checkout-demo
+            dockerfile: apps/checkout-demo/Dockerfile
+            build_args: ""
           # The Next apps are a monorepo workspace: the build context is the REPO ROOT so the
           # shared @iw/* packages are in scope; the Dockerfile lives under the app dir.
           - name: portfolio-web
