@@ -4,7 +4,7 @@
 # npm nests each workspace's deps under apps/<app>/node_modules (not hoisted), so install + build
 # happen in ONE stage — a cross-stage `COPY node_modules` would drop the nested trees.
 
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /repo
 # Manifests first so `npm install` is cached until a package.json changes. All workspaces must be
 # present for npm to resolve the graph.
@@ -41,7 +41,7 @@ ENV NEXT_PUBLIC_HOMELAB_URL=$NEXT_PUBLIC_HOMELAB_URL
 ENV NEXT_PUBLIC_AILAB_URL=$NEXT_PUBLIC_AILAB_URL
 RUN npm run build -w apps/web
 
-FROM node:22-alpine
+FROM node:26-alpine
 WORKDIR /repo
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
