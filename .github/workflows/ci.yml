@@ -17,7 +17,7 @@ jobs:
     name: security — secrets + dependency advisories
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
@@ -43,7 +43,7 @@ jobs:
     name: dotnet — build + auth integration tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "9.0.x"
@@ -58,7 +58,7 @@ jobs:
       matrix:
         app: [web, admin, cyberlab, homelab, ailab]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -77,7 +77,7 @@ jobs:
     name: shared runtime — typecheck + tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -90,7 +90,7 @@ jobs:
     name: kubernetes — schema validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: >-
           docker run --rm -v "${{ github.workspace }}:/work" ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
           -strict -summary -ignore-missing-schemas /work/deploy/k8s
@@ -99,7 +99,7 @@ jobs:
     name: docker — images build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # The .NET services are each their own context; the Next apps build from the repo root
       # (workspace) with the Dockerfile under the app dir.
       - run: docker build apps/auth

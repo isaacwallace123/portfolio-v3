@@ -94,7 +94,7 @@ jobs:
               NEXT_PUBLIC_HOMELAB_URL=https://homelab.isaacwallace.dev
               NEXT_PUBLIC_AILAB_URL=https://ailab.isaacwallace.dev
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v3
 
