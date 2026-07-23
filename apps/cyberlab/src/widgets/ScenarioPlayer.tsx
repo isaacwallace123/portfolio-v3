@@ -297,6 +297,8 @@ export default function ScenarioPlayer({ study }: { study: CaseStudy }) {
     // the player's whole accent — controls, ticks, caret — follows whoever is acting
     <div
       className={styles.root}
+      data-lab-reveal
+      data-lab-delay="80"
       style={{
         ["--active" as string]: `var(--${activeRole})`,
         ["--accent" as string]: `var(--${activeRole})`,

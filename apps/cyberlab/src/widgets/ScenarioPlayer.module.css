@@ -19,10 +19,15 @@
   background:
     radial-gradient(
       1000px 500px at 50% -30%,
-      rgba(69, 201, 221, 0.05),
+      color-mix(in srgb, var(--responder) 7%, transparent),
       transparent 70%
     ),
-    linear-gradient(180deg, #0a1018, #070c12);
+    radial-gradient(
+      700px 420px at 0 100%,
+      color-mix(in srgb, var(--attacker) 4%, transparent),
+      transparent 65%
+    ),
+    linear-gradient(180deg, #15100d, #0b0807);
   padding: clamp(10px, 2vw, 22px);
   overflow: hidden;
 }
@@ -38,21 +43,27 @@
   /* a terminal is a screen — it stays a dark console in either site theme, so
      its text tokens are pinned to the dark scale (otherwise --ink flips dark in
      light mode → unreadable dark-on-dark). */
-  --ink: #d7e2ee;
-  --ink-mid: #8ea1b5;
-  --ink-dim: #5b6c7e;
-  --line: #223041;
-  --line-soft: #18222e;
+  --ink: #f4e9de;
+  --ink-mid: #c0a995;
+  --ink-dim: #7d6a5c;
+  --line: #3d2d23;
+  --line-soft: #2a201a;
 
   position: absolute;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, #0c131b, #090f16);
+  background:
+    radial-gradient(
+      circle at 90% 0,
+      color-mix(in srgb, var(--role) 7%, transparent),
+      transparent 36%
+    ),
+    linear-gradient(180deg, #17110e, #0e0a08);
   border: 1px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
   box-shadow: var(--shadow);
-  filter: saturate(0.7) brightness(0.72);
+  filter: saturate(0.72) brightness(0.68);
   transition:
     filter 0.5s ease,
     border-color 0.5s ease,
@@ -72,7 +83,7 @@
   align-items: center;
   gap: 10px;
   padding: 7px 11px;
-  background: color-mix(in srgb, var(--role) 10%, #0b1119);
+  background: color-mix(in srgb, var(--role) 9%, #18110d);
   border-bottom: 1px solid var(--line-soft);
 }
 .lights {
@@ -83,7 +94,7 @@
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #33414f;
+  background: #4a3b31;
   display: block;
 }
 .term.active .lights i:nth-child(1) {
@@ -125,7 +136,7 @@
   /* faint CRT scanlines — the console motif, kept just under notice */
   background-image: repeating-linear-gradient(
     0deg,
-    rgba(255, 255, 255, 0.015) 0 1px,
+    rgba(255, 184, 116, 0.022) 0 1px,
     transparent 1px 3px
   );
 }
@@ -143,7 +154,7 @@
   color: color-mix(in srgb, var(--role) 85%, var(--ink));
 }
 .typed {
-  color: #eaf2fb;
+  color: #fff3e8;
 }
 .out {
   color: var(--ink-mid);

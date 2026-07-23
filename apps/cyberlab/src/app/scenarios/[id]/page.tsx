@@ -41,7 +41,7 @@ export default async function CaseStudyPage({
         All case studies
       </Link>
 
-      <div className="mb-[22px] flex flex-col gap-3">
+      <div className="mb-[22px] flex flex-col gap-3" data-lab-reveal>
         <div className="flex flex-wrap gap-2">
           {rolesOf(study).map((role) => (
             <span

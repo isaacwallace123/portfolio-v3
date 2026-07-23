@@ -111,6 +111,8 @@ export default function LiveView({
   return (
     <div
       className={styles.wrap}
+      data-lab-reveal
+      data-lab-delay="80"
       style={{
         ["--role" as string]: `var(--${activeRole})`,
         ["--active" as string]: `var(--${activeRole})`,

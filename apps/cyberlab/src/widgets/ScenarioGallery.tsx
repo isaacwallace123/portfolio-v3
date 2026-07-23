@@ -23,7 +23,7 @@ export default function ScenarioGallery({ studies }: { studies: CaseStudy[] }) {
     );
 
   return (
-    <Tabs defaultValue="all">
+    <Tabs defaultValue="all" data-lab-reveal data-lab-delay="80">
       <TabsList aria-label="Filter case studies">
         <TabsTrigger value="all">All ({studies.length})</TabsTrigger>
         <TabsTrigger value="scripted">Scripted ({scripted.length})</TabsTrigger>

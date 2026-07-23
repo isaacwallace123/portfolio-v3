@@ -21,7 +21,7 @@ export default function LivePage() {
 
   return (
     <section className="shell py-[clamp(40px,7vw,84px)]">
-      <div className="mb-6 flex flex-col gap-2">
+      <div className="mb-6 flex flex-col gap-2" data-lab-reveal>
         <div className="eyebrow">Live</div>
         <h1 className="text-[clamp(21px,3vw,30px)] font-bold tracking-[-0.01em]">
           What&apos;s running now

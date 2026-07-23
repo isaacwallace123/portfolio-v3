@@ -106,18 +106,24 @@
 .screen {
   /* the live view is a screen — stays a dark console in either site theme, so its
      text tokens are pinned to the dark scale (else --ink flips dark in light mode). */
-  --ink: #d7e2ee;
-  --ink-mid: #8ea1b5;
-  --ink-dim: #5b6c7e;
-  --line: #223041;
-  --line-soft: #18222e;
+  --ink: #f4e9de;
+  --ink-mid: #c0a995;
+  --ink-dim: #7d6a5c;
+  --line: #3d2d23;
+  --line-soft: #2a201a;
 
   position: relative;
   min-width: 0;
   border: 1px solid color-mix(in srgb, var(--role) 45%, var(--line));
   border-radius: var(--r);
   overflow: hidden;
-  background: linear-gradient(180deg, #0c131b, #080d13);
+  background:
+    radial-gradient(
+      circle at 88% 0,
+      color-mix(in srgb, var(--role) 8%, transparent),
+      transparent 34%
+    ),
+    linear-gradient(180deg, #17110e, #0d0a08);
   box-shadow:
     var(--shadow),
     0 0 34px -10px color-mix(in srgb, var(--role) 45%, transparent);
@@ -127,7 +133,7 @@
   align-items: center;
   gap: 10px;
   padding: 9px 13px;
-  background: color-mix(in srgb, var(--role) 12%, #0b1119);
+  background: color-mix(in srgb, var(--role) 10%, #18110d);
   border-bottom: 1px solid var(--line-soft);
 }
 .lights {
@@ -199,7 +205,7 @@
   pointer-events: none;
   background: repeating-linear-gradient(
     0deg,
-    rgba(255, 255, 255, 0.018) 0 1px,
+    rgba(255, 184, 116, 0.024) 0 1px,
     transparent 1px 3px
   );
 }
