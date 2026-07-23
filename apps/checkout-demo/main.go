@@ -57,7 +57,15 @@ func main() {
 		 WHERE NOT EXISTS (SELECT 1 FROM catalogue)`)
 
 	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
-		rdb = redis.NewClient(&redis.Options{Addr: addr})
+		// No retries + short timeouts: when the cache tier is scaled to zero, a miss must fail fast
+		// and fall through to the DB, never adding latency of its own.
+		rdb = redis.NewClient(&redis.Options{
+			Addr:         addr,
+			MaxRetries:   -1,
+			DialTimeout:  200 * time.Millisecond,
+			ReadTimeout:  200 * time.Millisecond,
+			WriteTimeout: 200 * time.Millisecond,
+		})
 	}
 	cacheOn = os.Getenv("CACHE_ENABLED") == "true"
 
