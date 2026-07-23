@@ -32,6 +32,7 @@ import {
   agentLogs,
   pipelineStages,
 } from "@/entities/experiment";
+import ModelObservatory from "@/widgets/ModelObservatory";
 
 const tasks = [
   { id: "repair", label: "Code repair", detail: "Fix a timestamp regression" },
@@ -195,7 +196,7 @@ export default function ExperimentArena() {
         <section className="ai-hero">
           <div className="hero-orbit orbit-one" />
           <div className="hero-orbit orbit-two" />
-          <div className="ai-hero-copy">
+          <div className="ai-hero-copy" data-lab-reveal>
             <p className="ai-kicker">
               <FlaskConical size={15} /> Local intelligence, under observation
             </p>
@@ -226,28 +227,11 @@ export default function ExperimentArena() {
               </a>
             </div>
           </div>
-          <div className="hero-model-stack">
-            <div className="model-card card-back">
-              <span>B50 · 16 GB</span>
-              <b>local-primary</b>
-              <small>31.4 tokens / second</small>
-            </div>
-            <div className="model-card card-front">
-              <span>B580 · 12 GB</span>
-              <b>local-fast</b>
-              <small>38.9 tokens / second</small>
-              <div className="token-stream">
-                101&nbsp; 011&nbsp; 001&nbsp; 110&nbsp; 010
-              </div>
-            </div>
-            <div className="model-pulse">
-              <Sparkles size={18} />
-            </div>
-          </div>
+          <ModelObservatory status={status} />
         </section>
 
         <section className="workbench" id="arena">
-          <div className="workbench-title">
+          <div className="workbench-title" data-lab-reveal>
             <div>
               <p className="ai-kicker">
                 <GitCompareArrows size={15} /> Dual-agent arena
@@ -270,7 +254,7 @@ export default function ExperimentArena() {
           <div className="experiment-progress">
             <span style={{ width: `${snapshot.progress * 100}%` }} />
           </div>
-          <div className="pipeline-rail">
+          <div className="pipeline-rail" data-lab-reveal data-lab-delay="70">
             {pipelineStages.map((stage, index) => {
               const complete = elapsedMs >= stage.at;
               const next = pipelineStages[index + 1];
@@ -289,7 +273,11 @@ export default function ExperimentArena() {
           </div>
 
           <div className="experiment-grid">
-            <aside className="experiment-config">
+            <aside
+              className="experiment-config"
+              data-lab-reveal
+              data-lab-delay="60"
+            >
               <div className="config-title">
                 <WandSparkles size={16} />
                 <span>Experiment setup</span>
@@ -360,7 +348,7 @@ export default function ExperimentArena() {
               </p>
             </aside>
 
-            <div className="agent-arena">
+            <div className="agent-arena" data-lab-reveal data-lab-delay="110">
               <AgentLane
                 name="primary"
                 route="local-primary"
@@ -380,7 +368,11 @@ export default function ExperimentArena() {
               />
             </div>
 
-            <section className="telemetry-panel">
+            <section
+              className="telemetry-panel"
+              data-lab-reveal
+              data-lab-delay="80"
+            >
               <header>
                 <span>
                   <Activity size={15} /> Inference telemetry
@@ -443,7 +435,11 @@ export default function ExperimentArena() {
               </div>
             </section>
 
-            <section className="judge-panel">
+            <section
+              className="judge-panel"
+              data-lab-reveal
+              data-lab-delay="130"
+            >
               <header>
                 <span>
                   <Check size={15} /> Deterministic judge
@@ -511,7 +507,7 @@ export default function ExperimentArena() {
         </section>
 
         <section className="rag-section" id="pipeline">
-          <div className="rag-copy">
+          <div className="rag-copy" data-lab-reveal>
             <p className="ai-kicker">
               <DatabaseZap size={15} /> RAG pipeline forge
             </p>
@@ -529,7 +525,7 @@ export default function ExperimentArena() {
               Open pipeline builder · next slice <ChevronRight size={15} />
             </button>
           </div>
-          <div className="rag-canvas">
+          <div className="rag-canvas" data-lab-reveal data-lab-delay="100">
             {[
               {
                 icon: <DatabaseZap size={17} />,
@@ -572,7 +568,7 @@ export default function ExperimentArena() {
           </div>
         </section>
 
-        <section className="model-registry" id="registry">
+        <section className="model-registry" id="registry" data-lab-reveal>
           <span>LLAMA.CPP / VULKAN</span>
           <span>LITELLM</span>
           <span>QWEN3 8B</span>
