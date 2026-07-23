@@ -373,7 +373,7 @@
     position: relative;
     min-height: min(900px, calc(100vh - 72px));
     width: 100%;
-    padding: clamp(72px, 8vw, 124px) 0 clamp(60px, 7vw, 100px);
+    padding: 92px 0 78px;
     overflow: hidden;
   }
 
@@ -854,7 +854,7 @@
   @media (max-width: 680px) {
     .cyber-hero {
       min-height: auto;
-      padding-top: 64px;
+      padding-top: 65px;
     }
     .cyber-hero h1 {
       font-size: clamp(46px, 14vw, 62px);
