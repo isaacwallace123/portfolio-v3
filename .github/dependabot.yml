@@ -1,57 +1,51 @@
 version: 2
+
+multi-ecosystem-groups:
+  application-dependencies:
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+  delivery-toolchain:
+    schedule:
+      interval: weekly
+    labels: [dependencies, infrastructure]
+
 updates:
   - package-ecosystem: npm
     directory: /
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    groups:
-      npm-development:
-        dependency-type: development
+    patterns: ["*"]
+    multi-ecosystem-group: application-dependencies
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: nuget
     directory: /
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+    patterns: ["*"]
+    multi-ecosystem-group: application-dependencies
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+    patterns: ["*"]
+    multi-ecosystem-group: delivery-toolchain
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: docker
-    directory: /apps/web
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: docker
-    directory: /apps/admin
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: docker
-    directory: /apps/cyberlab
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: docker
-    directory: /apps/homelab
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: docker
-    directory: /apps/ailab
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: docker
-    directory: /apps/auth
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: docker
-    directory: /apps/api
-    schedule:
-      interval: weekly
+    directories:
+      - /apps/web
+      - /apps/admin
+      - /apps/cyberlab
+      - /apps/homelab
+      - /apps/ailab
+      - /apps/auth
+      - /apps/api
+    patterns: ["*"]
+    multi-ecosystem-group: delivery-toolchain
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
