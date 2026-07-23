@@ -62,6 +62,42 @@ public sealed class RunBroker
         }
     }
 
+    // Allowlisted operator decisions per scenario, each a merge-patch fragment on the LabRun spec.
+    // The decisions are code-coupled to the Composition's spec fields, so they live here rather than
+    // in loose config. A caller may only apply a decision this map defines for the run's scenario.
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, object>> Decisions =
+        new Dictionary<string, IReadOnlyDictionary<string, object>>
+        {
+            ["checkout-traffic-spike"] = new Dictionary<string, object>
+            {
+                ["scale"] = new { apiReplicas = 6 },
+                ["cache"] = new { cacheReplicas = 1 },
+            },
+        };
+
+    public async Task<BrokerResult> SubmitDecisionAsync(string runId, string decisionId, CancellationToken ct)
+    {
+        var run = await GetRunAsync(runId, ct);
+        if (run is null)
+            return BrokerResult.Fail(404, "No such run.");
+        if (!Decisions.TryGetValue(run.ScenarioId, out var allowed) ||
+            !allowed.TryGetValue(decisionId, out var specPatch))
+            return BrokerResult.Fail(404, $"Decision '{decisionId}' is not available for this run.");
+
+        var patch = new k8s.Models.V1Patch(new { spec = specPatch }, k8s.Models.V1Patch.PatchType.MergePatch);
+        try
+        {
+            var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+                patch, LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
+            return BrokerResult.Accepted(RunView.From(Parse(updated)));
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogError(ex, "Failed to apply decision {Decision} to {RunId}.", decisionId, runId);
+            return BrokerResult.Fail(502, "The run controller rejected the decision.");
+        }
+    }
+
     public async Task<RunView?> GetRunAsync(string runId, CancellationToken ct)
     {
         try
@@ -111,5 +147,6 @@ public sealed class RunBroker
 public sealed record BrokerResult(RunView? Run, int Status, string? Error)
 {
     public static BrokerResult Ok(RunView run) => new(run, 201, null);
+    public static BrokerResult Accepted(RunView run) => new(run, 200, null);
     public static BrokerResult Fail(int status, string error) => new(null, status, error);
 }

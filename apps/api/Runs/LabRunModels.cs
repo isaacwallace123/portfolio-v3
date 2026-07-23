@@ -37,6 +37,10 @@ public sealed class LabRunSpec
     [JsonPropertyName("runId")] public string RunId { get; set; } = "";
     [JsonPropertyName("resourceClass")] public string ResourceClass { get; set; } = "standard";
     [JsonPropertyName("ttlSeconds")] public int TtlSeconds { get; set; } = 900;
+
+    // Decision-driven fields. Nullable so create omits them and the XRD defaults (3 / 0) apply.
+    [JsonPropertyName("apiReplicas")] public int? ApiReplicas { get; set; }
+    [JsonPropertyName("cacheReplicas")] public int? CacheReplicas { get; set; }
 }
 
 public sealed class LabRunStatus
@@ -60,9 +64,12 @@ public sealed record RunView(
     string Status,
     string? Namespace,
     int TtlSeconds,
-    DateTime? CreatedAt)
+    DateTime? CreatedAt,
+    int ApiReplicas,
+    bool CacheEnabled)
 {
-    // Map the LabRun's Crossplane conditions to a small, public lifecycle vocabulary.
+    // Map the LabRun's Crossplane conditions to a small, public lifecycle vocabulary, and surface the
+    // decision-driven state (replica count, cache tier) so a caller can see the effect of a decision.
     public static RunView From(LabRunResource r)
     {
         string status;
@@ -79,6 +86,8 @@ public sealed record RunView(
             status,
             r.Status?.Namespace,
             r.Spec.TtlSeconds,
-            r.Metadata.CreationTimestamp);
+            r.Metadata.CreationTimestamp,
+            r.Spec.ApiReplicas ?? 3,
+            (r.Spec.CacheReplicas ?? 0) > 0);
     }
 }

@@ -29,6 +29,14 @@ public static class RunEndpoints
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite);
 
+        app.MapPost("/v1/runs/{runId}/decisions", async (string runId, DecisionRequest req, RunBroker broker, CancellationToken ct) =>
+        {
+            var result = await broker.SubmitDecisionAsync(runId, req.DecisionId ?? "", ct);
+            return result.Run is not null
+                ? Results.Ok(result.Run)
+                : Results.Json(new { error = result.Error }, statusCode: result.Status);
+        }).RequireScope(ApiScopes.RunsWrite);
+
         app.MapDelete("/v1/runs/{runId}", async (string runId, RunBroker broker, CancellationToken ct) =>
         {
             var deleted = await broker.DeleteRunAsync(runId, ct);
@@ -38,3 +46,4 @@ public static class RunEndpoints
 }
 
 record CreateRunRequest(string? ScenarioId);
+record DecisionRequest(string? DecisionId);
