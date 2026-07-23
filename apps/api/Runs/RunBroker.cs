@@ -15,12 +15,14 @@ public sealed class RunBroker
 {
     private readonly IKubernetes _k8s;
     private readonly RunBrokerOptions _options;
+    private readonly EnvoyScraper _envoy;
     private readonly ILogger<RunBroker> _log;
 
-    public RunBroker(IKubernetes k8s, IOptions<RunBrokerOptions> options, ILogger<RunBroker> log)
+    public RunBroker(IKubernetes k8s, IOptions<RunBrokerOptions> options, EnvoyScraper envoy, ILogger<RunBroker> log)
     {
         _k8s = k8s;
         _options = options.Value;
+        _envoy = envoy;
         _log = log;
     }
 
@@ -142,9 +144,15 @@ public sealed class RunBroker
             // Metrics not available yet for this namespace — report zero usage.
         }
 
+        // Real request metrics from the run's Envoy gateway (null while the workload is starting).
+        var envoy = await _envoy.ScrapeAsync(runId, ns, ct);
+
         return new RunTelemetry(
             pods, (int)Math.Round(cpuMillis), (int)Math.Round(memMiB),
-            run.ApiReplicas, run.CacheEnabled);
+            run.ApiReplicas, run.CacheEnabled,
+            envoy?.RequestsPerSec ?? 0,
+            envoy?.P95LatencyMs ?? 0,
+            envoy?.ErrorRatePct ?? 0);
     }
 
     // metrics-server reports CPU in nanocores ("n") by convention; also handle m/u/cores.

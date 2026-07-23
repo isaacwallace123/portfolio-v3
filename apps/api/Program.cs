@@ -37,6 +37,7 @@ builder.Services.AddSingleton<IKubernetes>(_ =>
         : KubernetesClientConfiguration.BuildConfigFromConfigFile();
     return new Kubernetes(kube);
 });
+builder.Services.AddSingleton<EnvoyScraper>();
 builder.Services.AddScoped<RunBroker>();
 // Enforces run TTLs (deletes runs whose tab was closed without teardown), freeing capacity slots.
 builder.Services.AddHostedService<RunReaper>();

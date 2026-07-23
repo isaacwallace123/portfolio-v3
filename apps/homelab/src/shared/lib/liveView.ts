@@ -1,5 +1,4 @@
 import {
-  computeTelemetry,
   getRunSnapshot,
   type RunTelemetry,
   type RunView,
@@ -32,6 +31,9 @@ export interface RealRun {
     podCount: number;
     cpuMillicores: number;
     memoryMiB: number;
+    requestsPerSec: number;
+    p95LatencyMs: number;
+    errorRatePct: number;
   } | null;
 }
 
@@ -57,7 +59,6 @@ export function toLiveRunView(real: RealRun): LiveRunView {
   if (real.apiReplicas >= 6) accepted.add("scale");
   if (real.cacheEnabled) accepted.add("cache");
 
-  const model = computeTelemetry(scenario, narrativeElapsed, accepted);
   const snap = getRunSnapshot(scenario, narrativeElapsed);
 
   // Treat the run as "running" once its pods are measured, not only when the LabRun's Ready condition
@@ -70,11 +71,26 @@ export function toLiveRunView(real: RealRun): LiveRunView {
         ? "running"
         : "provisioning";
 
-  // Model drives the incident signals; real cluster state overrides replicas + cache.
+  // 100% real telemetry — request rate, p95, and error rate are measured by the run's Envoy gateway;
+  // replicas and cache reflect actual cluster state. Score and Postgres load are derived from those
+  // real signals (there is no telemetry model any more).
+  const t = real.telemetry;
+  const target =
+    scenario.telemetry?.kind === "traffic-spike"
+      ? scenario.telemetry.latencyTargetMs
+      : 120;
+  const p95 = t?.p95LatencyMs ?? 0;
+  const errRate = t?.errorRatePct ?? 0;
+  const pressured = p95 > target || errRate > 1;
   const telemetry: RunTelemetry = {
-    ...model,
+    requestsPerSec: t?.requestsPerSec ?? 0,
+    p95LatencyMs: p95,
+    latencyTargetMs: target,
+    errorRatePct: errRate,
     apiReplicas: real.apiReplicas,
+    postgresCpuPct: pressured ? Math.min(99, 40 + Math.round(p95 / 60)) : 28,
     cacheActive: real.cacheEnabled,
+    score: Math.max(0, 100 - (p95 > target ? 30 : 0) - (errRate > 1 ? 25 : 0)),
   };
 
   const acceptedDecisions = [...accepted].map((id) => {

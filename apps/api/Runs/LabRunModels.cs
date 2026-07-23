@@ -63,7 +63,11 @@ public sealed record RunTelemetry(
     int CpuMillicores,
     int MemoryMiB,
     int ApiReplicas,
-    bool CacheEnabled);
+    bool CacheEnabled,
+    // Real request metrics scraped from the run's Envoy gateway.
+    int RequestsPerSec,
+    int P95LatencyMs,
+    double ErrorRatePct);
 
 // The sanitized projection returned to API clients. No raw Kubernetes objects, conditions, or labels
 // cross this boundary — only the run's identity, lifecycle phase, and envelope.
