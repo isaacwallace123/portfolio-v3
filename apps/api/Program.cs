@@ -1,4 +1,6 @@
 using IsaacWallace.Api.Auth;
+using IsaacWallace.Api.Runs;
+using k8s;
 using Microsoft.AspNetCore.HttpOverrides;
 using Scalar.AspNetCore;
 
@@ -24,6 +26,18 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
 
 // API-key authentication, scope authorization, and per-caller rate limiting.
 builder.Services.AddHomelabApiAuth(config);
+
+// HomeOps run-broker: creates Crossplane LabRun objects on the cluster. In a pod it uses the
+// mounted ServiceAccount (scoped to LabRuns only); on a dev box it uses the local kubeconfig.
+builder.Services.Configure<RunBrokerOptions>(config.GetSection(RunBrokerOptions.SectionName));
+builder.Services.AddSingleton<IKubernetes>(_ =>
+{
+    var kube = KubernetesClientConfiguration.IsInCluster()
+        ? KubernetesClientConfiguration.InClusterConfig()
+        : KubernetesClientConfiguration.BuildConfigFromConfigFile();
+    return new Kubernetes(kube);
+});
+builder.Services.AddScoped<RunBroker>();
 
 builder.Services.AddOpenApi(options =>
 {
@@ -65,5 +79,8 @@ app.MapGet("/v1/me", (HttpContext ctx) =>
     return Results.Ok(new { keyId = record.Id, name = record.Name, scopes = record.Scopes });
 })
 .RequireApiKey();
+
+// HomeOps run-broker: /v1/scenarios + /v1/runs (create/list/get/delete), gated by runs:* scopes.
+app.MapRunEndpoints();
 
 app.Run();

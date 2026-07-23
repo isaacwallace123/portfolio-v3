@@ -11,6 +11,7 @@
   <ItemGroup>
     <!-- Identity/auth deliberately absent — that lives in apps/auth-service now. These stay so the
          general application API can grow real, DB-backed endpoints without another dependency pass. -->
+    <PackageReference Include="KubernetesClient" Version="19.0.2" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.*" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.*" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.*" />
