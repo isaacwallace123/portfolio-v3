@@ -24,7 +24,7 @@ public sealed partial class EnvoyScraper(ILogger<EnvoyScraper> log)
         try
         {
             a = Parse(await http.GetStringAsync(url, ct));
-            await Task.Delay(1000, ct);
+            await Task.Delay(2000, ct);
             b = Parse(await http.GetStringAsync(url, ct));
         }
         catch (Exception ex)
