@@ -82,6 +82,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   { name: portfolio-secrets, key: Auth__GitHub__ClientSecret }
+            # Shared secret that resource servers (the api) present to /auth/apikeys/introspect.
+            # Empty disables introspection (fail closed).
+            - name: Auth__IntrospectionToken
+              valueFrom:
+                secretKeyRef:
+                  { name: portfolio-secrets, key: Auth__IntrospectionToken }
           ports:
             - containerPort: 8080
               name: http

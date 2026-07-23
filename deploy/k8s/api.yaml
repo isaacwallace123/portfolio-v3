@@ -5,6 +5,18 @@
 #
 # The Postgres connection string is wired in ready for the first data endpoint; the current build
 # only serves /health and does not open a connection.
+#
+# The api is also the HomeOps run-broker: it creates Crossplane LabRun objects with the
+# `homeops-broker` ServiceAccount below, which is bound (in the homelab repo) to a ClusterRole scoped
+# to LabRun CRUD + metrics read — nothing else. In-cluster config is picked up automatically.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: homeops-broker
+  namespace: portfolio
+  labels:
+    app: api
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,6 +34,7 @@ spec:
       labels:
         app: api
     spec:
+      serviceAccountName: homeops-broker
       securityContext:
         seccompProfile:
           type: RuntimeDefault
@@ -45,6 +58,15 @@ spec:
                 secretKeyRef:
                   name: portfolio-secrets
                   key: ConnectionStrings__Postgres
+            # API-key validation: the api holds no key material — it introspects against the auth
+            # service (same namespace) using a shared internal token.
+            - name: ApiAuth__AuthBaseUrl
+              value: http://auth-service
+            - name: ApiAuth__IntrospectionToken
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: Auth__IntrospectionToken
           ports:
             - containerPort: 8080
               name: http

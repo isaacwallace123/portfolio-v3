@@ -32,6 +32,17 @@ spec:
             runAsGroup: 1001
             capabilities:
               drop: ["ALL"]
+          env:
+            # Live cluster provisioning: the /api/live/* routes proxy (server-side) to the api with a
+            # scoped runs:write key. The key stays server-side; the browser never sees it. An empty
+            # HOMELAB_RUNS_KEY disables the live panel until a key is issued and sealed.
+            - name: HOMELAB_API_URL
+              value: http://api
+            - name: HOMELAB_RUNS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: HOMELAB_RUNS_KEY
           ports:
             - containerPort: 3000
               name: http
