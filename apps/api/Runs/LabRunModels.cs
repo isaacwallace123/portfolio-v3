@@ -56,6 +56,15 @@ public sealed class LabRunCondition
     [JsonPropertyName("reason")] public string? Reason { get; set; }
 }
 
+// Real, sanitized run telemetry: measured resource usage of the run's workload (from metrics-server)
+// plus the decision-driven state. Aggregate numbers only — no pod names, specs, or labels.
+public sealed record RunTelemetry(
+    int PodCount,
+    int CpuMillicores,
+    int MemoryMiB,
+    int ApiReplicas,
+    bool CacheEnabled);
+
 // The sanitized projection returned to API clients. No raw Kubernetes objects, conditions, or labels
 // cross this boundary — only the run's identity, lifecycle phase, and envelope.
 public sealed record RunView(

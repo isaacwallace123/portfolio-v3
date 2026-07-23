@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json.Serialization;
 using k8s;
@@ -112,6 +113,60 @@ public sealed class RunBroker
         }
     }
 
+    // Real telemetry: sum the run namespace's actual CPU/memory usage from metrics-server, plus the
+    // decision-driven state. Returns null only when the run itself is gone; if metrics aren't ready
+    // yet (pods still starting), usage reads as zero rather than failing.
+    public async Task<RunTelemetry?> GetTelemetryAsync(string runId, CancellationToken ct)
+    {
+        var run = await GetRunAsync(runId, ct);
+        if (run is null) return null;
+        var ns = run.Namespace ?? runId;
+
+        int pods = 0;
+        double cpuMillis = 0, memMiB = 0;
+        try
+        {
+            var obj = await _k8s.CustomObjects.ListNamespacedCustomObjectAsync(
+                "metrics.k8s.io", "v1beta1", ns, "pods", cancellationToken: ct);
+            var list = KubernetesJson.Deserialize<PodMetricsList>(KubernetesJson.Serialize(obj));
+            pods = list.Items.Count;
+            foreach (var pod in list.Items)
+                foreach (var c in pod.Containers)
+                {
+                    cpuMillis += ParseCpuMillicores(c.Usage.Cpu);
+                    memMiB += ParseMemoryMiB(c.Usage.Memory);
+                }
+        }
+        catch (HttpOperationException)
+        {
+            // Metrics not available yet for this namespace — report zero usage.
+        }
+
+        return new RunTelemetry(
+            pods, (int)Math.Round(cpuMillis), (int)Math.Round(memMiB),
+            run.ApiReplicas, run.CacheEnabled);
+    }
+
+    // metrics-server reports CPU in nanocores ("n") by convention; also handle m/u/cores.
+    private static double ParseCpuMillicores(string q)
+    {
+        q = q.Trim();
+        if (q.EndsWith('n')) return double.Parse(q[..^1], CultureInfo.InvariantCulture) / 1_000_000.0;
+        if (q.EndsWith('u')) return double.Parse(q[..^1], CultureInfo.InvariantCulture) / 1_000.0;
+        if (q.EndsWith('m')) return double.Parse(q[..^1], CultureInfo.InvariantCulture);
+        return double.Parse(q, CultureInfo.InvariantCulture) * 1000.0;
+    }
+
+    private static double ParseMemoryMiB(string q)
+    {
+        q = q.Trim();
+        double v(int n) => double.Parse(q[..^n], CultureInfo.InvariantCulture);
+        if (q.EndsWith("Ki")) return v(2) / 1024.0;
+        if (q.EndsWith("Mi")) return v(2);
+        if (q.EndsWith("Gi")) return v(2) * 1024.0;
+        return double.Parse(q, CultureInfo.InvariantCulture) / (1024.0 * 1024.0); // bytes
+    }
+
     public async Task<bool> DeleteRunAsync(string runId, CancellationToken ct)
     {
         try
@@ -141,6 +196,28 @@ public sealed class RunBroker
     private sealed class LabRunList
     {
         [JsonPropertyName("items")] public List<LabRunResource> Items { get; set; } = [];
+    }
+
+    // metrics.k8s.io PodMetrics shape (only the fields we sum).
+    private sealed class PodMetricsList
+    {
+        [JsonPropertyName("items")] public List<PodMetrics> Items { get; set; } = [];
+    }
+
+    private sealed class PodMetrics
+    {
+        [JsonPropertyName("containers")] public List<ContainerMetrics> Containers { get; set; } = [];
+    }
+
+    private sealed class ContainerMetrics
+    {
+        [JsonPropertyName("usage")] public Usage Usage { get; set; } = new();
+    }
+
+    private sealed class Usage
+    {
+        [JsonPropertyName("cpu")] public string Cpu { get; set; } = "0";
+        [JsonPropertyName("memory")] public string Memory { get; set; } = "0";
     }
 }
 

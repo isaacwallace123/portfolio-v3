@@ -29,6 +29,14 @@ public static class RunEndpoints
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite);
 
+        app.MapGet("/v1/runs/{runId}/telemetry", async (string runId, RunBroker broker, CancellationToken ct) =>
+        {
+            var telemetry = await broker.GetTelemetryAsync(runId, ct);
+            return telemetry is null
+                ? Results.NotFound(new { error = "No such run." })
+                : Results.Ok(telemetry);
+        }).RequireScope(ApiScopes.RunsRead);
+
         app.MapPost("/v1/runs/{runId}/decisions", async (string runId, DecisionRequest req, RunBroker broker, CancellationToken ct) =>
         {
             var result = await broker.SubmitDecisionAsync(runId, req.DecisionId ?? "", ct);
