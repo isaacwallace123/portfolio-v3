@@ -16,5 +16,7 @@ export async function GET(
       { status: 404 },
     );
   }
-  return NextResponse.json(report, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json(report, {
+    headers: { "Cache-Control": "no-store" },
+  });
 }
