@@ -12,7 +12,9 @@ import {
   Gauge,
   GitBranch,
   Play,
+  RefreshCw,
   RotateCcw,
+  Sliders,
   TimerReset,
   Trash2,
   Waves,
@@ -37,6 +39,7 @@ import {
   getLiveReport,
   getLiveTrace,
   liveDecision,
+  practiceAction,
   teardownLiveRun,
   type LivePlatformStatus,
   type LiveReport,
@@ -51,8 +54,45 @@ const severityClass: Record<EventSeverity, string> = {
   critical: "event-critical",
 };
 
-// No run means no workload and therefore no workload telemetry. Showing zeroes is intentional:
-// the arena never substitutes a designed baseline for a measurement.
+const sandboxActionGroups = [
+  {
+    label: "API Replicas",
+    actions: [
+      ["scale-1", "1 replica"],
+      ["scale-3", "3 replicas"],
+      ["scale-6", "6 replicas"],
+    ],
+  },
+  {
+    label: "Release Track",
+    actions: [
+      ["release-stable", "Stable v1.4"],
+      ["release-candidate", "Candidate (Regression)"],
+    ],
+  },
+  {
+    label: "Traffic Load",
+    actions: [
+      ["traffic-on", "Start k6 Load"],
+      ["traffic-off", "Stop k6 Load"],
+    ],
+  },
+  {
+    label: "Cache Tier",
+    actions: [
+      ["cache-on", "Enable Redis"],
+      ["cache-off", "Disable Redis"],
+    ],
+  },
+  {
+    label: "Placement",
+    actions: [
+      ["move-apps", "Apps Worker"],
+      ["move-infra", "Infra Worker"],
+    ],
+  },
+] as const;
+
 function baselineTelemetry(): RunTelemetry {
   return {
     requestsPerSec: 0,
@@ -94,8 +134,8 @@ function StatusChip({ status }: { status: string }) {
   );
 }
 
-export default function OperationsArena() {
-  const [scenarioId, setScenarioId] = useState(trafficSpikeScenario.id);
+export default function OperationsArena({ defaultScenarioId }: { defaultScenarioId?: string }) {
+  const [scenarioId, setScenarioId] = useState(defaultScenarioId ?? trafficSpikeScenario.id);
   const scenario = getHomelabScenario(scenarioId);
   const [liveEnabled, setLiveEnabled] = useState<boolean | null>(null);
   const [run, setRun] = useState<LiveRunView | null>(null);
@@ -103,7 +143,9 @@ export default function OperationsArena() {
   const [trace, setTrace] = useState<LiveTrace | null>(null);
   const [report, setReport] = useState<LiveReport | null>(null);
   const [busy, setBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activeConsoleTab, setActiveConsoleTab] = useState<"decisions" | "sandbox">("decisions");
   const pollRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -182,6 +224,24 @@ export default function OperationsArena() {
     [run],
   );
 
+  const executeSandboxAction = useCallback(
+    async (actionId: string) => {
+      if (!run) return;
+      setActionBusy(actionId);
+      setError(null);
+      try {
+        setRun(await practiceAction(run.runId, actionId));
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Sandbox action rejected.",
+        );
+      } finally {
+        setActionBusy(null);
+      }
+    },
+    [run],
+  );
+
   const teardown = useCallback(async () => {
     if (!run) return;
     setBusy(true);
@@ -239,16 +299,14 @@ export default function OperationsArena() {
         <section className="hero">
           <div className="hero-copy" data-lab-reveal>
             <p className="kicker">
-              <Waves size={15} /> Interactive platform engineering
+              <Waves size={15} /> Interactive SRE & Platform Engineering Arena
             </p>
             <h1>
               Don&apos;t tour the infrastructure. <em>Operate it.</em>
             </h1>
             <p className="hero-lede">
-              Queue a disposable production incident on the{" "}
-              <strong>live homelab Kubernetes cluster</strong>. A real isolated
-              namespace and workload spin up; read the signals, make the call,
-              and tear it down.
+              Queue a disposable production incident or launch an interactive practice cluster on the{" "}
+              <strong>live homelab Kubernetes cluster</strong>. Read signals, execute operator decisions, and inspect real-time reconciliation.
             </p>
             <div className="hero-actions">
               <button
@@ -265,7 +323,7 @@ export default function OperationsArena() {
                       ? "Live control offline"
                       : run
                         ? "Tear down to run again"
-                        : "Queue live drill"}
+                        : `Queue ${scenario.title}`}
               </button>
               {run ? (
                 <button
@@ -273,7 +331,7 @@ export default function OperationsArena() {
                   onClick={teardown}
                   disabled={busy}
                 >
-                  <Trash2 size={15} /> Tear down
+                  <Trash2 size={15} /> Tear down workspace
                 </button>
               ) : (
                 <a className="text-link" href="#arena">
@@ -297,7 +355,7 @@ export default function OperationsArena() {
               <span>PLATFORM / NOW</span>
               <span className="live-dot">
                 {platform?.cluster === "ready"
-                  ? "LIVE CLUSTER"
+                  ? "LIVE K3S CLUSTER"
                   : "CONTROL PLANE"}
               </span>
             </div>
@@ -326,8 +384,7 @@ export default function OperationsArena() {
               </span>
             </div>
             <p>
-              Public controls are allowlisted. Personal workloads remain outside
-              the drill boundary.
+              Public controls are allowlisted. Personal workloads remain isolated outside the drill boundary.
             </p>
           </div>
         </section>
@@ -355,56 +412,128 @@ export default function OperationsArena() {
           </div>
 
           <div className="arena-grid">
+            {/* Upgraded 2D Runtime Topology Canvas */}
             <section className="panel topology-panel">
               <div className="panel-title">
                 <span>
-                  <CloudCog size={16} /> Runtime topology
+                  <CloudCog size={16} /> Interactive Runtime Topology
                 </span>
                 <small>namespace / {namespace}</small>
               </div>
-              <div className="topology-flow">
-                <div className="topology-node edge">
-                  <Zap size={18} />
-                  <b>k6 edge</b>
-                  <small>{tel.requestsPerSec} req/s</small>
-                </div>
-                <ArrowRight className="flow-arrow" />
-                <div className="topology-node">
-                  <GitBranch size={18} />
-                  <b>Envoy</b>
-                  <small>gateway</small>
-                </div>
-                <ArrowRight className="flow-arrow" />
-                <div
-                  className={`topology-node api ${pressure ? "node-hot" : ""}`}
-                >
-                  <Box size={18} />
-                  <b>Checkout API</b>
-                  <small>{tel.apiReplicas} replicas</small>
-                  <div className="pod-row">
-                    {Array.from({ length: tel.apiReplicas }).map((_, index) => (
-                      <i key={index} />
-                    ))}
-                  </div>
-                </div>
-                <ArrowRight className="flow-arrow" />
-                <div className="data-stack">
+
+              <div className="runtime-topology-canvas">
+                {/* SVG Flow Connections */}
+                <svg className="runtime-flow-svg" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="flowGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="var(--mint)" stopOpacity="0.8" />
+                      <stop offset="100%" stopColor="var(--acid)" stopOpacity="0.8" />
+                    </linearGradient>
+                  </defs>
+                  {/* k6 -> Envoy */}
+                  <path
+                    d="M 110 65 L 190 65"
+                    stroke="url(#flowGlow)"
+                    strokeWidth={tel.requestsPerSec > 0 ? 3 : 1.5}
+                    strokeDasharray={tel.requestsPerSec > 0 ? "6,4" : undefined}
+                    className={tel.requestsPerSec > 0 ? "animated-traffic-line" : ""}
+                  />
+                  {/* Envoy -> Checkout API */}
+                  <path
+                    d="M 290 65 L 370 65"
+                    stroke={pressure ? "var(--red)" : "url(#flowGlow)"}
+                    strokeWidth={tel.requestsPerSec > 0 ? 3 : 1.5}
+                    strokeDasharray={tel.requestsPerSec > 0 ? "6,4" : undefined}
+                    className={tel.requestsPerSec > 0 ? "animated-traffic-line" : ""}
+                  />
+                  {/* Checkout API -> Postgres */}
+                  <path
+                    d="M 520 65 L 590 40"
+                    stroke={tel.postgresCpuPct > 50 ? "var(--amber)" : "var(--mint)"}
+                    strokeWidth={1.5}
+                  />
+                  {/* Checkout API -> Redis */}
+                  <path
+                    d="M 520 65 L 590 100"
+                    stroke={cached ? "var(--acid)" : "rgba(141, 167, 154, 0.3)"}
+                    strokeWidth={1.5}
+                    strokeDasharray={cached ? "4,4" : undefined}
+                  />
+                </svg>
+
+                <div className="runtime-node-grid">
+                  {/* Node 1: k6 Load Generator */}
                   <div
-                    className={`topology-node ${pressure ? "node-warn" : ""}`}
+                    className={`rt-node ${tel.requestsPerSec > 0 ? "node-active" : ""}`}
                   >
-                    <Database size={17} />
-                    <b>Postgres</b>
-                    <small>
-                      {pressure ? `${tel.postgresCpuPct}% CPU` : "healthy"}
-                    </small>
+                    <div className="rt-node-icon">
+                      <Zap size={18} />
+                    </div>
+                    <div className="rt-node-info">
+                      <b>k6 edge</b>
+                      <small>{tel.requestsPerSec} req/s</small>
+                    </div>
                   </div>
-                  <div className={`topology-node ${cached ? "node-good" : ""}`}>
-                    <Database size={17} />
-                    <b>Redis</b>
-                    <small>{cached ? "cache active" : "standby"}</small>
+
+                  {/* Flow Arrow */}
+                  <ArrowRight className="rt-flow-arrow" />
+
+                  {/* Node 2: Envoy Gateway */}
+                  <div className="rt-node">
+                    <div className="rt-node-icon">
+                      <GitBranch size={18} />
+                    </div>
+                    <div className="rt-node-info">
+                      <b>Envoy</b>
+                      <small>gateway</small>
+                    </div>
+                  </div>
+
+                  {/* Flow Arrow */}
+                  <ArrowRight className="rt-flow-arrow" />
+
+                  {/* Node 3: Checkout API Workload */}
+                  <div className={`rt-node node-workload ${pressure ? "node-hot" : ""}`}>
+                    <div className="rt-node-head">
+                      <Box size={18} />
+                      <div>
+                        <b>Checkout API</b>
+                        <small>{tel.apiReplicas} replicas</small>
+                      </div>
+                    </div>
+                    <div className="rt-pod-grid">
+                      {Array.from({ length: Math.max(1, tel.apiReplicas) }).map((_, idx) => (
+                        <span key={idx} className={`rt-pod ${pressure ? "pod-pressure" : "pod-healthy"}`}>
+                          <i /> pod-{idx + 1}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Flow Arrow */}
+                  <ArrowRight className="rt-flow-arrow" />
+
+                  {/* Node 4: Data Tier (Postgres & Redis) */}
+                  <div className="rt-data-stack">
+                    <div className={`rt-node ${tel.postgresCpuPct > 50 ? "node-warn" : ""}`}>
+                      <Database size={16} />
+                      <div>
+                        <b>Postgres</b>
+                        <small>{tel.postgresCpuPct > 0 ? `${tel.postgresCpuPct}% CPU` : "healthy"}</small>
+                      </div>
+                    </div>
+                    <div className={`rt-node ${cached ? "node-good" : "node-idle"}`}>
+                      <Database size={16} />
+                      <div>
+                        <b>Redis</b>
+                        <small>{cached ? "cache active" : "standby"}</small>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
+
+              {/* Live Telemetry Bar */}
               <div className="metrics-row">
                 <Metric
                   label="Requests"
@@ -432,51 +561,105 @@ export default function OperationsArena() {
               </div>
             </section>
 
+            {/* Combined Operator Console & Sandbox Controls */}
             <aside className="panel decision-panel">
               <div className="panel-title">
-                <span>
-                  <CircleGauge size={16} /> Operator console
-                </span>
+                <div className="console-tab-buttons">
+                  <button
+                    className={activeConsoleTab === "decisions" ? "active" : ""}
+                    onClick={() => setActiveConsoleTab("decisions")}
+                  >
+                    <CircleGauge size={15} /> Incident Decisions
+                  </button>
+                  <button
+                    className={activeConsoleTab === "sandbox" ? "active" : ""}
+                    onClick={() => setActiveConsoleTab("sandbox")}
+                  >
+                    <Sliders size={15} /> Sandbox Controls
+                  </button>
+                </div>
                 <small>{phaseLabel}</small>
               </div>
-              <p className="decision-intro">
-                Interventions become available when the incident begins. Each
-                decision changes the <strong>real</strong> workload —
-                deployments roll, capacity changes, or placement reconciles.
-              </p>
-              <div className="decision-list">
-                {scenario.decisions.map((decision) => {
-                  const selected = acceptedDecisions.some(
-                    (d) => d.id === decision.id,
-                  );
-                  const available =
-                    run?.availableDecisions.includes(decision.id) ?? false;
-                  return (
+
+              {activeConsoleTab === "decisions" ? (
+                <>
+                  <p className="decision-intro">
+                    Interventions modify the <strong>live Kubernetes workload</strong>—rollout updates, scale pods, or re-balance placement.
+                  </p>
+                  <div className="decision-list">
+                    {scenario.decisions.map((decision) => {
+                      const selected = acceptedDecisions.some(
+                        (d) => d.id === decision.id,
+                      );
+                      const available =
+                        run?.availableDecisions.includes(decision.id) ?? false;
+                      return (
+                        <button
+                          key={decision.id}
+                          onClick={() => intervene(decision.id)}
+                          disabled={!available || selected}
+                          className={selected ? "selected" : ""}
+                        >
+                          <span>
+                            {selected ? <Check size={16} /> : <Gauge size={16} />}
+                          </span>
+                          <span>
+                            <b>{decision.label}</b>
+                            <small>{decision.description}</small>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <div className="sandbox-control-suite">
+                  <p className="decision-intro">
+                    Direct Crossplane reconciliation controls for testing custom failures and performance tuning.
+                  </p>
+                  <div className="sandbox-groups">
+                    {sandboxActionGroups.map((group) => (
+                      <fieldset key={group.label}>
+                        <legend>{group.label}</legend>
+                        <div className="sandbox-btn-row">
+                          {group.actions.map(([id, label]) => (
+                            <button
+                              key={id}
+                              onClick={() => executeSandboxAction(id)}
+                              disabled={!active || actionBusy !== null}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </fieldset>
+                    ))}
+                  </div>
+                  <div className="sandbox-utility-row">
                     <button
-                      key={decision.id}
-                      onClick={() => intervene(decision.id)}
-                      disabled={!available || selected}
-                      className={selected ? "selected" : ""}
+                      onClick={() => executeSandboxAction("restart")}
+                      disabled={!active || actionBusy !== null}
                     >
-                      <span>
-                        {selected ? <Check size={16} /> : <Gauge size={16} />}
-                      </span>
-                      <span>
-                        <b>{decision.label}</b>
-                        <small>{decision.description}</small>
-                      </span>
+                      <RefreshCw size={14} /> Rollout Restart
                     </button>
-                  );
-                })}
-              </div>
+                    <button
+                      onClick={() => executeSandboxAction("reset")}
+                      disabled={!active || actionBusy !== null}
+                    >
+                      <RotateCcw size={14} /> Reset Baseline
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {status === "idle" && (
                 <div className="console-empty">
                   <TimerReset size={22} />
-                  <b>No active drill</b>
+                  <b>No active workspace</b>
                   <span>
                     {liveEnabled === false
                       ? "Live provisioning is currently offline."
-                      : "Queue the scenario to provision its isolated namespace."}
+                      : "Queue a scenario or click Launch Workspace to spin up an isolated namespace."}
                   </span>
                 </div>
               )}
@@ -484,7 +667,7 @@ export default function OperationsArena() {
                 <div className="evidence-ready">
                   <Check size={18} />
                   <span>
-                    <b>Live on the cluster</b>
+                    <b>Live on K3s cluster</b>
                     <small>
                       namespace {namespace}
                       {pods !== null ? ` · ${pods} pods` : ""}
@@ -497,10 +680,11 @@ export default function OperationsArena() {
               )}
             </aside>
 
+            {/* Event Stream */}
             <section className="panel timeline-panel">
               <div className="panel-title">
                 <span>
-                  <Activity size={16} /> Correlated event stream
+                  <Activity size={16} /> Correlated Event Stream
                 </span>
                 <small>metrics · gitops · cluster</small>
               </div>
@@ -543,10 +727,11 @@ export default function OperationsArena() {
               </div>
             </section>
 
+            {/* Request Trace Waterfall */}
             <section className="panel trace-panel">
               <div className="panel-title">
                 <span>
-                  <GitBranch size={16} /> Request trace
+                  <GitBranch size={16} /> Request Trace
                 </span>
                 <small>
                   trace / {trace?.traceId.slice(0, 9) ?? "awaiting live spans"}
@@ -624,17 +809,17 @@ export default function OperationsArena() {
           </div>
         </section>
 
+        {/* Scenario Catalogue Carousel */}
         <section className="drills-section" id="drills">
           <div className="section-heading">
             <div>
               <p className="kicker">
-                <RotateCcw size={15} /> Scenario catalogue
+                <RotateCcw size={15} /> Scenario Catalogue
               </p>
               <h2>Practice the failure, not the diagram.</h2>
             </div>
             <p>
-              Each drill creates real disposable resources, captures evidence,
-              and tears itself down.
+              Each scenario creates real disposable Kubernetes resources, captures telemetry evidence, and tears itself down.
             </p>
           </div>
           <div className="drill-grid">
@@ -672,3 +857,4 @@ export default function OperationsArena() {
     </div>
   );
 }
+

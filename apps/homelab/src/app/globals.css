@@ -2120,7 +2120,7 @@ html[data-reduce-motion] *::after {
   line-height: 1.65;
 }
 
-/* ── Three.js topology ────────────────────────────────────────────────────── */
+/* ── 2D Live Topology Flowchart ───────────────────────────────────────────── */
 .topology-page {
   max-width: 1680px;
   width: 100%;
@@ -2157,30 +2157,375 @@ html[data-reduce-motion] *::after {
   border-right: 1px solid var(--line);
 }
 .topology-toolbar {
-  position: absolute;
-  inset: 0 0 auto;
-  z-index: 3;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
   background: rgba(3, 16, 12, 0.82);
   backdrop-filter: blur(14px);
 }
-.topology-toolbar small {
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(6, 16, 13, 0.6);
+  color: var(--muted);
+}
+.search-box input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--ink);
+  font-size: 11px;
+}
+.layer-pills {
+  display: flex;
+  gap: 6px;
+}
+.layer-pills button {
+  padding: 5px 10px;
+  font-size: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all var(--dur-fast) ease;
+}
+.layer-pills button.active,
+.layer-pills button:hover {
+  border-color: var(--mint);
+  color: var(--acid);
+  background: rgba(84, 232, 161, 0.08);
+}
+.topology-flow-grid {
+  position: relative;
+  height: calc(100% - 60px);
+  padding: 40px 24px 70px;
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  overflow-y: auto;
+}
+.topology-svg-connections {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+.active-edge {
+  filter: drop-shadow(0 0 6px var(--acid));
+}
+.layer-column {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-width: 170px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(177, 255, 203, 0.08);
+  border-radius: 12px;
+  background: rgba(6, 16, 13, 0.4);
+}
+.layer-col-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--ink-mid);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.layer-col-header i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--mint);
+}
+.dot-compute { background: #72a8ff !important; }
+.dot-network { background: #4de9dd !important; }
+.dot-platform { background: var(--mint) !important; }
+.dot-data { background: #d28cff !important; }
+.dot-observe { background: #ffc857 !important; }
+.dot-apps { background: var(--acid) !important; }
+
+.layer-col-nodes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.topology-node-card {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(9, 24, 20, 0.88);
+  cursor: pointer;
+  transition: all var(--dur-fast) ease;
+}
+.topology-node-card:hover,
+.topology-node-card.selected {
+  border-color: var(--mint);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(84, 232, 161, 0.15);
+}
+.node-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.status-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-dim);
+}
+.status-indicator.status-healthy { background: var(--mint); box-shadow: 0 0 6px var(--mint); }
+.status-indicator.status-degraded { background: var(--amber); }
+.status-indicator.status-unavailable { background: var(--red); }
+.node-kind-badge {
+  font-size: 8px;
+  font-family: ui-monospace, monospace;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.node-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.node-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.node-meta span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Runtime Topology Canvas & Console Controls ──────────────────────────── */
+.runtime-topology-canvas {
+  position: relative;
+  padding: 28px 20px;
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+.runtime-flow-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+.animated-traffic-line {
+  animation: trafficDash 1.2s linear infinite;
+}
+@keyframes trafficDash {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+.runtime-node-grid {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.rt-node {
+  min-width: 130px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: all var(--dur-fast) ease;
+}
+.rt-node:hover {
+  border-color: var(--mint);
+  box-shadow: 0 0 20px rgba(84, 232, 161, 0.1);
+}
+.rt-node.node-active {
+  border-color: var(--acid);
+  box-shadow: 0 0 20px rgba(184, 255, 106, 0.15);
+}
+.rt-node.node-hot {
+  border-color: var(--red);
+  box-shadow: 0 0 24px rgba(255, 106, 114, 0.2);
+  animation: nodePulse 2s infinite alternate;
+}
+@keyframes nodePulse {
+  0% { box-shadow: 0 0 10px rgba(255, 106, 114, 0.1); }
+  100% { box-shadow: 0 0 28px rgba(255, 106, 114, 0.35); }
+}
+.rt-node-icon {
+  color: var(--mint);
+}
+.rt-node-info b {
+  display: block;
+  font-size: 12px;
+}
+.rt-node-info small {
+  color: var(--muted);
+  font-size: 9px;
+  font-family: ui-monospace, monospace;
+}
+.node-workload {
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 170px;
+}
+.rt-node-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rt-pod-grid {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.rt-pod {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  font-size: 8px;
+  font-family: ui-monospace, monospace;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line);
+}
+.rt-pod i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+.rt-pod.pod-healthy i { background: var(--mint); }
+.rt-pod.pod-pressure i { background: var(--red); }
+.rt-flow-arrow {
+  color: var(--ink-dim);
+  flex-shrink: 0;
+}
+.rt-data-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.console-tab-buttons {
+  display: flex;
+  gap: 8px;
+}
+.console-tab-buttons button {
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
 }
-.three-host {
-  position: absolute;
-  inset: 0;
-  cursor: grab;
+.console-tab-buttons button.active {
+  border-color: var(--mint);
+  color: var(--acid);
+  background: rgba(84, 232, 161, 0.08);
 }
-.three-host:active {
-  cursor: grabbing;
+.sandbox-control-suite {
+  padding-top: 10px;
 }
-.three-host canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
+.sandbox-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 14px 0;
 }
+.sandbox-groups fieldset {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.sandbox-groups legend {
+  padding: 0 4px;
+  font-size: 8px;
+  font-family: ui-monospace, monospace;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.sandbox-btn-row {
+  display: flex;
+  gap: 6px;
+}
+.sandbox-btn-row button {
+  flex: 1;
+  padding: 6px;
+  font-size: 10px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink-mid);
+  cursor: pointer;
+}
+.sandbox-btn-row button:hover:not(:disabled) {
+  border-color: var(--mint);
+  color: var(--acid);
+}
+.sandbox-utility-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.sandbox-utility-row button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  font-size: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-mid);
+  cursor: pointer;
+}
+.sandbox-utility-row button:hover:not(:disabled) {
+  border-color: var(--acid);
+  color: var(--acid);
+}
+
 .topology-loading {
   height: 100%;
   display: grid;

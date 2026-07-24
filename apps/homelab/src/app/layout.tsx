@@ -17,8 +17,8 @@ export const metadata: Metadata = {
 
 const NAV_LINKS = [
   { href: "/", label: "Overview" },
+  { href: "/drills", label: "Operations & Drills" },
   { href: "/practice", label: "Practice cluster" },
-  { href: "/drills", label: "Incident drills" },
   { href: "/topology", label: "Live topology" },
 ] as const;
 
