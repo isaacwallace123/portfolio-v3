@@ -2120,7 +2120,7 @@ html[data-reduce-motion] *::after {
   line-height: 1.65;
 }
 
-/* ── 2D Live Topology Flowchart ───────────────────────────────────────────── */
+/* ── Railway-style Topology Flowchart ─────────────────────────────────────── */
 .topology-page {
   max-width: 1680px;
   width: 100%;
@@ -2208,139 +2208,35 @@ html[data-reduce-motion] *::after {
   color: var(--acid);
   background: rgba(84, 232, 161, 0.08);
 }
-.topology-flow-grid {
-  position: relative;
-  height: calc(100% - 60px);
-  padding: 40px 24px 70px;
-  display: flex;
-  gap: 16px;
-  overflow-x: auto;
-  overflow-y: auto;
-}
-.topology-svg-connections {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 1;
-}
-.active-edge {
-  filter: drop-shadow(0 0 6px var(--acid));
-}
-.layer-column {
-  position: relative;
-  z-index: 2;
-  flex: 1;
-  min-width: 170px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid rgba(177, 255, 203, 0.08);
-  border-radius: 12px;
-  background: rgba(6, 16, 13, 0.4);
-}
-.layer-col-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--ink-mid);
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--line);
-}
-.layer-col-header i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--mint);
-}
-.dot-compute {
-  background: #72a8ff !important;
-}
-.dot-network {
-  background: #4de9dd !important;
-}
-.dot-platform {
-  background: var(--mint) !important;
-}
-.dot-data {
-  background: #d28cff !important;
-}
-.dot-observe {
-  background: #ffc857 !important;
-}
-.dot-apps {
-  background: var(--acid) !important;
-}
 
-.layer-col-nodes {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.topology-node-card {
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: rgba(9, 24, 20, 0.88);
-  cursor: pointer;
-  transition: all var(--dur-fast) ease;
-}
-.topology-node-card:hover,
-.topology-node-card.selected {
-  border-color: var(--mint);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 20px rgba(84, 232, 161, 0.15);
-}
-.node-card-head {
+/* ── SVG flowchart canvas ──────────────────────────────────── */
+.topo-svg-wrap {
+  height: calc(100% - 52px - 44px); /* subtract toolbar + legend */
+  overflow: auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
+  justify-content: center;
+  padding: 20px;
 }
-.status-indicator {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ink-dim);
+.topo-flowchart-svg {
+  width: 100%;
+  height: auto;
+  min-height: 100%;
+  max-height: 100%;
 }
-.status-indicator.status-healthy {
-  background: var(--mint);
-  box-shadow: 0 0 6px var(--mint);
+.topo-node-g rect {
+  transition:
+    stroke var(--dur-base) ease,
+    filter var(--dur-base) ease;
 }
-.status-indicator.status-degraded {
-  background: var(--amber);
+.topo-node-g:hover rect {
+  filter: drop-shadow(0 8px 22px rgba(84, 232, 161, 0.2));
 }
-.status-indicator.status-unavailable {
-  background: var(--red);
+:root {
+  --topo-card: rgba(12, 30, 24, 0.92);
 }
-.node-kind-badge {
-  font-size: 8px;
-  font-family: ui-monospace, monospace;
-  color: var(--ink-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.node-title {
-  margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink);
-}
-.node-meta {
-  display: flex;
-  gap: 12px;
-  font-size: 10px;
-  color: var(--muted);
-}
-.node-meta span {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+:root[data-theme="light"] {
+  --topo-card: rgba(240, 250, 245, 0.92);
 }
 
 /* ── Runtime Topology Canvas & Console Controls ──────────────────────────── */
