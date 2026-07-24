@@ -16,23 +16,38 @@ public sealed class RunBroker
     private readonly IKubernetes _k8s;
     private readonly RunBrokerOptions _options;
     private readonly EnvoyScraper _envoy;
+    private readonly TraceScraper _traces;
+    private readonly PlatformInventory _inventory;
     private readonly ILogger<RunBroker> _log;
 
-    public RunBroker(IKubernetes k8s, IOptions<RunBrokerOptions> options, EnvoyScraper envoy, ILogger<RunBroker> log)
+    public RunBroker(
+        IKubernetes k8s,
+        IOptions<RunBrokerOptions> options,
+        EnvoyScraper envoy,
+        TraceScraper traces,
+        PlatformInventory inventory,
+        ILogger<RunBroker> log)
     {
         _k8s = k8s;
         _options = options.Value;
         _envoy = envoy;
+        _traces = traces;
+        _inventory = inventory;
         _log = log;
     }
 
-    public IReadOnlyList<string> Scenarios => _options.Scenarios;
+    public IReadOnlyList<ScenarioDefinition> Scenarios =>
+        _options.Scenarios
+            .Select(id => ScenarioDefinitions.All.GetValueOrDefault(id))
+            .OfType<ScenarioDefinition>()
+            .ToArray();
 
     public async Task<BrokerResult> CreateRunAsync(string scenarioId, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(scenarioId))
             return BrokerResult.Fail(400, "scenarioId is required.");
-        if (!_options.Scenarios.Contains(scenarioId))
+        if (!_options.Scenarios.Contains(scenarioId) ||
+            !ScenarioDefinitions.All.TryGetValue(scenarioId, out var scenario))
             return BrokerResult.Fail(404, $"Unknown scenario '{scenarioId}'.");
 
         var active = (await ListAsync(ct)).Count(r => r.Status is "provisioning" or "ready");
@@ -49,6 +64,13 @@ public sealed class RunBroker
                 RunId = runId,
                 ResourceClass = "standard",
                 TtlSeconds = _options.DefaultTtlSeconds,
+                ApiReplicas = scenario.InitialApiReplicas,
+                CacheReplicas = scenario.InitialCacheReplicas,
+                ReleaseTrack = scenario.InitialReleaseTrack,
+                DataState = scenario.InitialDataState,
+                TargetPool = scenario.InitialTargetPool,
+                LoadReplicas = scenarioId == "practice-cluster" ? 0 : 1,
+                RestartToken = "baseline",
             },
         };
 
@@ -65,29 +87,40 @@ public sealed class RunBroker
         }
     }
 
-    // Allowlisted operator decisions per scenario, each a merge-patch fragment on the LabRun spec.
-    // The decisions are code-coupled to the Composition's spec fields, so they live here rather than
-    // in loose config. A caller may only apply a decision this map defines for the run's scenario.
-    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, object>> Decisions =
-        new Dictionary<string, IReadOnlyDictionary<string, object>>
-        {
-            ["checkout-traffic-spike"] = new Dictionary<string, object>
-            {
-                ["scale"] = new { apiReplicas = 6 },
-                ["cache"] = new { cacheReplicas = 1 },
-            },
-        };
-
     public async Task<BrokerResult> SubmitDecisionAsync(string runId, string decisionId, CancellationToken ct)
     {
-        var run = await GetRunAsync(runId, ct);
-        if (run is null)
+        var resource = await GetResourceAsync(runId, ct);
+        if (resource is null)
             return BrokerResult.Fail(404, "No such run.");
-        if (!Decisions.TryGetValue(run.ScenarioId, out var allowed) ||
-            !allowed.TryGetValue(decisionId, out var specPatch))
+        if (!ScenarioDefinitions.All.TryGetValue(resource.Spec.ScenarioId, out var scenario))
+            return BrokerResult.Fail(404, "The scenario definition is not available.");
+        var decision = scenario.Decisions.FirstOrDefault(d => d.Id == decisionId);
+        if (decision is null)
             return BrokerResult.Fail(404, $"Decision '{decisionId}' is not available for this run.");
 
-        var patch = new k8s.Models.V1Patch(new { spec = specPatch }, k8s.Models.V1Patch.PatchType.MergePatch);
+        const string annotationPrefix = "homeops.isaacwallace.dev/decision-";
+        if (resource.Metadata.Annotations?.ContainsKey($"{annotationPrefix}{decisionId}") == true)
+            return BrokerResult.Accepted(RunView.From(resource));
+
+        var createdAt = resource.Metadata.CreationTimestamp ?? DateTime.UtcNow;
+        var elapsed = Math.Max(0, (DateTime.UtcNow - createdAt).TotalSeconds - 16);
+        if (elapsed < decision.AvailableAfterSeconds)
+            return BrokerResult.Fail(
+                409,
+                $"Decision '{decisionId}' unlocks after {decision.AvailableAfterSeconds} seconds of live traffic.");
+
+        var patchBody = new
+        {
+            metadata = new
+            {
+                annotations = new Dictionary<string, string>
+                {
+                    [$"{annotationPrefix}{decisionId}"] = DateTime.UtcNow.ToString("O"),
+                },
+            },
+            spec = decision.SpecPatch,
+        };
+        var patch = new k8s.Models.V1Patch(patchBody, k8s.Models.V1Patch.PatchType.MergePatch);
         try
         {
             var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
@@ -103,16 +136,172 @@ public sealed class RunBroker
 
     public async Task<RunView?> GetRunAsync(string runId, CancellationToken ct)
     {
+        var resource = await GetResourceAsync(runId, ct);
+        return resource is null ? null : RunView.From(resource);
+    }
+
+    private async Task<LabRunResource?> GetResourceAsync(string runId, CancellationToken ct)
+    {
         try
         {
             var obj = await _k8s.CustomObjects.GetClusterCustomObjectAsync(
                 LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
-            return RunView.From(Parse(obj));
+            return Parse(obj);
         }
         catch (HttpOperationException ex) when (ex.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
             return null;
         }
+    }
+
+    public async Task<PlatformStatus> GetPlatformStatusAsync(CancellationToken ct)
+    {
+        var nodes = await _k8s.CoreV1.ListNodeAsync(cancellationToken: ct);
+        var ready = nodes.Items.Count(node =>
+            node.Status?.Conditions?.Any(c => c.Type == "Ready" && c.Status == "True") == true);
+        var active = (await ListAsync(ct)).Count(run => run.Status is "provisioning" or "ready");
+        var slots = Math.Max(0, _options.MaxConcurrentRuns - active);
+        var freePct = _options.MaxConcurrentRuns == 0
+            ? 0
+            : (int)Math.Round(slots * 100.0 / _options.MaxConcurrentRuns);
+
+        return new PlatformStatus(
+            ready == nodes.Items.Count ? "ready" : ready > 0 ? "degraded" : "offline",
+            ready,
+            nodes.Items.Count,
+            active,
+            _options.MaxConcurrentRuns,
+            slots,
+            freePct);
+    }
+
+    public async Task<PlatformOverview> GetOverviewAsync(CancellationToken ct)
+    {
+        var active = (await ListAsync(ct)).Count(run => run.Status is "provisioning" or "ready");
+        return await _inventory.GetOverviewAsync(active, ct);
+    }
+
+    public Task<HomelabTopology> GetTopologyAsync(CancellationToken ct) =>
+        _inventory.GetTopologyAsync(ct);
+
+    public async Task<BrokerResult> SubmitPracticeActionAsync(
+        string runId, string actionId, CancellationToken ct)
+    {
+        var resource = await GetResourceAsync(runId, ct);
+        if (resource is null)
+            return BrokerResult.Fail(404, "No such practice cluster.");
+        if (resource.Spec.ScenarioId != "practice-cluster")
+            return BrokerResult.Fail(409, "This run is not a practice cluster.");
+
+        IReadOnlyDictionary<string, object> spec = actionId switch
+        {
+            "scale-1" => Patch(("apiReplicas", 1)),
+            "scale-3" => Patch(("apiReplicas", 3)),
+            "scale-6" => Patch(("apiReplicas", 6)),
+            "cache-on" => Patch(("cacheReplicas", 1)),
+            "cache-off" => Patch(("cacheReplicas", 0)),
+            "release-candidate" => Patch(("releaseTrack", "candidate")),
+            "release-stable" => Patch(("releaseTrack", "stable")),
+            "move-apps" => Patch(("targetPool", "apps")),
+            "move-infra" => Patch(("targetPool", "infra")),
+            "traffic-on" => Patch(("loadReplicas", 1)),
+            "traffic-off" => Patch(("loadReplicas", 0)),
+            "restart" => Patch(("restartToken", Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)))),
+            "reset" => Patch(
+                ("apiReplicas", 2), ("cacheReplicas", 0), ("releaseTrack", "stable"),
+                ("dataState", "healthy"), ("targetPool", "apps"), ("loadReplicas", 0),
+                ("restartToken", Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)))),
+            _ => new Dictionary<string, object>(),
+        };
+        if (spec.Count == 0)
+            return BrokerResult.Fail(404, $"Unknown practice action '{actionId}'.");
+
+        var patchBody = new
+        {
+            metadata = new
+            {
+                annotations = new Dictionary<string, string>
+                {
+                    ["homeops.isaacwallace.dev/practice-action"] = actionId,
+                    ["homeops.isaacwallace.dev/practice-action-at"] = DateTime.UtcNow.ToString("O"),
+                },
+            },
+            spec,
+        };
+        var patch = new k8s.Models.V1Patch(patchBody, k8s.Models.V1Patch.PatchType.MergePatch);
+        try
+        {
+            var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+                patch, LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
+            return BrokerResult.Accepted(RunView.From(Parse(updated)));
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogError(ex, "Failed practice action {Action} on {RunId}.", actionId, runId);
+            return BrokerResult.Fail(502, "The practice controller rejected the action.");
+        }
+    }
+
+    private static IReadOnlyDictionary<string, object> Patch(
+        params (string Key, object Value)[] fields) =>
+        fields.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+
+    public async Task<RunTrace?> GetTraceAsync(string runId, CancellationToken ct)
+    {
+        var run = await GetRunAsync(runId, ct);
+        if (run?.Namespace is null) return null;
+        return await _traces.ScrapeAsync(runId, run.Namespace, ct);
+    }
+
+    public async Task<RunReport?> GetReportAsync(string runId, CancellationToken ct)
+    {
+        var run = await GetRunAsync(runId, ct);
+        if (run is null || run.CreatedAt is null) return null;
+        if (!ScenarioDefinitions.All.TryGetValue(run.ScenarioId, out var scenario)) return null;
+
+        var elapsed = (DateTime.UtcNow - run.CreatedAt.Value).TotalSeconds - 16;
+        if (elapsed < scenario.DurationSeconds) return RunReport.NotReady(runId, run.ScenarioId);
+
+        var telemetry = await GetTelemetryAsync(runId, ct);
+        var passedState = run.ScenarioId switch
+        {
+            "checkout-bad-release" => run.ReleaseTrack == "stable",
+            "catalogue-data-recovery" => run.DataState == "recovered",
+            "worker-evacuation" => run.TargetPool == "infra",
+            _ => run.ApiReplicas >= 6 || run.CacheEnabled,
+        };
+        var inBudget = telemetry is not null &&
+            telemetry.P95LatencyMs <= 120 &&
+            telemetry.ErrorRatePct <= 1;
+        var outcome = passedState && inBudget ? "passed" : passedState ? "degraded" : "failed";
+        var score = outcome == "passed" ? 100 : outcome == "degraded" ? 65 : 30;
+        var findings = new List<ReportFinding>
+        {
+            new(
+                "Scenario objective",
+                passedState ? "The required platform state was reached." : "The required platform state was not reached.",
+                passedState ? "success" : "critical"),
+            new(
+                "Final SLO window",
+                inBudget
+                    ? "Measured p95 latency and error rate were inside the objective."
+                    : "The final measured window remained outside the objective.",
+                inBudget ? "success" : "warning"),
+        };
+
+        return new RunReport(
+            true,
+            run.RunId,
+            run.ScenarioId,
+            outcome,
+            score,
+            scenario.Objective,
+            outcome == "passed"
+                ? "The operator recovered the real workload and preserved the final SLO window."
+                : "The run completed with unresolved or late recovery signals.",
+            run.AcceptedDecisions,
+            findings,
+            DateTime.UtcNow);
     }
 
     // Real telemetry: sum the run namespace's actual CPU/memory usage from metrics-server, plus the
@@ -125,7 +314,7 @@ public sealed class RunBroker
         var ns = run.Namespace ?? runId;
 
         int pods = 0;
-        double cpuMillis = 0, memMiB = 0;
+        double cpuMillis = 0, memMiB = 0, postgresCpuMillis = 0;
         try
         {
             var obj = await _k8s.CustomObjects.ListNamespacedCustomObjectAsync(
@@ -135,8 +324,12 @@ public sealed class RunBroker
             foreach (var pod in list.Items)
                 foreach (var c in pod.Containers)
                 {
-                    cpuMillis += ParseCpuMillicores(c.Usage.Cpu);
+                    var containerCpu = ParseCpuMillicores(c.Usage.Cpu);
+                    cpuMillis += containerCpu;
                     memMiB += ParseMemoryMiB(c.Usage.Memory);
+                    if (pod.Metadata.Name.StartsWith("postgres-", StringComparison.Ordinal) ||
+                        pod.Metadata.Name == "postgres")
+                        postgresCpuMillis += containerCpu;
                 }
         }
         catch (HttpOperationException)
@@ -149,6 +342,7 @@ public sealed class RunBroker
 
         return new RunTelemetry(
             pods, (int)Math.Round(cpuMillis), (int)Math.Round(memMiB),
+            Math.Clamp((int)Math.Round(postgresCpuMillis / 5.0), 0, 100),
             run.ApiReplicas, run.CacheEnabled,
             envoy?.RequestsPerSec ?? 0,
             envoy?.P95LatencyMs ?? 0,
@@ -214,7 +408,13 @@ public sealed class RunBroker
 
     private sealed class PodMetrics
     {
+        [JsonPropertyName("metadata")] public MetricMetadata Metadata { get; set; } = new();
         [JsonPropertyName("containers")] public List<ContainerMetrics> Containers { get; set; } = [];
+    }
+
+    private sealed class MetricMetadata
+    {
+        [JsonPropertyName("name")] public string Name { get; set; } = "";
     }
 
     private sealed class ContainerMetrics
@@ -227,6 +427,33 @@ public sealed class RunBroker
         [JsonPropertyName("cpu")] public string Cpu { get; set; } = "0";
         [JsonPropertyName("memory")] public string Memory { get; set; } = "0";
     }
+}
+
+public sealed record PlatformStatus(
+    string Cluster,
+    int NodesReady,
+    int NodesTotal,
+    int ActiveRuns,
+    int MaxConcurrentRuns,
+    int SlotsAvailable,
+    int CapacityFreePct);
+
+public sealed record ReportFinding(string Label, string Detail, string Severity);
+
+public sealed record RunReport(
+    bool Ready,
+    string RunId,
+    string ScenarioId,
+    string Outcome,
+    int Score,
+    string Objective,
+    string Summary,
+    IReadOnlyList<AcceptedDecision> Decisions,
+    IReadOnlyList<ReportFinding> Findings,
+    DateTime SealedAt)
+{
+    public static RunReport NotReady(string runId, string scenarioId) =>
+        new(false, runId, scenarioId, "pending", 0, "", "", [], [], DateTime.MinValue);
 }
 
 public sealed record BrokerResult(RunView? Run, int Status, string? Error)

@@ -1,4 +1,5 @@
 // Server-only bridge from the public homelab page to the real HomeOps API (api.isaacwallace.dev).
+import "server-only";
 //
 // The browser never holds a cluster credential or an API key: it calls this app's /api/live/* routes
 // same-origin, and those routes (server-side) forward to the real API with a scoped runs:write key

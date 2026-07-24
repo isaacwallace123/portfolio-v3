@@ -3,7 +3,7 @@ import {
   type RunTelemetry,
   type RunView,
 } from "@iw/lab-runtime";
-import { trafficSpikeScenario } from "@/entities/scenario";
+import { getHomelabScenario } from "@/entities/scenario";
 
 // Merge a REAL cluster run with the scenario's modeled incident so the arena renders exactly as
 // designed while the infrastructure underneath is genuinely live. The run is real (a Crossplane
@@ -16,8 +16,6 @@ import { trafficSpikeScenario } from "@/entities/scenario";
 
 // Real provisioning takes ~15s before the incident clock should start.
 const PROVISION_MS = 16_000;
-const REAL_DECISIONS = new Set(["scale", "cache"]); // rollback has no real workload yet
-
 export interface RealRun {
   runId: string;
   scenarioId: string;
@@ -25,12 +23,24 @@ export interface RealRun {
   namespace: string | null;
   apiReplicas: number;
   cacheEnabled: boolean;
+  releaseTrack?: "stable" | "candidate";
+  dataState?: "healthy" | "degraded" | "recovered";
+  targetPool?: "apps" | "infra";
+  loadEnabled?: boolean;
+  restartToken?: string;
+  acceptedDecisions?: {
+    id: string;
+    label: string;
+    acceptedAtMs: number;
+  }[];
+  availableDecisions?: string[];
   ttlSeconds: number;
   createdAt?: string;
   telemetry?: {
     podCount: number;
     cpuMillicores: number;
     memoryMiB: number;
+    postgresCpuPct: number;
     requestsPerSec: number;
     p95LatencyMs: number;
     errorRatePct: number;
@@ -44,10 +54,15 @@ export interface LiveRunView extends RunView {
   podCount: number | null;
   cpuMillicores: number | null;
   memoryMiB: number | null;
+  releaseTrack: "stable" | "candidate";
+  dataState: "healthy" | "degraded" | "recovered";
+  targetPool: "apps" | "infra";
+  loadEnabled: boolean;
+  restartToken: string;
 }
 
 export function toLiveRunView(real: RealRun): LiveRunView {
-  const scenario = trafficSpikeScenario;
+  const scenario = getHomelabScenario(real.scenarioId);
   const createdMs = real.createdAt ? Date.parse(real.createdAt) : Date.now();
   const narrativeElapsed = Math.max(
     0,
@@ -58,6 +73,15 @@ export function toLiveRunView(real: RealRun): LiveRunView {
   const accepted = new Set<string>();
   if (real.apiReplicas >= 6) accepted.add("scale");
   if (real.cacheEnabled) accepted.add("cache");
+  if (
+    real.releaseTrack === "stable" &&
+    real.scenarioId === "checkout-bad-release"
+  )
+    accepted.add("rollback");
+  if (real.dataState === "recovered") accepted.add("restore");
+  if (real.targetPool === "infra") accepted.add("evacuate");
+  for (const decision of real.acceptedDecisions ?? [])
+    accepted.add(decision.id);
 
   const snap = getRunSnapshot(scenario, narrativeElapsed);
 
@@ -67,9 +91,11 @@ export function toLiveRunView(real: RealRun): LiveRunView {
   const status: RunView["status"] =
     real.status === "deleting"
       ? "collecting"
-      : real.status === "ready" || podsUp
-        ? "running"
-        : "provisioning";
+      : narrativeElapsed >= scenario.durationMs
+        ? "complete"
+        : real.status === "ready" || podsUp
+          ? "running"
+          : "provisioning";
 
   // 100% real telemetry — request rate, p95, and error rate are measured by the run's Envoy gateway;
   // replicas and cache reflect actual cluster state. Score and Postgres load are derived from those
@@ -81,34 +107,38 @@ export function toLiveRunView(real: RealRun): LiveRunView {
       : 120;
   const p95 = t?.p95LatencyMs ?? 0;
   const errRate = t?.errorRatePct ?? 0;
-  const pressured = p95 > target || errRate > 1;
   const telemetry: RunTelemetry = {
     requestsPerSec: t?.requestsPerSec ?? 0,
     p95LatencyMs: p95,
     latencyTargetMs: target,
     errorRatePct: errRate,
     apiReplicas: real.apiReplicas,
-    postgresCpuPct: pressured ? Math.min(99, 40 + Math.round(p95 / 60)) : 28,
+    postgresCpuPct: t?.postgresCpuPct ?? 0,
     cacheActive: real.cacheEnabled,
     score: Math.max(0, 100 - (p95 > target ? 30 : 0) - (errRate > 1 ? 25 : 0)),
   };
 
-  const acceptedDecisions = [...accepted].map((id) => {
-    const d = scenario.decisions.find((x) => x.id === id);
-    return { id, label: d?.label ?? id, acceptedAtMs: d?.availableAfterMs ?? 0 };
-  });
+  const acceptedDecisions =
+    real.acceptedDecisions ??
+    [...accepted].map((id) => {
+      const d = scenario.decisions.find((x) => x.id === id);
+      return {
+        id,
+        label: d?.label ?? id,
+        acceptedAtMs: d?.availableAfterMs ?? 0,
+      };
+    });
 
   // Decisions unlock on the incident clock (a scripted drill), not the laggy Ready condition — the
   // real patch applies fine as long as the LabRun exists.
-  const availableDecisions =
-    status === "collecting"
+  const availableDecisions = real.availableDecisions
+    ? real.availableDecisions
+    : status === "collecting" || status === "complete"
       ? []
       : scenario.decisions
           .filter(
             (d) =>
-              REAL_DECISIONS.has(d.id) &&
-              narrativeElapsed >= d.availableAfterMs &&
-              !accepted.has(d.id),
+              narrativeElapsed >= d.availableAfterMs && !accepted.has(d.id),
           )
           .map((d) => d.id);
 
@@ -127,12 +157,17 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     visibleEvents: snap.visibleEvents,
     acceptedDecisions,
     availableDecisions,
-    complete: false,
-    reportReady: false,
+    complete: status === "complete",
+    reportReady: status === "complete",
     live: true,
     namespace: real.namespace,
     podCount: real.telemetry?.podCount ?? null,
     cpuMillicores: real.telemetry?.cpuMillicores ?? null,
     memoryMiB: real.telemetry?.memoryMiB ?? null,
+    releaseTrack: real.releaseTrack ?? "stable",
+    dataState: real.dataState ?? "healthy",
+    targetPool: real.targetPool ?? "apps",
+    loadEnabled: real.loadEnabled ?? true,
+    restartToken: real.restartToken ?? "baseline",
   };
 }

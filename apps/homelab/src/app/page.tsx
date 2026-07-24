@@ -1,5 +1,5 @@
-import OperationsArena from "@/widgets/OperationsArena";
+import HomeOverview from "@/widgets/HomeOverview";
 
 export default function HomePage() {
-  return <OperationsArena />;
+  return <HomeOverview />;
 }
