@@ -55,6 +55,10 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${API_ENV:-Development}
       ConnectionStrings__Postgres: Host=db;Port=5432;Database=${POSTGRES_DB:-iw};Username=${POSTGRES_USER:-iw};Password=${POSTGRES_PASSWORD:-iw-dev-only}
+      RunBroker__Scenarios__0: checkout-traffic-spike
+      RunBroker__Scenarios__1: checkout-bad-release
+      RunBroker__Scenarios__2: catalogue-data-recovery
+      RunBroker__Scenarios__3: worker-evacuation
     depends_on:
       db:
         condition: service_healthy
@@ -124,6 +128,9 @@ services:
     init: true
     ports:
       - "${HOMELAB_PORT:-3002}:3000"
+    environment:
+      HOMELAB_API_URL: ${HOMELAB_API_URL:-http://api}
+      HOMELAB_RUNS_KEY: ${HOMELAB_RUNS_KEY:-}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
       interval: 15s

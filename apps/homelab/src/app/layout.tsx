@@ -16,9 +16,10 @@ export const metadata: Metadata = {
 };
 
 const NAV_LINKS = [
-  { href: "#arena", label: "Live arena" },
-  { href: "#drills", label: "Drills" },
-  { href: "#platform", label: "Platform" },
+  { href: "/", label: "Overview" },
+  { href: "/practice", label: "Practice cluster" },
+  { href: "/drills", label: "Incident drills" },
+  { href: "/topology", label: "Live topology" },
 ] as const;
 
 export default function RootLayout({

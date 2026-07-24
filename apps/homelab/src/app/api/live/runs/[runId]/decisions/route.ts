@@ -26,5 +26,14 @@ export async function POST(
   });
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) return NextResponse.json(payload, { status: res.status });
-  return NextResponse.json(toLiveRunView(payload), { status: res.status });
+  let telemetry = null;
+  try {
+    const telemetryRes = await liveFetch(`/v1/runs/${runId}/telemetry`);
+    if (telemetryRes.ok) telemetry = await telemetryRes.json();
+  } catch {
+    /* next poll will fill it */
+  }
+  return NextResponse.json(toLiveRunView({ ...payload, telemetry }), {
+    status: res.status,
+  });
 }

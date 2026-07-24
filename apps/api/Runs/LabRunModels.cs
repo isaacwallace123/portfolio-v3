@@ -29,6 +29,7 @@ public sealed class LabRunMetadata
     [JsonPropertyName("name")] public string Name { get; set; } = "";
     [JsonPropertyName("creationTimestamp")] public DateTime? CreationTimestamp { get; set; }
     [JsonPropertyName("deletionTimestamp")] public DateTime? DeletionTimestamp { get; set; }
+    [JsonPropertyName("annotations")] public Dictionary<string, string>? Annotations { get; set; }
 }
 
 public sealed class LabRunSpec
@@ -41,6 +42,11 @@ public sealed class LabRunSpec
     // Decision-driven fields. Nullable so create omits them and the XRD defaults (3 / 0) apply.
     [JsonPropertyName("apiReplicas")] public int? ApiReplicas { get; set; }
     [JsonPropertyName("cacheReplicas")] public int? CacheReplicas { get; set; }
+    [JsonPropertyName("releaseTrack")] public string? ReleaseTrack { get; set; }
+    [JsonPropertyName("dataState")] public string? DataState { get; set; }
+    [JsonPropertyName("targetPool")] public string? TargetPool { get; set; }
+    [JsonPropertyName("loadReplicas")] public int? LoadReplicas { get; set; }
+    [JsonPropertyName("restartToken")] public string? RestartToken { get; set; }
 }
 
 public sealed class LabRunStatus
@@ -62,6 +68,7 @@ public sealed record RunTelemetry(
     int PodCount,
     int CpuMillicores,
     int MemoryMiB,
+    int PostgresCpuPct,
     int ApiReplicas,
     bool CacheEnabled,
     // Real request metrics scraped from the run's Envoy gateway.
@@ -79,7 +86,14 @@ public sealed record RunView(
     int TtlSeconds,
     DateTime? CreatedAt,
     int ApiReplicas,
-    bool CacheEnabled)
+    bool CacheEnabled,
+    string ReleaseTrack,
+    string DataState,
+    string TargetPool,
+    bool LoadEnabled,
+    string RestartToken,
+    IReadOnlyList<AcceptedDecision> AcceptedDecisions,
+    IReadOnlyList<string> AvailableDecisions)
 {
     // Map the LabRun's Crossplane conditions to a small, public lifecycle vocabulary, and surface the
     // decision-driven state (replica count, cache tier) so a caller can see the effect of a decision.
@@ -93,14 +107,61 @@ public sealed record RunView(
         else
             status = "provisioning";
 
+        var definition = ScenarioDefinitions.All.GetValueOrDefault(r.Spec.ScenarioId);
+        var createdAt = r.Metadata.CreationTimestamp;
+        var elapsedSeconds = createdAt is null
+            ? 0
+            : Math.Max(0, (DateTime.UtcNow - createdAt.Value).TotalSeconds - 16);
+        var accepted = ReadAcceptedDecisions(r, createdAt);
+        var acceptedIds = accepted.Select(d => d.Id).ToHashSet(StringComparer.Ordinal);
+        var available = definition?.Decisions
+            .Where(d => elapsedSeconds >= d.AvailableAfterSeconds && !acceptedIds.Contains(d.Id))
+            .Select(d => d.Id)
+            .ToArray() ?? [];
+
         return new RunView(
             r.Spec.RunId,
             r.Spec.ScenarioId,
             status,
             r.Status?.Namespace,
             r.Spec.TtlSeconds,
-            r.Metadata.CreationTimestamp,
+            createdAt,
             r.Spec.ApiReplicas ?? 3,
-            (r.Spec.CacheReplicas ?? 0) > 0);
+            (r.Spec.CacheReplicas ?? 0) > 0,
+            r.Spec.ReleaseTrack ?? "stable",
+            r.Spec.DataState ?? "healthy",
+            r.Spec.TargetPool ?? "apps",
+            (r.Spec.LoadReplicas ?? 1) > 0,
+            r.Spec.RestartToken ?? "baseline",
+            accepted,
+            available);
+    }
+
+    private static IReadOnlyList<AcceptedDecision> ReadAcceptedDecisions(
+        LabRunResource resource,
+        DateTime? createdAt)
+    {
+        const string prefix = "homeops.isaacwallace.dev/decision-";
+        if (resource.Metadata.Annotations is null) return [];
+
+        return resource.Metadata.Annotations
+            .Where(pair => pair.Key.StartsWith(prefix, StringComparison.Ordinal))
+            .Select(pair =>
+            {
+                var acceptedAt = DateTime.TryParse(pair.Value, out var parsed)
+                    ? parsed.ToUniversalTime()
+                    : createdAt ?? DateTime.UtcNow;
+                var offset = createdAt is null
+                    ? 0
+                    : Math.Max(0, (int)(acceptedAt - createdAt.Value).TotalMilliseconds - 16_000);
+                var id = pair.Key[prefix.Length..];
+                var label = ScenarioDefinitions.All.GetValueOrDefault(resource.Spec.ScenarioId)?
+                    .Decisions.FirstOrDefault(d => d.Id == id)?.Label ?? id;
+                return new AcceptedDecision(id, label, offset);
+            })
+            .OrderBy(decision => decision.AcceptedAtMs)
+            .ToArray();
     }
 }
+
+public sealed record AcceptedDecision(string Id, string Label, int AcceptedAtMs);

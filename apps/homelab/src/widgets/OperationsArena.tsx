@@ -24,14 +24,24 @@ import {
   type EventSeverity,
   type RunTelemetry,
 } from "@iw/lab-runtime";
-import { trafficSpikeScenario, upcomingDrills } from "@/entities/scenario";
+import {
+  getHomelabScenario,
+  trafficSpikeScenario,
+  upcomingDrills,
+} from "@/entities/scenario";
 import {
   createLiveRun,
+  fetchPlatformStatus,
   fetchLiveStatus,
   getLiveRun,
+  getLiveReport,
+  getLiveTrace,
   liveDecision,
   teardownLiveRun,
+  type LivePlatformStatus,
+  type LiveReport,
   type LiveRunView,
+  type LiveTrace,
 } from "@/shared/lib/liveClient";
 
 const severityClass: Record<EventSeverity, string> = {
@@ -41,28 +51,16 @@ const severityClass: Record<EventSeverity, string> = {
   critical: "event-critical",
 };
 
-// Baseline projection shown before a run exists, so the arena reads as a healthy platform at rest.
+// No run means no workload and therefore no workload telemetry. Showing zeroes is intentional:
+// the arena never substitutes a designed baseline for a measurement.
 function baselineTelemetry(): RunTelemetry {
-  const m = trafficSpikeScenario.telemetry;
-  if (!m || m.kind !== "traffic-spike") {
-    return {
-      requestsPerSec: 0,
-      p95LatencyMs: 0,
-      latencyTargetMs: 120,
-      errorRatePct: 0,
-      apiReplicas: 0,
-      postgresCpuPct: 0,
-      cacheActive: false,
-      score: 100,
-    };
-  }
   return {
-    requestsPerSec: m.baseline.requestsPerSec,
-    p95LatencyMs: m.baseline.p95LatencyMs,
-    latencyTargetMs: m.latencyTargetMs,
-    errorRatePct: m.baseline.errorRatePct,
-    apiReplicas: m.baseline.apiReplicas,
-    postgresCpuPct: m.baseline.postgresCpuPct,
+    requestsPerSec: 0,
+    p95LatencyMs: 0,
+    latencyTargetMs: 120,
+    errorRatePct: 0,
+    apiReplicas: 0,
+    postgresCpuPct: 0,
     cacheActive: false,
     score: 100,
   };
@@ -97,9 +95,13 @@ function StatusChip({ status }: { status: string }) {
 }
 
 export default function OperationsArena() {
-  const scenario = trafficSpikeScenario;
+  const [scenarioId, setScenarioId] = useState(trafficSpikeScenario.id);
+  const scenario = getHomelabScenario(scenarioId);
   const [liveEnabled, setLiveEnabled] = useState<boolean | null>(null);
   const [run, setRun] = useState<LiveRunView | null>(null);
+  const [platform, setPlatform] = useState<LivePlatformStatus | null>(null);
+  const [trace, setTrace] = useState<LiveTrace | null>(null);
+  const [report, setReport] = useState<LiveReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
@@ -108,6 +110,9 @@ export default function OperationsArena() {
     fetchLiveStatus()
       .then((s) => setLiveEnabled(s.enabled))
       .catch(() => setLiveEnabled(false));
+    fetchPlatformStatus()
+      .then(setPlatform)
+      .catch(() => setPlatform(null));
   }, []);
 
   const stopPolling = useCallback(() => {
@@ -124,9 +129,16 @@ export default function OperationsArena() {
       stopPolling();
       pollRef.current = window.setInterval(async () => {
         try {
-          const view = await getLiveRun(runId);
+          const [view, latestTrace] = await Promise.all([
+            getLiveRun(runId),
+            getLiveTrace(runId).catch(() => null),
+          ]);
           setRun(view);
-          if (isTerminalPhase(view.status)) stopPolling();
+          if (latestTrace) setTrace(latestTrace);
+          if (isTerminalPhase(view.status)) {
+            stopPolling();
+            setReport(await getLiveReport(runId).catch(() => null));
+          }
         } catch {
           stopPolling();
         }
@@ -139,9 +151,12 @@ export default function OperationsArena() {
     if (busy) return;
     setBusy(true);
     setError(null);
+    setTrace(null);
+    setReport(null);
     try {
       const created = await createLiveRun(scenario.id);
       setRun(created);
+      setScenarioId(created.scenarioId);
       startPolling(created.runId);
     } catch (err) {
       setError(
@@ -175,6 +190,11 @@ export default function OperationsArena() {
       await teardownLiveRun(run.runId);
       stopPolling();
       setRun(null);
+      setTrace(null);
+      setReport(null);
+      fetchPlatformStatus()
+        .then(setPlatform)
+        .catch(() => setPlatform(null));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Teardown failed.");
     } finally {
@@ -199,7 +219,19 @@ export default function OperationsArena() {
   const namespace = run?.namespace ?? "run-hl-idle";
   const pods = run?.podCount ?? null;
 
-  const canStart = liveEnabled === true && !busy && !active;
+  const canStart = liveEnabled === true && !busy && run === null;
+  const capacityFree = platform?.capacityFreePct ?? 0;
+  const liveSpans = trace?.spans ?? [];
+
+  const chooseScenario = useCallback(
+    (id: string) => {
+      if (run) return;
+      setScenarioId(id);
+      setError(null);
+      document.getElementById("arena")?.scrollIntoView({ behavior: "smooth" });
+    },
+    [run],
+  );
 
   return (
     <div className="site-frame">
@@ -231,9 +263,11 @@ export default function OperationsArena() {
                     ? "Drill in progress"
                     : liveEnabled === false
                       ? "Live control offline"
-                      : "Queue live drill"}
+                      : run
+                        ? "Tear down to run again"
+                        : "Queue live drill"}
               </button>
-              {active ? (
+              {run ? (
                 <button
                   className="text-link"
                   onClick={teardown}
@@ -261,29 +295,34 @@ export default function OperationsArena() {
           >
             <div className="console-top">
               <span>PLATFORM / NOW</span>
-              <span className="live-dot">LIVE CLUSTER</span>
+              <span className="live-dot">
+                {platform?.cluster === "ready"
+                  ? "LIVE CLUSTER"
+                  : "CONTROL PLANE"}
+              </span>
             </div>
             <div
               className="capacity-ring"
-              style={{ "--value": "68%" } as React.CSSProperties}
+              style={{ "--value": `${capacityFree}%` } as React.CSSProperties}
             >
               <div>
-                <strong>68%</strong>
-                <span>capacity free</span>
+                <strong>{capacityFree}%</strong>
+                <span>run capacity free</span>
               </div>
             </div>
             <div className="console-grid">
               <span>
-                <b>3</b> nodes ready
+                <b>{platform?.nodesReady ?? "—"}</b> /{" "}
+                {platform?.nodesTotal ?? "—"} nodes ready
               </span>
               <span>
                 <b>{pods ?? "—"}</b> run pods
               </span>
               <span>
-                <b>99.98%</b> platform SLO
+                <b>{platform?.cluster ?? "—"}</b> cluster state
               </span>
               <span>
-                <b>1</b> drill slot
+                <b>{platform?.slotsAvailable ?? "—"}</b> drill slots
               </span>
             </div>
             <p>
@@ -403,7 +442,7 @@ export default function OperationsArena() {
               <p className="decision-intro">
                 Interventions become available when the incident begins. Each
                 decision changes the <strong>real</strong> workload —
-                replicas scale, the cache tier comes up.
+                deployments roll, capacity changes, or placement reconciles.
               </p>
               <div className="decision-list">
                 {scenario.decisions.map((decision) => {
@@ -509,27 +548,44 @@ export default function OperationsArena() {
                 <span>
                   <GitBranch size={16} /> Request trace
                 </span>
-                <small>trace / 7f3a·91bc</small>
+                <small>
+                  trace / {trace?.traceId.slice(0, 9) ?? "awaiting live spans"}
+                </small>
               </div>
               <div className="trace-waterfall">
-                {[
-                  { name: "envoy.gateway", ms: 4, w: 12 },
-                  { name: "checkout.http", ms: latency, w: 78 },
-                  {
-                    name: "catalogue.grpc",
-                    ms: Math.max(18, latency * 0.46),
-                    w: 44,
-                  },
-                  {
-                    name: "postgres.query",
-                    ms: pressure ? 286 : 24,
-                    w: pressure ? 62 : 18,
-                  },
-                ].map((span, index) => (
+                {(liveSpans.length
+                  ? liveSpans.map((span) => ({
+                      name: span.name,
+                      ms: span.durationMs,
+                      w: Math.max(
+                        8,
+                        (span.durationMs /
+                          Math.max(1, trace?.durationMs ?? 1)) *
+                          90,
+                      ),
+                      error: span.status === "error",
+                    }))
+                  : [
+                      { name: "envoy.gateway", ms: 4, w: 12, error: false },
+                      {
+                        name: "checkout.request",
+                        ms: latency,
+                        w: 78,
+                        error: false,
+                      },
+                      {
+                        name: "postgres.query",
+                        ms: pressure ? 286 : 24,
+                        w: pressure ? 62 : 18,
+                        error: false,
+                      },
+                    ]
+                ).map((span, index) => (
                   <div key={span.name}>
                     <span>{span.name}</span>
                     <div>
                       <i
+                        className={span.error ? "span-error" : ""}
                         style={{
                           width: `${Math.min(span.w, 96)}%`,
                           marginLeft: `${index * 6}%`,
@@ -541,6 +597,30 @@ export default function OperationsArena() {
                 ))}
               </div>
             </section>
+
+            {report && (
+              <section className="panel report-panel">
+                <div className="panel-title">
+                  <span>
+                    <Check size={16} /> After-action report
+                  </span>
+                  <small>sealed / score {report.score}</small>
+                </div>
+                <div className={`report-outcome outcome-${report.outcome}`}>
+                  <strong>{report.outcome}</strong>
+                  <span>{report.summary}</span>
+                </div>
+                <p className="report-objective">{report.objective}</p>
+                <div className="report-findings">
+                  {report.findings.map((finding) => (
+                    <article key={finding.label}>
+                      <b>{finding.label}</b>
+                      <span>{finding.detail}</span>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
         </section>
 
@@ -559,12 +639,20 @@ export default function OperationsArena() {
           </div>
           <div className="drill-grid">
             {upcomingDrills.map((drill, index) => (
-              <article key={drill.title}>
-                <span>0{index + 2}</span>
+              <article
+                key={drill.title}
+                className={scenario.id === drill.id ? "drill-selected" : ""}
+              >
+                <span>0{index + 1}</span>
                 <small>{drill.tag}</small>
                 <h3>{drill.title}</h3>
                 <p>{drill.description}</p>
-                <button disabled>In development</button>
+                <button
+                  onClick={() => chooseScenario(drill.id)}
+                  disabled={run !== null}
+                >
+                  {scenario.id === drill.id ? "Selected" : "Load scenario"}
+                </button>
               </article>
             ))}
           </div>

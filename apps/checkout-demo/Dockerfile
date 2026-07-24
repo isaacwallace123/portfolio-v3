@@ -6,6 +6,9 @@ COPY main.go .
 RUN go mod init checkout-demo \
  && go get github.com/jackc/pgx/v5/pgxpool@v5.6.0 \
  && go get github.com/redis/go-redis/v9@v9.6.0 \
+ && go get go.opentelemetry.io/otel@v1.31.0 \
+ && go get go.opentelemetry.io/otel/sdk@v1.31.0 \
+ && go get go.opentelemetry.io/otel/sdk/resource@v1.31.0 \
  && CGO_ENABLED=0 go build -ldflags="-s -w" -o /checkout .
 
 FROM gcr.io/distroless/static:nonroot

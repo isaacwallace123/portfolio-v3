@@ -1,5 +1,5 @@
 import { createRunEngine, type RunEngine } from "@iw/lab-runtime";
-import { trafficSpikeScenario } from "@/entities/scenario";
+import { homelabScenarios } from "@/entities/scenario";
 
 // Process-wide run engine singleton backing the /api/v1 routes. In-memory today; the production
 // build swaps createRunEngine() for the Crossplane-claim engine without touching the routes.
@@ -12,7 +12,7 @@ type GlobalWithEngine = typeof globalThis & { [KEY]?: RunEngine };
 
 function build(): RunEngine {
   return createRunEngine({
-    scenarios: [trafficSpikeScenario],
+    scenarios: [...homelabScenarios],
     maxConcurrentRuns: 1,
     runTtlMs: 15 * 60_000,
     vcpu: 4,
