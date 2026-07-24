@@ -25,7 +25,7 @@ spec:
         node-role.kubernetes.io/apps: "true"
       containers:
         - name: admin
-          image: ghcr.io/isaacwallace123/portfolio-admin:a2988c1
+          image: ghcr.io/isaacwallace123/portfolio-admin:332e3cc
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
