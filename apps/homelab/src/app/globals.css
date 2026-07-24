@@ -2258,12 +2258,24 @@ html[data-reduce-motion] *::after {
   border-radius: 50%;
   background: var(--mint);
 }
-.dot-compute { background: #72a8ff !important; }
-.dot-network { background: #4de9dd !important; }
-.dot-platform { background: var(--mint) !important; }
-.dot-data { background: #d28cff !important; }
-.dot-observe { background: #ffc857 !important; }
-.dot-apps { background: var(--acid) !important; }
+.dot-compute {
+  background: #72a8ff !important;
+}
+.dot-network {
+  background: #4de9dd !important;
+}
+.dot-platform {
+  background: var(--mint) !important;
+}
+.dot-data {
+  background: #d28cff !important;
+}
+.dot-observe {
+  background: #ffc857 !important;
+}
+.dot-apps {
+  background: var(--acid) !important;
+}
 
 .layer-col-nodes {
   display: flex;
@@ -2296,9 +2308,16 @@ html[data-reduce-motion] *::after {
   border-radius: 50%;
   background: var(--ink-dim);
 }
-.status-indicator.status-healthy { background: var(--mint); box-shadow: 0 0 6px var(--mint); }
-.status-indicator.status-degraded { background: var(--amber); }
-.status-indicator.status-unavailable { background: var(--red); }
+.status-indicator.status-healthy {
+  background: var(--mint);
+  box-shadow: 0 0 6px var(--mint);
+}
+.status-indicator.status-degraded {
+  background: var(--amber);
+}
+.status-indicator.status-unavailable {
+  background: var(--red);
+}
 .node-kind-badge {
   font-size: 8px;
   font-family: ui-monospace, monospace;
@@ -2384,8 +2403,12 @@ html[data-reduce-motion] *::after {
   animation: nodePulse 2s infinite alternate;
 }
 @keyframes nodePulse {
-  0% { box-shadow: 0 0 10px rgba(255, 106, 114, 0.1); }
-  100% { box-shadow: 0 0 28px rgba(255, 106, 114, 0.35); }
+  0% {
+    box-shadow: 0 0 10px rgba(255, 106, 114, 0.1);
+  }
+  100% {
+    box-shadow: 0 0 28px rgba(255, 106, 114, 0.35);
+  }
 }
 .rt-node-icon {
   color: var(--mint);
@@ -2431,8 +2454,12 @@ html[data-reduce-motion] *::after {
   height: 5px;
   border-radius: 50%;
 }
-.rt-pod.pod-healthy i { background: var(--mint); }
-.rt-pod.pod-pressure i { background: var(--red); }
+.rt-pod.pod-healthy i {
+  background: var(--mint);
+}
+.rt-pod.pod-pressure i {
+  background: var(--red);
+}
 .rt-flow-arrow {
   color: var(--ink-dim);
   flex-shrink: 0;

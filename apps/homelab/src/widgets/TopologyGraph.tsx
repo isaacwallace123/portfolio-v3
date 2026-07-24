@@ -34,7 +34,9 @@ export default function TopologyGraph() {
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [nodePositions, setNodePositions] = useState<
+    Record<string, { x: number; y: number }>
+  >({});
 
   useEffect(() => {
     let active = true;
@@ -82,7 +84,14 @@ export default function TopologyGraph() {
   // Group nodes by layer for column-based flow rendering
   const nodesByLayer = useMemo(() => {
     if (!topology) return {};
-    const layers = ["compute", "network", "platform", "data", "observe", "apps"] as const;
+    const layers = [
+      "compute",
+      "network",
+      "platform",
+      "data",
+      "observe",
+      "apps",
+    ] as const;
     const grouped: Record<string, TopologyNode[]> = {};
     for (const l of layers) grouped[l] = [];
     for (const node of filteredNodes) {
@@ -101,7 +110,8 @@ export default function TopologyGraph() {
       const containerRect = containerRef.current.getBoundingClientRect();
       const positions: Record<string, { x: number; y: number }> = {};
 
-      const elements = containerRef.current.querySelectorAll<HTMLElement>("[data-node-id]");
+      const elements =
+        containerRef.current.querySelectorAll<HTMLElement>("[data-node-id]");
       elements.forEach((el) => {
         const id = el.getAttribute("data-node-id");
         if (id) {
@@ -129,8 +139,9 @@ export default function TopologyGraph() {
           </h1>
         </div>
         <p>
-          Interactive 2D architecture flow. Inspect live GitOps deployments,
-          K3s nodes, network routing, storage, and telemetry. Select any service to inspect its live state and metrics.
+          Interactive 2D architecture flow. Inspect live GitOps deployments, K3s
+          nodes, network routing, storage, and telemetry. Select any service to
+          inspect its live state and metrics.
         </p>
       </section>
 
@@ -177,9 +188,23 @@ export default function TopologyGraph() {
               {/* SVG connection overlay */}
               <svg className="topology-svg-connections" aria-hidden="true">
                 <defs>
-                  <linearGradient id="edgeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="var(--mint)" stopOpacity="0.6" />
-                    <stop offset="100%" stopColor="var(--acid)" stopOpacity="0.6" />
+                  <linearGradient
+                    id="edgeGradient"
+                    x1="0%"
+                    y1="0%"
+                    x2="100%"
+                    y2="0%"
+                  >
+                    <stop
+                      offset="0%"
+                      stopColor="var(--mint)"
+                      stopOpacity="0.6"
+                    />
+                    <stop
+                      offset="100%"
+                      stopColor="var(--acid)"
+                      stopOpacity="0.6"
+                    />
                   </linearGradient>
                 </defs>
                 {topology.edges.map((edge, idx) => {
@@ -200,9 +225,13 @@ export default function TopologyGraph() {
                       key={`${edge.source}-${edge.target}-${idx}`}
                       d={d}
                       fill="none"
-                      stroke={isHighlighted ? "var(--acid)" : "url(#edgeGradient)"}
+                      stroke={
+                        isHighlighted ? "var(--acid)" : "url(#edgeGradient)"
+                      }
                       strokeWidth={isHighlighted ? 2.5 : 1.2}
-                      strokeDasharray={edge.kind === "hosts" ? "4,4" : undefined}
+                      strokeDasharray={
+                        edge.kind === "hosts" ? "4,4" : undefined
+                      }
                       opacity={isHighlighted ? 1 : 0.35}
                       className={isHighlighted ? "active-edge" : ""}
                     />
@@ -211,11 +240,28 @@ export default function TopologyGraph() {
               </svg>
 
               {/* Layer Columns */}
-              {(["compute", "network", "platform", "data", "observe", "apps"] as const).map((layerId) => {
+              {(
+                [
+                  "compute",
+                  "network",
+                  "platform",
+                  "data",
+                  "observe",
+                  "apps",
+                ] as const
+              ).map((layerId) => {
                 const nodes = nodesByLayer[layerId] ?? [];
-                if (activeLayerFilter !== "all" && activeLayerFilter !== layerId) return null;
+                if (
+                  activeLayerFilter !== "all" &&
+                  activeLayerFilter !== layerId
+                )
+                  return null;
                 return (
-                  <div key={layerId} className="layer-column" data-layer-col={layerId}>
+                  <div
+                    key={layerId}
+                    className="layer-column"
+                    data-layer-col={layerId}
+                  >
                     <div className="layer-col-header">
                       <i className={`dot-${layerId}`} />
                       <span>{layerId.toUpperCase()}</span>
@@ -232,8 +278,12 @@ export default function TopologyGraph() {
                             className={`topology-node-card status-${node.status} ${isSelected ? "selected" : ""}`}
                           >
                             <div className="node-card-head">
-                              <span className={`status-indicator status-${node.status}`} />
-                              <span className="node-kind-badge">{node.kind}</span>
+                              <span
+                                className={`status-indicator status-${node.status}`}
+                              />
+                              <span className="node-kind-badge">
+                                {node.kind}
+                              </span>
                             </div>
                             <h4 className="node-title">{node.label}</h4>
                             <div className="node-meta">
@@ -348,4 +398,3 @@ export default function TopologyGraph() {
     </main>
   );
 }
-

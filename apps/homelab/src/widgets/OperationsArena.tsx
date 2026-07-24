@@ -134,8 +134,14 @@ function StatusChip({ status }: { status: string }) {
   );
 }
 
-export default function OperationsArena({ defaultScenarioId }: { defaultScenarioId?: string }) {
-  const [scenarioId, setScenarioId] = useState(defaultScenarioId ?? trafficSpikeScenario.id);
+export default function OperationsArena({
+  defaultScenarioId,
+}: {
+  defaultScenarioId?: string;
+}) {
+  const [scenarioId, setScenarioId] = useState(
+    defaultScenarioId ?? trafficSpikeScenario.id,
+  );
   const scenario = getHomelabScenario(scenarioId);
   const [liveEnabled, setLiveEnabled] = useState<boolean | null>(null);
   const [run, setRun] = useState<LiveRunView | null>(null);
@@ -145,7 +151,9 @@ export default function OperationsArena({ defaultScenarioId }: { defaultScenario
   const [busy, setBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeConsoleTab, setActiveConsoleTab] = useState<"decisions" | "sandbox">("decisions");
+  const [activeConsoleTab, setActiveConsoleTab] = useState<
+    "decisions" | "sandbox"
+  >("decisions");
   const pollRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -305,8 +313,10 @@ export default function OperationsArena({ defaultScenarioId }: { defaultScenario
               Don&apos;t tour the infrastructure. <em>Operate it.</em>
             </h1>
             <p className="hero-lede">
-              Queue a disposable production incident or launch an interactive practice cluster on the{" "}
-              <strong>live homelab Kubernetes cluster</strong>. Read signals, execute operator decisions, and inspect real-time reconciliation.
+              Queue a disposable production incident or launch an interactive
+              practice cluster on the{" "}
+              <strong>live homelab Kubernetes cluster</strong>. Read signals,
+              execute operator decisions, and inspect real-time reconciliation.
             </p>
             <div className="hero-actions">
               <button
@@ -384,7 +394,8 @@ export default function OperationsArena({ defaultScenarioId }: { defaultScenario
               </span>
             </div>
             <p>
-              Public controls are allowlisted. Personal workloads remain isolated outside the drill boundary.
+              Public controls are allowlisted. Personal workloads remain
+              isolated outside the drill boundary.
             </p>
           </div>
         </section>
@@ -425,9 +436,23 @@ export default function OperationsArena({ defaultScenarioId }: { defaultScenario
                 {/* SVG Flow Connections */}
                 <svg className="runtime-flow-svg" aria-hidden="true">
                   <defs>
-                    <linearGradient id="flowGlow" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stopColor="var(--mint)" stopOpacity="0.8" />
-                      <stop offset="100%" stopColor="var(--acid)" stopOpacity="0.8" />
+                    <linearGradient
+                      id="flowGlow"
+                      x1="0%"
+                      y1="0%"
+                      x2="100%"
+                      y2="0%"
+                    >
+                      <stop
+                        offset="0%"
+                        stopColor="var(--mint)"
+                        stopOpacity="0.8"
+                      />
+                      <stop
+                        offset="100%"
+                        stopColor="var(--acid)"
+                        stopOpacity="0.8"
+                      />
                     </linearGradient>
                   </defs>
                   {/* k6 -> Envoy */}
@@ -436,7 +461,9 @@ export default function OperationsArena({ defaultScenarioId }: { defaultScenario
                     stroke="url(#flowGlow)"
                     strokeWidth={tel.requestsPerSec > 0 ? 3 : 1.5}
                     strokeDasharray={tel.requestsPerSec > 0 ? "6,4" : undefined}
-                    className={tel.requestsPerSec > 0 ? "animated-traffic-line" : ""}
+                    className={
+                      tel.requestsPerSec > 0 ? "animated-traffic-line" : ""
+                    }
                   />
                   {/* Envoy -> Checkout API */}
                   <path
@@ -444,12 +471,16 @@ export default function OperationsArena({ defaultScenarioId }: { defaultScenario
                     stroke={pressure ? "var(--red)" : "url(#flowGlow)"}
                     strokeWidth={tel.requestsPerSec > 0 ? 3 : 1.5}
                     strokeDasharray={tel.requestsPerSec > 0 ? "6,4" : undefined}
-                    className={tel.requestsPerSec > 0 ? "animated-traffic-line" : ""}
+                    className={
+                      tel.requestsPerSec > 0 ? "animated-traffic-line" : ""
+                    }
                   />
                   {/* Checkout API -> Postgres */}
                   <path
                     d="M 520 65 L 590 40"
-                    stroke={tel.postgresCpuPct > 50 ? "var(--amber)" : "var(--mint)"}
+                    stroke={
+                      tel.postgresCpuPct > 50 ? "var(--amber)" : "var(--mint)"
+                    }
                     strokeWidth={1.5}
                   />
                   {/* Checkout API -> Redis */}
@@ -493,7 +524,9 @@ export default function OperationsArena({ defaultScenarioId }: { defaultScenario
                   <ArrowRight className="rt-flow-arrow" />
 
                   {/* Node 3: Checkout API Workload */}
-                  <div className={`rt-node node-workload ${pressure ? "node-hot" : ""}`}>
+                  <div
+                    className={`rt-node node-workload ${pressure ? "node-hot" : ""}`}
+                  >
                     <div className="rt-node-head">
                       <Box size={18} />
                       <div>
@@ -502,11 +535,16 @@ export default function OperationsArena({ defaultScenarioId }: { defaultScenario
                       </div>
                     </div>
                     <div className="rt-pod-grid">
-                      {Array.from({ length: Math.max(1, tel.apiReplicas) }).map((_, idx) => (
-                        <span key={idx} className={`rt-pod ${pressure ? "pod-pressure" : "pod-healthy"}`}>
-                          <i /> pod-{idx + 1}
-                        </span>
-                      ))}
+                      {Array.from({ length: Math.max(1, tel.apiReplicas) }).map(
+                        (_, idx) => (
+                          <span
+                            key={idx}
+                            className={`rt-pod ${pressure ? "pod-pressure" : "pod-healthy"}`}
+                          >
+                            <i /> pod-{idx + 1}
+                          </span>
+                        ),
+                      )}
                     </div>
                   </div>
 
@@ -515,14 +553,22 @@ export default function OperationsArena({ defaultScenarioId }: { defaultScenario
 
                   {/* Node 4: Data Tier (Postgres & Redis) */}
                   <div className="rt-data-stack">
-                    <div className={`rt-node ${tel.postgresCpuPct > 50 ? "node-warn" : ""}`}>
+                    <div
+                      className={`rt-node ${tel.postgresCpuPct > 50 ? "node-warn" : ""}`}
+                    >
                       <Database size={16} />
                       <div>
                         <b>Postgres</b>
-                        <small>{tel.postgresCpuPct > 0 ? `${tel.postgresCpuPct}% CPU` : "healthy"}</small>
+                        <small>
+                          {tel.postgresCpuPct > 0
+                            ? `${tel.postgresCpuPct}% CPU`
+                            : "healthy"}
+                        </small>
                       </div>
                     </div>
-                    <div className={`rt-node ${cached ? "node-good" : "node-idle"}`}>
+                    <div
+                      className={`rt-node ${cached ? "node-good" : "node-idle"}`}
+                    >
                       <Database size={16} />
                       <div>
                         <b>Redis</b>
@@ -584,7 +630,9 @@ export default function OperationsArena({ defaultScenarioId }: { defaultScenario
               {activeConsoleTab === "decisions" ? (
                 <>
                   <p className="decision-intro">
-                    Interventions modify the <strong>live Kubernetes workload</strong>—rollout updates, scale pods, or re-balance placement.
+                    Interventions modify the{" "}
+                    <strong>live Kubernetes workload</strong>—rollout updates,
+                    scale pods, or re-balance placement.
                   </p>
                   <div className="decision-list">
                     {scenario.decisions.map((decision) => {
@@ -601,7 +649,11 @@ export default function OperationsArena({ defaultScenarioId }: { defaultScenario
                           className={selected ? "selected" : ""}
                         >
                           <span>
-                            {selected ? <Check size={16} /> : <Gauge size={16} />}
+                            {selected ? (
+                              <Check size={16} />
+                            ) : (
+                              <Gauge size={16} />
+                            )}
                           </span>
                           <span>
                             <b>{decision.label}</b>
@@ -615,7 +667,8 @@ export default function OperationsArena({ defaultScenarioId }: { defaultScenario
               ) : (
                 <div className="sandbox-control-suite">
                   <p className="decision-intro">
-                    Direct Crossplane reconciliation controls for testing custom failures and performance tuning.
+                    Direct Crossplane reconciliation controls for testing custom
+                    failures and performance tuning.
                   </p>
                   <div className="sandbox-groups">
                     {sandboxActionGroups.map((group) => (
@@ -819,7 +872,8 @@ export default function OperationsArena({ defaultScenarioId }: { defaultScenario
               <h2>Practice the failure, not the diagram.</h2>
             </div>
             <p>
-              Each scenario creates real disposable Kubernetes resources, captures telemetry evidence, and tears itself down.
+              Each scenario creates real disposable Kubernetes resources,
+              captures telemetry evidence, and tears itself down.
             </p>
           </div>
           <div className="drill-grid">
@@ -857,4 +911,3 @@ export default function OperationsArena({ defaultScenarioId }: { defaultScenario
     </div>
   );
 }
-
