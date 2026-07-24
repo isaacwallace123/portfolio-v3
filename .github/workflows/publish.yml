@@ -4,10 +4,9 @@ concurrency:
   group: publish-${{ github.ref }}
   cancel-in-progress: true
 
-# Build the auth service, the general-API stub, and the site images, and push to GHCR on every push
-# to main (and on version tags).
-# ArgoCD Image Updater in the homelab cluster rolls the :latest digest out automatically; a tag
-# push also produces an immutable :vX.Y.Z you can pin.
+# Build the services and sites, push them to GHCR, then pin the immutable commit tag in the
+# Kubernetes manifests. ArgoCD watches those manifest changes and performs the production rollout.
+# A version tag also produces an immutable :vX.Y.Z image.
 on:
   push:
     branches: [main]
@@ -128,3 +127,48 @@ jobs:
           build-args: ${{ matrix.build_args }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  pin-production-images:
+    if: github.ref == 'refs/heads/main'
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Pin published image tags for ArgoCD
+        shell: bash
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA::7}"
+
+          declare -A images=(
+            ["deploy/k8s/admin.yaml"]="portfolio-admin"
+            ["deploy/k8s/ailab.yaml"]="portfolio-ailab"
+            ["deploy/k8s/api.yaml"]="portfolio-api"
+            ["deploy/k8s/auth-service.yaml"]="portfolio-auth-service"
+            ["deploy/k8s/cyberlab.yaml"]="cyberlab-web"
+            ["deploy/k8s/homelab.yaml"]="portfolio-homelab"
+            ["deploy/k8s/web.yaml"]="portfolio-web"
+          )
+
+          for manifest in "${!images[@]}"; do
+            image="${images[$manifest]}"
+            sed -Ei \
+              "s#(image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/${image}:)[^[:space:]]+#\\1${short_sha}#" \
+              "$manifest"
+          done
+
+          if git diff --quiet -- deploy/k8s; then
+            echo "Production manifests already reference ${short_sha}."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/k8s
+          git commit -m "deploy images ${short_sha} [skip ci]"
+          git push origin HEAD:main
