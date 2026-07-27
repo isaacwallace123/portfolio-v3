@@ -154,6 +154,46 @@ export async function practiceAction(
   return asJson(res);
 }
 
+// A drill runs ON the provisioned cluster: it sets an objective and clock and unlocks decisions
+// against the same live workload, rather than provisioning a second environment.
+export async function startDrill(
+  runId: string,
+  drillId: string,
+): Promise<LiveRunView> {
+  const res = await fetch(`/api/live/runs/${runId}/drill`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ drillId }),
+  });
+  return asJson(res);
+}
+
+export async function endDrill(runId: string): Promise<LiveRunView> {
+  const res = await fetch(`/api/live/runs/${runId}/drill`, {
+    method: "DELETE",
+  });
+  return asJson(res);
+}
+
+export interface ClusterEvent {
+  id: string;
+  at: string;
+  source: string;
+  reason: string;
+  message: string;
+  severity: "info" | "warning";
+  objectKind: string;
+}
+
+// Real Kubernetes Events from the run namespace.
+export async function fetchRunEvents(runId: string): Promise<ClusterEvent[]> {
+  const res = await fetch(`/api/live/runs/${runId}/events`, {
+    cache: "no-store",
+  });
+  if (!res.ok) return [];
+  return res.json().catch(() => []);
+}
+
 export async function teardownLiveRun(runId: string): Promise<void> {
   const res = await fetch(`/api/live/runs/${runId}`, { method: "DELETE" });
   await asJson(res);

@@ -1,21 +1,13 @@
-import {
-  getRunSnapshot,
-  type RunTelemetry,
-  type RunView,
-} from "@iw/lab-runtime";
-import { getHomelabScenario } from "@/entities/scenario";
+import type { RunTelemetry, RunView } from "@iw/lab-runtime";
 
-// Merge a REAL cluster run with the scenario's modeled incident so the arena renders exactly as
-// designed while the infrastructure underneath is genuinely live. The run is real (a Crossplane
-// LabRun → disposable namespace + workload); the traffic-spike *incident* is a scripted drill played
-// on a clock. Operator decisions have BOTH effects: real (checkout actually scales, the Redis tier
-// actually comes up) and narrative (latency/error curves respond in the model).
-//
-// Real signals always win over the model where they overlap (apiReplicas, cache), so the topology
-// and decisions reflect the cluster, not a simulation.
+// Projects the API's run model into the shape the arena renders. Everything here is real: the run is
+// a Crossplane LabRun (disposable namespace + live workload), the telemetry is measured by that run's
+// Envoy gateway and metrics-server, and the drill clock, decisions, and their unlock state are
+// broker-authoritative. Nothing is simulated — the event stream comes from real Kubernetes Events on
+// a separate endpoint, and operator decisions patch the live workload.
 
-// Real provisioning takes ~15s before the incident clock should start.
-const PROVISION_MS = 16_000;
+// SLO the arena scores against (ms). Matches the drill objectives in the API catalog.
+const LATENCY_TARGET_MS = 120;
 export interface RealRun {
   runId: string;
   scenarioId: string;
@@ -34,6 +26,13 @@ export interface RealRun {
     acceptedAtMs: number;
   }[];
   availableDecisions?: string[];
+  // The drill currently layered on this cluster ("" when it is an open sandbox).
+  drillId?: string;
+  drillTitle?: string;
+  drillObjective?: string;
+  drillElapsedSeconds?: number;
+  drillDurationSeconds?: number;
+  drillComplete?: boolean;
   ttlSeconds: number;
   createdAt?: string;
   telemetry?: {
@@ -59,39 +58,34 @@ export interface LiveRunView extends RunView {
   targetPool: "apps" | "infra";
   loadEnabled: boolean;
   restartToken: string;
+  // Active drill layered on this cluster ("" when it is an open sandbox).
+  drillId: string;
+  drillTitle: string;
+  drillObjective: string;
+  drillComplete: boolean;
 }
 
 export function toLiveRunView(real: RealRun): LiveRunView {
-  const scenario = getHomelabScenario(real.scenarioId);
   const createdMs = real.createdAt ? Date.parse(real.createdAt) : Date.now();
-  const narrativeElapsed = Math.max(
-    0,
-    Math.min(Date.now() - createdMs - PROVISION_MS, scenario.durationMs),
+
+  // The active drill's clock is owned by the API (it starts when the drill starts, not when the
+  // cluster was provisioned). Everything below is measured or broker-authoritative.
+  const drillId = real.drillId ?? "";
+  const drillDurationMs = (real.drillDurationSeconds ?? 0) * 1000;
+  const drillElapsedMs = Math.min(
+    (real.drillElapsedSeconds ?? 0) * 1000,
+    drillDurationMs || Number.MAX_SAFE_INTEGER,
   );
 
-  // Derive which operator decisions are in effect from the real LabRun spec.
-  const accepted = new Set<string>();
-  if (real.apiReplicas >= 6) accepted.add("scale");
-  if (real.cacheEnabled) accepted.add("cache");
-  if (
-    real.releaseTrack === "stable" &&
-    real.scenarioId === "checkout-bad-release"
-  )
-    accepted.add("rollback");
-  if (real.dataState === "recovered") accepted.add("restore");
-  if (real.targetPool === "infra") accepted.add("evacuate");
-  for (const decision of real.acceptedDecisions ?? [])
-    accepted.add(decision.id);
+  const accepted = new Set((real.acceptedDecisions ?? []).map((d) => d.id));
 
-  const snap = getRunSnapshot(scenario, narrativeElapsed);
-
-  // Treat the run as "running" once its pods are measured, not only when the LabRun's Ready condition
-  // flips (that lags Crossplane reconciliation by up to a minute).
+  // Treat the cluster as "running" once its pods are measured, not only when the LabRun's Ready
+  // condition flips (that lags Crossplane reconciliation by up to a minute).
   const podsUp = (real.telemetry?.podCount ?? 0) > 0;
   const status: RunView["status"] =
     real.status === "deleting"
       ? "collecting"
-      : narrativeElapsed >= scenario.durationMs
+      : real.drillComplete
         ? "complete"
         : real.status === "ready" || podsUp
           ? "running"
@@ -101,10 +95,7 @@ export function toLiveRunView(real: RealRun): LiveRunView {
   // replicas and cache reflect actual cluster state. Score and Postgres load are derived from those
   // real signals (there is no telemetry model any more).
   const t = real.telemetry;
-  const target =
-    scenario.telemetry?.kind === "traffic-spike"
-      ? scenario.telemetry.latencyTargetMs
-      : 120;
+  const target = LATENCY_TARGET_MS;
   const p95 = t?.p95LatencyMs ?? 0;
   const errRate = t?.errorRatePct ?? 0;
   const telemetry: RunTelemetry = {
@@ -118,29 +109,15 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     score: Math.max(0, 100 - (p95 > target ? 30 : 0) - (errRate > 1 ? 25 : 0)),
   };
 
+  // Decisions and their unlock state are broker-authoritative (gated on the drill's own clock).
   const acceptedDecisions =
     real.acceptedDecisions ??
-    [...accepted].map((id) => {
-      const d = scenario.decisions.find((x) => x.id === id);
-      return {
-        id,
-        label: d?.label ?? id,
-        acceptedAtMs: d?.availableAfterMs ?? 0,
-      };
-    });
-
-  // Decisions unlock on the incident clock (a scripted drill), not the laggy Ready condition — the
-  // real patch applies fine as long as the LabRun exists.
-  const availableDecisions = real.availableDecisions
-    ? real.availableDecisions
-    : status === "collecting" || status === "complete"
-      ? []
-      : scenario.decisions
-          .filter(
-            (d) =>
-              narrativeElapsed >= d.availableAfterMs && !accepted.has(d.id),
-          )
-          .map((d) => d.id);
+    [...accepted].map((id) => ({
+      id,
+      label: id,
+      acceptedAtMs: 0,
+    }));
+  const availableDecisions = real.availableDecisions ?? [];
 
   const ttlMs = real.ttlSeconds * 1000;
   return {
@@ -149,12 +126,14 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     status,
     queuePosition: 0,
     createdAt: real.createdAt ?? new Date().toISOString(),
-    elapsedMs: narrativeElapsed,
-    durationMs: scenario.durationMs,
+    elapsedMs: drillElapsedMs,
+    durationMs: drillDurationMs,
     ttlMs,
     remainingTtlMs: Math.max(0, ttlMs - (Date.now() - createdMs)),
     telemetry,
-    visibleEvents: snap.visibleEvents,
+    // The arena renders REAL Kubernetes Events from /api/live/runs/{id}/events instead of a
+    // scripted timeline, so no synthetic events are projected here.
+    visibleEvents: [],
     acceptedDecisions,
     availableDecisions,
     complete: status === "complete",
@@ -169,5 +148,9 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     targetPool: real.targetPool ?? "apps",
     loadEnabled: real.loadEnabled ?? true,
     restartToken: real.restartToken ?? "baseline",
+    drillId,
+    drillTitle: real.drillTitle ?? "",
+    drillObjective: real.drillObjective ?? "",
+    drillComplete: real.drillComplete ?? false,
   };
 }

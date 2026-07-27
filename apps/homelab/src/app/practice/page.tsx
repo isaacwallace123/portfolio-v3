@@ -1,5 +1,5 @@
-import PracticeCluster from "@/widgets/PracticeCluster";
+import ClusterWorkbench from "@/widgets/ClusterWorkbench";
 
 export default function PracticePage() {
-  return <PracticeCluster />;
+  return <ClusterWorkbench />;
 }

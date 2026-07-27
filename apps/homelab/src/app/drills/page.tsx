@@ -1,5 +1,6 @@
-import OperationsArena from "@/widgets/OperationsArena";
+import { redirect } from "next/navigation";
 
+// Drills and the practice cluster are one surface now: a drill runs ON the cluster you provision.
 export default function DrillsPage() {
-  return <OperationsArena />;
+  redirect("/practice");
 }
