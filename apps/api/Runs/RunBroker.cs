@@ -92,7 +92,13 @@ public sealed class RunBroker
         var resource = await GetResourceAsync(runId, ct);
         if (resource is null)
             return BrokerResult.Fail(404, "No such run.");
-        if (!ScenarioDefinitions.All.TryGetValue(resource.Spec.ScenarioId, out var scenario))
+
+        // Decisions belong to the drill currently running on this cluster, and unlock on the drill's
+        // own clock — RunView is the single source of truth for both.
+        var view = RunView.From(resource);
+        if (view.DrillId.Length == 0)
+            return BrokerResult.Fail(409, "No drill is running on this cluster.");
+        if (!ScenarioDefinitions.All.TryGetValue(view.DrillId, out var scenario))
             return BrokerResult.Fail(404, "The scenario definition is not available.");
         var decision = scenario.Decisions.FirstOrDefault(d => d.Id == decisionId);
         if (decision is null)
@@ -100,10 +106,9 @@ public sealed class RunBroker
 
         const string annotationPrefix = "homeops.isaacwallace.dev/decision-";
         if (resource.Metadata.Annotations?.ContainsKey($"{annotationPrefix}{decisionId}") == true)
-            return BrokerResult.Accepted(RunView.From(resource));
+            return BrokerResult.Accepted(view);
 
-        var createdAt = resource.Metadata.CreationTimestamp ?? DateTime.UtcNow;
-        var elapsed = Math.Max(0, (DateTime.UtcNow - createdAt).TotalSeconds - 16);
+        var elapsed = view.DrillElapsedSeconds;
         if (elapsed < decision.AvailableAfterSeconds)
             return BrokerResult.Fail(
                 409,
@@ -132,6 +137,136 @@ public sealed class RunBroker
             _log.LogError(ex, "Failed to apply decision {Decision} to {RunId}.", decisionId, runId);
             return BrokerResult.Fail(502, "The run controller rejected the decision.");
         }
+    }
+
+    // Start a drill ON an already-running cluster: set the objective/clock and reset the workload to
+    // the drill's starting conditions. The namespace and its workload are untouched, so the drill
+    // begins against live traffic instead of waiting out another provisioning cycle.
+    public async Task<BrokerResult> StartDrillAsync(string runId, string drillId, CancellationToken ct)
+    {
+        var resource = await GetResourceAsync(runId, ct);
+        if (resource is null)
+            return BrokerResult.Fail(404, "No such run.");
+        if (!ScenarioDefinitions.IsDrill(drillId) ||
+            !ScenarioDefinitions.All.TryGetValue(drillId, out var drill))
+            return BrokerResult.Fail(404, $"Unknown drill '{drillId}'.");
+
+        // Clear any decision annotations from a previous drill so its decisions unlock again.
+        var annotations = new Dictionary<string, string?>
+        {
+            ["homeops.isaacwallace.dev/drill-started"] = DateTime.UtcNow.ToString("O"),
+        };
+        foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
+            if (key.StartsWith("homeops.isaacwallace.dev/decision-", StringComparison.Ordinal))
+                annotations[key] = null; // null removes the annotation in a merge patch
+
+        var patchBody = new
+        {
+            metadata = new { annotations },
+            spec = new
+            {
+                drillId,
+                drillStartedAt = DateTime.UtcNow.ToString("O"),
+                apiReplicas = drill.InitialApiReplicas,
+                cacheReplicas = drill.InitialCacheReplicas,
+                releaseTrack = drill.InitialReleaseTrack,
+                dataState = drill.InitialDataState,
+                targetPool = drill.InitialTargetPool,
+                loadReplicas = 1, // a drill always needs live traffic to measure against
+            },
+        };
+        return await PatchRunAsync(runId, patchBody, $"start drill {drillId}", ct);
+    }
+
+    // End the active drill and return the cluster to open-sandbox baseline.
+    public async Task<BrokerResult> EndDrillAsync(string runId, CancellationToken ct)
+    {
+        var resource = await GetResourceAsync(runId, ct);
+        if (resource is null)
+            return BrokerResult.Fail(404, "No such run.");
+
+        var annotations = new Dictionary<string, string?>();
+        foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
+            if (key.StartsWith("homeops.isaacwallace.dev/decision-", StringComparison.Ordinal))
+                annotations[key] = null;
+
+        var patchBody = new
+        {
+            metadata = new { annotations },
+            spec = new
+            {
+                drillId = "",
+                drillStartedAt = "",
+                releaseTrack = "stable",
+                dataState = "healthy",
+            },
+        };
+        return await PatchRunAsync(runId, patchBody, "end drill", ct);
+    }
+
+    private async Task<BrokerResult> PatchRunAsync(
+        string runId, object patchBody, string what, CancellationToken ct)
+    {
+        var patch = new k8s.Models.V1Patch(patchBody, k8s.Models.V1Patch.PatchType.MergePatch);
+        try
+        {
+            var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+                patch, LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
+            return BrokerResult.Accepted(RunView.From(Parse(updated)));
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogError(ex, "Failed to {What} on {RunId}.", what, runId);
+            return BrokerResult.Fail(502, "The run controller rejected the request.");
+        }
+    }
+
+    // Real Kubernetes Events from the run's namespace, sanitized to a small public shape. This is the
+    // arena's event stream: actual scheduling, image pull, probe, and scaling activity.
+    public async Task<IReadOnlyList<RunEventView>?> GetEventsAsync(string runId, CancellationToken ct)
+    {
+        var view = await GetRunAsync(runId, ct);
+        if (view is null) return null;
+        var ns = view.Namespace ?? runId;
+
+        try
+        {
+            var list = await _k8s.CoreV1.ListNamespacedEventAsync(ns, cancellationToken: ct);
+            return list.Items
+                .Select(e => new
+                {
+                    At = e.LastTimestamp ?? e.EventTime ?? e.FirstTimestamp ?? e.Metadata.CreationTimestamp,
+                    Event = e,
+                })
+                .Where(x => x.At is not null)
+                .OrderBy(x => x.At)
+                .TakeLast(40)
+                .Select(x => new RunEventView(
+                    x.Event.Metadata.Uid ?? $"{x.Event.Metadata.Name}",
+                    x.At!.Value,
+                    // Source is the controller that acted (scheduler, kubelet, deployment-controller).
+                    x.Event.ReportingComponent is { Length: > 0 } rc ? rc : x.Event.Source?.Component ?? "kubernetes",
+                    x.Event.Reason ?? "Event",
+                    Sanitize(x.Event.Message ?? ""),
+                    string.Equals(x.Event.Type, "Warning", StringComparison.OrdinalIgnoreCase)
+                        ? "warning"
+                        : "info",
+                    // The object kind/name the event is about (Pod, Deployment, ...).
+                    $"{x.Event.InvolvedObject?.Kind}".ToLowerInvariant()))
+                .ToArray();
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogDebug(ex, "Events unavailable for {RunId}.", runId);
+            return [];
+        }
+    }
+
+    // Events are cluster-internal text; keep them short and free of image digests / node identities.
+    private static string Sanitize(string message)
+    {
+        var text = message.Length <= 160 ? message : message[..160] + "…";
+        return text.Replace("\n", " ").Trim();
     }
 
     public async Task<RunView?> GetRunAsync(string runId, CancellationToken ct)

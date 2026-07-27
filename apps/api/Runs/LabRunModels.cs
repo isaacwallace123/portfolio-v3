@@ -47,6 +47,11 @@ public sealed class LabRunSpec
     [JsonPropertyName("targetPool")] public string? TargetPool { get; set; }
     [JsonPropertyName("loadReplicas")] public int? LoadReplicas { get; set; }
     [JsonPropertyName("restartToken")] public string? RestartToken { get; set; }
+
+    // A drill layers an objective, clock, and decision set over an already-running cluster.
+    // Empty drillId means the cluster is an open sandbox.
+    [JsonPropertyName("drillId")] public string? DrillId { get; set; }
+    [JsonPropertyName("drillStartedAt")] public string? DrillStartedAt { get; set; }
 }
 
 public sealed class LabRunStatus
@@ -76,6 +81,17 @@ public sealed record RunTelemetry(
     int P95LatencyMs,
     double ErrorRatePct);
 
+// A sanitized Kubernetes Event from the run namespace — real cluster activity (scheduling, image
+// pulls, probes, scaling), not a scripted timeline.
+public sealed record RunEventView(
+    string Id,
+    DateTime At,
+    string Source,
+    string Reason,
+    string Message,
+    string Severity,
+    string ObjectKind);
+
 // The sanitized projection returned to API clients. No raw Kubernetes objects, conditions, or labels
 // cross this boundary — only the run's identity, lifecycle phase, and envelope.
 public sealed record RunView(
@@ -93,7 +109,14 @@ public sealed record RunView(
     bool LoadEnabled,
     string RestartToken,
     IReadOnlyList<AcceptedDecision> AcceptedDecisions,
-    IReadOnlyList<string> AvailableDecisions)
+    IReadOnlyList<string> AvailableDecisions,
+    // Active drill layered on this cluster ("" when the cluster is an open sandbox).
+    string DrillId,
+    string DrillTitle,
+    string DrillObjective,
+    int DrillElapsedSeconds,
+    int DrillDurationSeconds,
+    bool DrillComplete)
 {
     // Map the LabRun's Crossplane conditions to a small, public lifecycle vocabulary, and surface the
     // decision-driven state (replica count, cache tier) so a caller can see the effect of a decision.
@@ -107,17 +130,48 @@ public sealed record RunView(
         else
             status = "provisioning";
 
-        var definition = ScenarioDefinitions.All.GetValueOrDefault(r.Spec.ScenarioId);
         var createdAt = r.Metadata.CreationTimestamp;
-        var elapsedSeconds = createdAt is null
+
+        // The active drill is spec.drillId when a drill was started on a running cluster. Runs created
+        // directly against a drill scenario (the original one-run-per-drill flow) still work: their
+        // scenarioId is the drill and the clock runs from provisioning.
+        var drillId = r.Spec.DrillId ?? "";
+        if (!ScenarioDefinitions.IsDrill(drillId)) drillId = "";
+        DateTime? drillStart = null;
+        if (drillId.Length > 0)
+        {
+            drillStart = DateTime.TryParse(
+                r.Spec.DrillStartedAt,
+                null,
+                System.Globalization.DateTimeStyles.AdjustToUniversal |
+                System.Globalization.DateTimeStyles.AssumeUniversal,
+                out var parsed)
+                ? parsed
+                : createdAt;
+        }
+        else if (ScenarioDefinitions.IsDrill(r.Spec.ScenarioId))
+        {
+            drillId = r.Spec.ScenarioId;
+            // Discount provisioning so the drill clock starts when the workload is actually serving.
+            drillStart = createdAt?.AddSeconds(16);
+        }
+
+        var definition = drillId.Length > 0
+            ? ScenarioDefinitions.All.GetValueOrDefault(drillId)
+            : null;
+        var elapsedSeconds = drillStart is null
             ? 0
-            : Math.Max(0, (DateTime.UtcNow - createdAt.Value).TotalSeconds - 16);
-        var accepted = ReadAcceptedDecisions(r, createdAt);
+            : Math.Max(0, (DateTime.UtcNow - drillStart.Value).TotalSeconds);
+
+        var accepted = ReadAcceptedDecisions(r, drillStart ?? createdAt);
         var acceptedIds = accepted.Select(d => d.Id).ToHashSet(StringComparer.Ordinal);
         var available = definition?.Decisions
             .Where(d => elapsedSeconds >= d.AvailableAfterSeconds && !acceptedIds.Contains(d.Id))
             .Select(d => d.Id)
             .ToArray() ?? [];
+
+        var duration = definition?.DurationSeconds ?? 0;
+        var drillComplete = definition is not null && elapsedSeconds >= duration;
 
         return new RunView(
             r.Spec.RunId,
@@ -134,7 +188,13 @@ public sealed record RunView(
             (r.Spec.LoadReplicas ?? 1) > 0,
             r.Spec.RestartToken ?? "baseline",
             accepted,
-            available);
+            available,
+            definition is null ? "" : drillId,
+            definition?.Title ?? "",
+            definition?.Objective ?? "",
+            (int)Math.Round(elapsedSeconds),
+            duration,
+            drillComplete);
     }
 
     private static IReadOnlyList<AcceptedDecision> ReadAcceptedDecisions(

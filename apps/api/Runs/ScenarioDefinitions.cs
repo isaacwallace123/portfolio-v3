@@ -27,6 +27,17 @@ public sealed record ScenarioDefinition(
 // decisions below, but cannot supply an image, command, manifest, namespace, or arbitrary patch.
 public static class ScenarioDefinitions
 {
+    // The open sandbox a practice cluster runs as when no drill is active. It is a scenario (it seeds
+    // the workload) but never a drill: it has no objective clock and no decisions.
+    public const string SandboxId = "practice-cluster";
+
+    // A drill is a scenario that layers an objective, a clock, and decisions over a live cluster.
+    public static bool IsDrill(string id) =>
+        id != SandboxId && All.TryGetValue(id, out var d) && d.Decisions.Count > 0;
+
+    public static IEnumerable<ScenarioDefinition> Drills =>
+        All.Values.Where(d => IsDrill(d.Id));
+
     public static readonly IReadOnlyDictionary<string, ScenarioDefinition> All =
         new[]
         {

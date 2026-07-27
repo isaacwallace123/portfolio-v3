@@ -103,6 +103,34 @@ public static class RunEndpoints
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite);
 
+        // Start a drill ON a running cluster (objective + clock + decisions over the live workload).
+        app.MapPost("/v1/runs/{runId}/drill", async (
+            string runId, DrillRequest req, RunBroker broker, CancellationToken ct) =>
+        {
+            var result = await broker.StartDrillAsync(runId, req.DrillId ?? "", ct);
+            return result.Run is not null
+                ? Results.Ok(result.Run)
+                : Results.Json(new { error = result.Error }, statusCode: result.Status);
+        }).RequireScope(ApiScopes.RunsWrite);
+
+        // End the active drill; the cluster stays up as an open sandbox.
+        app.MapDelete("/v1/runs/{runId}/drill", async (string runId, RunBroker broker, CancellationToken ct) =>
+        {
+            var result = await broker.EndDrillAsync(runId, ct);
+            return result.Run is not null
+                ? Results.Ok(result.Run)
+                : Results.Json(new { error = result.Error }, statusCode: result.Status);
+        }).RequireScope(ApiScopes.RunsWrite);
+
+        // Real Kubernetes Events from the run namespace.
+        app.MapGet("/v1/runs/{runId}/events", async (string runId, RunBroker broker, CancellationToken ct) =>
+        {
+            var events = await broker.GetEventsAsync(runId, ct);
+            return events is null
+                ? Results.NotFound(new { error = "No such run." })
+                : Results.Ok(events);
+        }).RequireScope(ApiScopes.RunsRead);
+
         app.MapDelete("/v1/runs/{runId}", async (string runId, RunBroker broker, CancellationToken ct) =>
         {
             var deleted = await broker.DeleteRunAsync(runId, ct);
@@ -113,4 +141,5 @@ public static class RunEndpoints
 
 record CreateRunRequest(string? ScenarioId);
 record DecisionRequest(string? DecisionId);
+record DrillRequest(string? DrillId);
 record PracticeActionRequest(string? ActionId);

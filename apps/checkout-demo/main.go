@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -30,8 +31,10 @@ import (
 var (
 	pool         *pgxpool.Pool
 	rdb          *redis.Client
-	cacheOn      bool
-	dbMs         = envInt("DB_QUERY_MS", 25)
+	cacheOn bool
+	// Fixed CPU work per request (sha256 rounds). Fixed *work* — not a fixed duration — so wall-clock
+	// latency rises when replicas are contended and falls when capacity is added.
+	workIterations = envInt("WORK_ITERATIONS", 3000)
 	releaseTrack = envString("RELEASE_TRACK", "stable")
 	dataState    = envString("DATA_STATE", "healthy")
 	requestCount atomic.Uint64
@@ -93,8 +96,8 @@ func main() {
 	http.HandleFunc("/", handleCheckout)
 
 	log.Printf(
-		"checkout-demo listening on :8080 (release=%s data=%s dbMs=%d cache=%v)",
-		releaseTrack, dataState, dbMs, cacheOn)
+		"checkout-demo listening on :8080 (release=%s data=%s work=%d cache=%v)",
+		releaseTrack, dataState, workIterations, cacheOn)
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
@@ -129,11 +132,7 @@ func handleCheckout(w http.ResponseWriter, r *http.Request) {
 	dbCtx, dbSpan := tracer.Start(ctx, "postgres.query",
 		trace.WithAttributes(attribute.String("db.system", "postgresql")))
 	var count int
-	err := pool.QueryRow(
-		dbCtx,
-		`SELECT count(*) FROM catalogue, pg_sleep($1)`,
-		float64(dbMs)/1000.0,
-	).Scan(&count)
+	err := pool.QueryRow(dbCtx, `SELECT count(*) FROM catalogue`).Scan(&count)
 	if err != nil {
 		dbSpan.RecordError(err)
 		dbSpan.SetStatus(codes.Error, "query failed")
@@ -142,6 +141,16 @@ func handleCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dbSpan.End()
+
+	// Real per-request CPU cost (order-pricing style work). This is what makes the service's capacity
+	// a function of how many checkout replicas are running: each replica has its own CPU limit, so
+	// scaling 3 -> 6 genuinely doubles throughput and halves the queue, and p95 falls. Keeping the
+	// cost in the app (rather than a DB sleep) is what makes the scale decision meaningful, while the
+	// cache decision still bypasses this path entirely.
+	_, compute := tracer.Start(ctx, "checkout.compute",
+		trace.WithAttributes(attribute.Int("work.iterations", workIterations)))
+	burnCPU(workIterations)
+	compute.End()
 
 	if dataState == "degraded" && sequence%4 == 0 {
 		_, integrity := tracer.Start(ctx, "catalogue.integrity",
@@ -177,6 +186,16 @@ func handleCheckout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Release", releaseTrack)
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(body)
+}
+
+// burnCPU performs a fixed amount of real hashing work. Fixed work per request (rather than a sleep)
+// is what ties the service's throughput to its CPU allocation, so replica count actually matters.
+func burnCPU(rounds int) {
+	buf := make([]byte, 1024)
+	for i := 0; i < rounds; i++ {
+		sum := sha256.Sum256(buf)
+		copy(buf, sum[:])
+	}
 }
 
 func fail(span trace.Span, w http.ResponseWriter, status int, errorType string) {
