@@ -241,14 +241,14 @@ public sealed class RunBroker
                 drillStartedAt = "",
                 releaseTrack = "stable",
                 dataState = "healthy",
-                apiReplicas = 2,
+                apiReplicas = 1,
                 cacheReplicas = 0,
                 loadReplicas = 0,
             },
         };
         var ended = await PatchRunAsync(runId, patchBody, "end drill", ct);
         await WriteThroughReplicasAsync(runId, Patch(
-            ("apiReplicas", 2), ("cacheReplicas", 0), ("loadReplicas", 0)), ct);
+            ("apiReplicas", 1), ("cacheReplicas", 0), ("loadReplicas", 0)), ct);
         return ended;
     }
 
@@ -492,7 +492,7 @@ public sealed class RunBroker
             "traffic-off" => Patch(("loadReplicas", 0)),
             "restart" => Patch(("restartToken", Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)))),
             "reset" => Patch(
-                ("apiReplicas", 2), ("cacheReplicas", 0), ("releaseTrack", "stable"),
+                ("apiReplicas", 1), ("cacheReplicas", 0), ("releaseTrack", "stable"),
                 ("dataState", "healthy"), ("targetPool", "apps"), ("loadReplicas", 0),
                 ("restartToken", Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)))),
             _ => new Dictionary<string, object>(),

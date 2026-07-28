@@ -140,14 +140,6 @@ export interface RunComponent {
   pods: RunPod[];
 }
 
-export async function fetchComponents(runId: string): Promise<RunComponent[]> {
-  const res = await fetch(`/api/live/runs/${runId}/components`, {
-    cache: "no-store",
-  });
-  if (!res.ok) return [];
-  return res.json().catch(() => []);
-}
-
 export async function fetchLiveStatus(): Promise<LiveStatus> {
   const res = await fetch("/api/live/status", { cache: "no-store" });
   return asJson(res);
@@ -174,11 +166,6 @@ export async function createLiveRun(scenarioId: string): Promise<LiveRunView> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ scenarioId }),
   });
-  return asJson(res);
-}
-
-export async function getLiveRun(runId: string): Promise<LiveRunView> {
-  const res = await fetch(`/api/live/runs/${runId}`, { cache: "no-store" });
   return asJson(res);
 }
 
@@ -243,30 +230,26 @@ export interface ClusterEvent {
   objectKind: string;
 }
 
-// Real Kubernetes Events from the run namespace.
-export async function fetchRunEvents(runId: string): Promise<ClusterEvent[]> {
-  const res = await fetch(`/api/live/runs/${runId}/events`, {
-    cache: "no-store",
-  });
-  if (!res.ok) return [];
-  return res.json().catch(() => []);
+/** One frame of a cluster: the run and everything measured about it, at one instant. */
+export interface ClusterSnapshot {
+  run: LiveRunView;
+  components: RunComponent[];
+  events: ClusterEvent[];
+  trace: LiveTrace | null;
 }
 
+export async function fetchSnapshot(runId: string): Promise<ClusterSnapshot> {
+  const res = await fetch(`/api/live/runs/${runId}/snapshot`);
+  return asJson(res);
+}
+
+// Real Kubernetes Events from the run namespace.
 export async function teardownLiveRun(runId: string): Promise<void> {
   const res = await fetch(`/api/live/runs/${runId}`, { method: "DELETE" });
   await asJson(res);
 }
 
 // Returns null while no trace has been captured yet (traffic off, or the workload still starting).
-export async function getLiveTrace(runId: string): Promise<LiveTrace | null> {
-  const res = await fetch(`/api/live/runs/${runId}/trace`, {
-    cache: "no-store",
-  });
-  if (!res.ok) return null;
-  const body = await res.json().catch(() => null);
-  return body && Array.isArray(body.spans) ? (body as LiveTrace) : null;
-}
-
 export async function getLiveReport(runId: string): Promise<LiveReport | null> {
   const res = await fetch(`/api/live/runs/${runId}/report`, {
     cache: "no-store",

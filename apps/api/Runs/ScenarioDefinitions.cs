@@ -168,7 +168,10 @@ public static class ScenarioDefinitions
                 "standard",
                 900,
                 "Experiment safely, observe real reconciliation, then tear the workspace down.",
-                2, 0, "stable", "healthy", "apps",
+                // One replica, no cache, no traffic: the sandbox starts at the smallest thing that
+                // serves a request, so every control the page offers has somewhere to go and its
+                // effect is visible against a baseline you chose rather than one already half set.
+                1, 0, "stable", "healthy", "apps",
                 []),
         }.ToDictionary(s => s.Id, StringComparer.Ordinal);
 

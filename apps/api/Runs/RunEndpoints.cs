@@ -78,6 +78,38 @@ public static class RunEndpoints
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite);
 
+        // Everything the live page needs for one frame, in one call.
+        //
+        // The page used to assemble a frame from five separate reads (run, telemetry, components,
+        // events, trace). At a 1.2s poll that is ~250 requests a minute against a per-key fixed
+        // window, so the window would empty part-way through every minute and the page would spend
+        // the rest of it failing — the periodic "reconnecting" flap. One call per frame is ~50 a
+        // minute, and it also means the numbers on screen all describe the same instant instead of
+        // five instants smeared across five round trips.
+        app.MapGet("/v1/runs/{runId}/snapshot", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
+        {
+            var owner = Owner(ctx);
+            var run = await broker.GetRunAsync(runId, owner, ct);
+            if (run is null) return Results.NotFound(new { error = "No such run." });
+
+            // Gathered concurrently: the slowest of these is the Envoy scrape, and serialising them
+            // would put the whole frame behind it.
+            var telemetryTask = broker.GetTelemetryAsync(runId, owner, ct);
+            var componentsTask = broker.GetComponentsAsync(runId, owner, ct);
+            var eventsTask = broker.GetEventsAsync(runId, owner, ct);
+            var traceTask = broker.GetTraceAsync(runId, owner, ct);
+            await Task.WhenAll(telemetryTask, componentsTask, eventsTask, traceTask);
+
+            return Results.Ok(new
+            {
+                run,
+                telemetry = await telemetryTask,
+                components = await componentsTask ?? [],
+                events = await eventsTask ?? [],
+                trace = await traceTask,
+            });
+        }).RequireScope(ApiScopes.RunsRead);
+
         app.MapGet("/v1/runs/{runId}/telemetry", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
             var telemetry = await broker.GetTelemetryAsync(runId, Owner(ctx), ct);
