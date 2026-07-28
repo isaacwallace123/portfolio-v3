@@ -1590,3 +1590,15 @@
     transform: translateY(0);
   }
 }
+
+/* A replica the cluster has refused outright — the quota is full, or nothing can schedule it.
+   Distinct from a pending ghost: this one is not coming, and says so instead of spinning. */
+.cardBlocked {
+  animation: cardIn var(--dur-med) var(--ease) both;
+  opacity: 0.75;
+  border-color: color-mix(in srgb, var(--amber) 55%, var(--line));
+  color: var(--amber);
+}
+.cardBlocked .phaseText {
+  color: var(--amber);
+}

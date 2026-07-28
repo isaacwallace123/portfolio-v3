@@ -32,6 +32,7 @@ import {
   Zap,
 } from "lucide-react";
 import { AUTH_URL, HOMELAB_URL } from "@iw/core";
+import { RangeSlider } from "@iw/ui";
 import { homelabScenarios } from "@/entities/scenario";
 import {
   createLiveRun,
@@ -368,9 +369,6 @@ export default function ClusterWorkbench() {
   const [levels, setLevels] = useState<Set<Level>>(new Set());
   const [phases, setPhases] = useState<Set<Phase>>(new Set());
   const [query, setQuery] = useState("");
-  // Slider positions mid-drag, before they are committed to the cluster.
-  const [drag, setDrag] = useState<Record<string, number>>({});
-  const commitTimers = useRef<Record<string, number>>({});
 
   // Ticks once a second so the countdown and elapsed clock move smoothly between polls.
   const [now, setNow] = useState(() => Date.now());
@@ -598,6 +596,21 @@ export default function ClusterWorkbench() {
       default:
         return 1;
     }
+  };
+
+  // A replica the cluster has refused to create — quota exhausted, nothing schedulable. Without
+  // this a ghost card spins on "requesting…" forever and reads as slowness, when the cluster has
+  // actually already answered and the answer was no.
+  const blockedReason = (svc: ServiceId): string | null => {
+    const hit = events.find(
+      (e) =>
+        (e.reason === "FailedCreate" || e.reason === "FailedScheduling") &&
+        e.message.includes(svc),
+    );
+    if (!hit) return null;
+    return hit.message.includes("exceeded quota")
+      ? "quota reached"
+      : "cannot schedule";
   };
 
   // The one tier that is currently not where it was asked to be. Drives the banner so a change is
@@ -888,33 +901,44 @@ export default function ClusterWorkbench() {
 
                     // Asked for, not yet reported by the cluster. Drawn in place so the edges fan
                     // out to their final positions the moment the slider moves.
-                    ...Array.from({ length: ghosts }, (_, i) => (
-                      <div
-                        key={`${svc}:ghost${i}`}
-                        ref={(el) => {
-                          cardRefs.current[`${svc}:ghost${i}`] = el;
-                        }}
-                        className={`${styles.card} ${styles.cardGhost}`}
-                        aria-hidden="true"
-                      >
-                        <span className={styles.cardHead}>
-                          <span className={styles.cardIcon}>
-                            <Icon size={14} />
+                    ...Array.from({ length: ghosts }, (_, i) => {
+                      const blocked = blockedReason(svc);
+                      return (
+                        <div
+                          key={`${svc}:ghost${i}`}
+                          ref={(el) => {
+                            cardRefs.current[`${svc}:ghost${i}`] = el;
+                          }}
+                          className={`${styles.card} ${styles.cardGhost} ${
+                            blocked ? styles.cardBlocked : ""
+                          }`}
+                          aria-hidden="true"
+                        >
+                          <span className={styles.cardHead}>
+                            <span className={styles.cardIcon}>
+                              <Icon size={14} />
+                            </span>
+                            <span className={styles.cardTitle}>
+                              <b>{meta.label}</b>
+                              <small>{blocked ? "refused" : "pending"}</small>
+                            </span>
+                            {blocked ? (
+                              <AlertTriangle size={12} />
+                            ) : (
+                              <Loader2 size={12} className={styles.spin} />
+                            )}
                           </span>
-                          <span className={styles.cardTitle}>
-                            <b>{meta.label}</b>
-                            <small>pending</small>
+                          <span className={styles.cardBar}>
+                            {!blocked && <i className={styles.barPulse} />}
                           </span>
-                          <Loader2 size={12} className={styles.spin} />
-                        </span>
-                        <span className={styles.cardBar}>
-                          <i className={styles.barPulse} />
-                        </span>
-                        <span className={styles.cardFoot}>
-                          <span className={styles.phaseText}>requesting…</span>
-                        </span>
-                      </div>
-                    )),
+                          <span className={styles.cardFoot}>
+                            <span className={styles.phaseText}>
+                              {blocked ?? "requesting…"}
+                            </span>
+                          </span>
+                        </div>
+                      );
+                    }),
                   ];
                 })}
               </div>
@@ -945,7 +969,8 @@ export default function ClusterWorkbench() {
               <i /> {flowing ? "traffic flowing" : "traffic stopped"}
             </span>
             <span>
-              {run.podCount ?? 0} pods · {components.length} services
+              {components.reduce((a, c) => a + c.pods.length, 0)} pods ·{" "}
+              {components.length} services
             </span>
             {trace && trace.spans.length > 0 && (
               <span>
@@ -1383,76 +1408,26 @@ export default function ClusterWorkbench() {
 
               {tab === "controls" && (
                 <div className={styles.controls}>
-                  {SLIDERS.map((sl) => {
-                    // While dragging, the thumb follows the pointer locally and nothing is sent.
-                    // Committing on every step fired one patch per notch, and a burst of patches on
-                    // a single LabRun is exactly what holds Crossplane's realtime circuit breaker
-                    // open — so the drag itself was making the cluster slow to answer it.
-                    const v = drag[sl.prefix] ?? sl.value(run);
-                    const pendingHere = busy?.startsWith(sl.prefix) ?? false;
-                    return (
-                      <div key={sl.label} className={styles.control}>
-                        <label>
-                          {sl.label}
-                          <b className={styles.sliderValue}>
-                            {pendingHere && (
-                              <Loader2 size={11} className={styles.spin} />
-                            )}
-                            {sl.unit(v)}
-                          </b>
-                        </label>
-                        <input
-                          className={styles.slider}
-                          type="range"
-                          min={sl.min}
-                          max={sl.max}
-                          step={1}
-                          value={v}
-                          onChange={(e) => {
-                            const n = Number(e.target.value);
-                            setDrag((d) => ({ ...d, [sl.prefix]: n }));
-                            window.clearTimeout(
-                              commitTimers.current[sl.prefix],
-                            );
-                            commitTimers.current[sl.prefix] = window.setTimeout(
-                              () => {
-                                setDrag((d) => {
-                                  const next = { ...d };
-                                  delete next[sl.prefix];
-                                  return next;
-                                });
-                                if (n === sl.value(run)) return;
-                                act(
-                                  `${sl.prefix}${n}`,
-                                  () =>
-                                    practiceAction(
-                                      run.runId,
-                                      `${sl.prefix}${n}`,
-                                    ),
-                                  (r) => sl.apply(r, n),
-                                );
-                              },
-                              220,
-                            );
-                          }}
-                        />
-                        <div className={styles.ticks}>
-                          {Array.from(
-                            { length: sl.max - sl.min + 1 },
-                            (_, i) => sl.min + i,
-                          ).map((n) => (
-                            <span
-                              key={n}
-                              className={n === v ? styles.tickOn : ""}
-                            >
-                              {n}
-                            </span>
-                          ))}
-                        </div>
-                        <small>{sl.hint}</small>
-                      </div>
-                    );
-                  })}
+                  {SLIDERS.map((sl) => (
+                    <RangeSlider
+                      key={sl.label}
+                      label={sl.label}
+                      hint={sl.hint}
+                      min={sl.min}
+                      max={sl.max}
+                      ticks
+                      value={sl.value(run)}
+                      format={sl.unit}
+                      pending={busy?.startsWith(sl.prefix) ?? false}
+                      onCommit={(n) =>
+                        act(
+                          `${sl.prefix}${n}`,
+                          () => practiceAction(run.runId, `${sl.prefix}${n}`),
+                          (r) => sl.apply(r, n),
+                        )
+                      }
+                    />
+                  ))}
 
                   {CONTROLS.map((g) => {
                     const activeId = g.active(run);
