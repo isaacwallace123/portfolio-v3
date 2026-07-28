@@ -1,10 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   Activity,
   AlertTriangle,
-  ArrowRight,
   Check,
   ChevronRight,
   CircleSlash,
@@ -16,11 +21,12 @@ import {
   MemoryStick,
   Play,
   Radio,
-  RefreshCw,
   Server,
+  SlidersHorizontal,
   Square,
   Timer,
   Trash2,
+  X,
   Zap,
 } from "lucide-react";
 import { AUTH_URL, HOMELAB_URL } from "@iw/core";
@@ -52,23 +58,43 @@ import styles from "./ClusterWorkbench.module.css";
 const SANDBOX = "practice-cluster";
 const drills = homelabScenarios.filter((s) => s.id !== SANDBOX);
 
-// Each tier of the request path, in flow order, mapped to the Deployment that backs it.
-const TIERS = [
-  { id: "k6", label: "k6", role: "load generator", icon: Zap, accent: "load" },
-  { id: "envoy", label: "Envoy", role: "gateway", icon: Radio, accent: "edge" },
+// Canvas layout: which service sits in which column/row, and how the request flows between them.
+// The graph is fixed (it is the scenario's architecture); only its live state changes.
+const NODES = [
+  { id: "k6", label: "k6", role: "load generator", icon: Zap, col: 1, row: 1 },
+  { id: "envoy", label: "Envoy", role: "gateway", icon: Radio, col: 2, row: 1 },
   {
     id: "checkout",
     label: "checkout",
     role: "API",
     icon: Server,
-    accent: "app",
+    col: 3,
+    row: 1,
+  },
+  {
+    id: "postgres",
+    label: "Postgres",
+    role: "database",
+    icon: Database,
+    col: 4,
+    row: 0,
+  },
+  {
+    id: "redis",
+    label: "Redis",
+    role: "cache",
+    icon: Database,
+    col: 4,
+    row: 2,
   },
 ] as const;
 
-const DATA_TIERS = [
-  { id: "postgres", label: "Postgres", role: "database", icon: Database },
-  { id: "redis", label: "Redis", role: "cache", icon: Database },
-] as const;
+const EDGES: [string, string][] = [
+  ["k6", "envoy"],
+  ["envoy", "checkout"],
+  ["checkout", "postgres"],
+  ["checkout", "redis"],
+];
 
 const controlGroups = [
   {
@@ -137,98 +163,7 @@ function ago(iso: string) {
   return `${Math.floor(s / 3600)}h`;
 }
 
-/** A tier node in the flowchart: live readiness, aggregate usage, and every pod behind it. */
-function TierNode({
-  label,
-  role,
-  Icon,
-  component,
-  accent,
-  detail,
-  dimmed,
-}: {
-  label: string;
-  role: string;
-  Icon: typeof Server;
-  component?: RunComponent;
-  accent?: string;
-  detail?: string;
-  dimmed?: boolean;
-}) {
-  const desired = component?.desired ?? 0;
-  const ready = component?.ready ?? 0;
-  const healthy = desired > 0 && ready === desired;
-  const pods = component?.pods ?? [];
-  const limit = component?.cpuLimitMillicoresPerPod ?? 0;
-
-  return (
-    <div
-      className={`${styles.tier} ${dimmed ? styles.tierDim : ""} ${
-        accent ? (styles[`tier-${accent}`] ?? "") : ""
-      }`}
-    >
-      <div className={styles.tierTop}>
-        <span className={styles.tierIcon}>
-          <Icon size={15} />
-        </span>
-        <div className={styles.tierName}>
-          <b>{label}</b>
-          <small>{role}</small>
-        </div>
-        <span
-          className={`${styles.pill} ${
-            desired === 0
-              ? styles.pillIdle
-              : healthy
-                ? styles.pillOk
-                : styles.pillWarn
-          }`}
-        >
-          {desired === 0 ? "off" : `${ready}/${desired}`}
-        </span>
-      </div>
-
-      {detail && <p className={styles.tierDetail}>{detail}</p>}
-
-      {pods.length > 0 && (
-        <div className={styles.pods}>
-          {pods.map((p) => {
-            const pct =
-              limit > 0 ? Math.min(100, (p.cpuMillicores / limit) * 100) : 0;
-            return (
-              <div key={p.name} className={styles.pod} title={`pod …${p.name}`}>
-                <span className={styles.podId}>…{p.name}</span>
-                <div className={styles.podBar}>
-                  <i
-                    className={pct > 85 ? styles.podBarHot : ""}
-                    style={{ width: `${Math.max(3, pct)}%` }}
-                  />
-                </div>
-                <span className={styles.podStat}>{p.cpuMillicores}m</span>
-                <span className={styles.podStat}>{p.memoryMiB}Mi</span>
-                {!p.ready && <span className={styles.podWarn}>starting</span>}
-                {p.restarts > 0 && (
-                  <span className={styles.podWarn}>×{p.restarts}</span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {component && pods.length > 0 && (
-        <div className={styles.tierTotals}>
-          <span>
-            <Cpu size={11} /> {component.cpuMillicores}m
-          </span>
-          <span>
-            <MemoryStick size={11} /> {component.memoryMiB} MiB
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
+type Tab = "drills" | "controls" | "activity";
 
 export default function ClusterWorkbench() {
   const [status, setStatus] = useState<LiveStatus | null>(null);
@@ -240,8 +175,49 @@ export default function ClusterWorkbench() {
   const [report, setReport] = useState<LiveReport | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("drills");
   const poll = useRef<number | null>(null);
 
+  // ── edge geometry: measure node boxes and draw curves between them ────────
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const nodeRefs = useRef<Record<string, HTMLElement | null>>({});
+  const [paths, setPaths] = useState<{ id: string; d: string }[]>([]);
+
+  const measure = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const base = canvas.getBoundingClientRect();
+    const next: { id: string; d: string }[] = [];
+    for (const [from, to] of EDGES) {
+      const a = nodeRefs.current[from]?.getBoundingClientRect();
+      const b = nodeRefs.current[to]?.getBoundingClientRect();
+      if (!a || !b) continue;
+      const x1 = a.right - base.left;
+      const y1 = a.top + a.height / 2 - base.top;
+      const x2 = b.left - base.left;
+      const y2 = b.top + b.height / 2 - base.top;
+      const dx = Math.max(28, (x2 - x1) * 0.5);
+      next.push({
+        id: `${from}-${to}`,
+        d: `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`,
+      });
+    }
+    setPaths(next);
+  }, []);
+
+  useLayoutEffect(() => {
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (canvasRef.current) ro.observe(canvasRef.current);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [measure, components.length, run?.runId]);
+
+  // ── data ──────────────────────────────────────────────────────────────────
   const stopPolling = useCallback(() => {
     if (poll.current !== null) {
       window.clearInterval(poll.current);
@@ -276,7 +252,6 @@ export default function ClusterWorkbench() {
     [refresh, stopPolling],
   );
 
-  // Resume the cluster this account already owns, so a reload never orphans one.
   useEffect(() => {
     fetchLiveStatus()
       .then((s) => {
@@ -332,7 +307,6 @@ export default function ClusterWorkbench() {
   const teardown = useCallback(async () => {
     if (!run) return;
     setBusy("teardown");
-    setError(null);
     try {
       await teardownLiveRun(run.runId);
       stopPolling();
@@ -341,6 +315,7 @@ export default function ClusterWorkbench() {
       setEvents([]);
       setTrace(null);
       setReport(null);
+      setSelected(null);
       fetchPlatformStatus()
         .then(setPlatform)
         .catch(() => setPlatform(null));
@@ -351,9 +326,17 @@ export default function ClusterWorkbench() {
     }
   }, [run, stopPolling]);
 
-  const byName = (n: string) => components.find((c) => c.name === n);
+  const byName = useCallback(
+    (n: string) => components.find((c) => c.name === n),
+    [components],
+  );
 
-  // ── signed out / no cluster ────────────────────────────────────────────────
+  // The React Compiler memoizes this; a manual useMemo here would only fight it.
+  const drill = run?.drillId
+    ? (drills.find((d) => d.id === run.drillId) ?? null)
+    : null;
+
+  // ── empty / signed-out ────────────────────────────────────────────────────
   if (!run) {
     const signedIn = status?.signedIn === true;
     const slots = platform?.slotsAvailable ?? null;
@@ -362,7 +345,7 @@ export default function ClusterWorkbench() {
     )}`;
 
     return (
-      <div className={styles.page}>
+      <div className={styles.shell}>
         <div className={styles.empty}>
           <p className={styles.kicker}>
             <Radio size={14} /> Real cluster control
@@ -374,11 +357,10 @@ export default function ClusterWorkbench() {
             gateway and a k6 load generator. Operate it freely, or run a drill
             on it and work a real incident.
           </p>
-
           <ul className={styles.included}>
             <li>
-              <Server size={15} /> Isolated namespace with a quota and a
-              default-deny network policy
+              <Server size={15} /> Isolated namespace, quota and default-deny
+              network policy
             </li>
             <li>
               <Activity size={15} /> Every metric measured from the running
@@ -410,15 +392,9 @@ export default function ClusterWorkbench() {
                     : "Provision cluster"}
             </button>
           ) : (
-            <>
-              <a className={styles.primary} href={signInUrl}>
-                <Lock size={16} /> Sign in to provision
-              </a>
-              <p className={styles.capacity}>
-                Provisioning creates real infrastructure, so it is tied to an
-                account. Signing in takes a second and needs no password.
-              </p>
-            </>
+            <a className={styles.primary} href={signInUrl}>
+              <Lock size={16} /> Sign in to provision
+            </a>
           )}
 
           {platform && (
@@ -434,375 +410,461 @@ export default function ClusterWorkbench() {
     );
   }
 
-  // ── live cluster ───────────────────────────────────────────────────────────
+  // ── live cluster: canvas + inspector ──────────────────────────────────────
   const t = run.telemetry;
-  const drill = run.drillId ? drills.find((d) => d.id === run.drillId) : null;
-  const overSlo = t.p95LatencyMs > t.latencyTargetMs;
-  const erroring = t.errorRatePct > 1;
   const provisioning = run.status === "provisioning";
   const totalCpu = components.reduce((a, c) => a + c.cpuMillicores, 0);
   const totalMem = components.reduce((a, c) => a + c.memoryMiB, 0);
+  const flowing = run.loadEnabled && t.requestsPerSec > 0;
+  const selectedComp = selected ? byName(selected) : null;
+  const selectedNode = NODES.find((n) => n.id === selected);
 
   return (
-    <div className={styles.page}>
-      <header className={styles.bar}>
-        <div className={styles.barMain}>
+    <div className={styles.shell}>
+      {/* top bar */}
+      <header className={styles.topbar}>
+        <div className={styles.identity}>
           <span
             className={`${styles.dot} ${provisioning ? styles.dotWarn : styles.dotOk}`}
           />
-          <h1>Practice cluster</h1>
-          <code className={styles.ns}>{run.namespace ?? run.runId}</code>
+          <b>Practice cluster</b>
+          <code>{run.namespace ?? run.runId}</code>
           {drill && <span className={styles.drillTag}>{run.drillTitle}</span>}
         </div>
-        <div className={styles.barMeta}>
-          <span>
+        <div className={styles.topStats}>
+          <span title="Requests per second through Envoy">
+            <Activity size={13} /> {t.requestsPerSec}/s
+          </span>
+          <span
+            className={
+              t.p95LatencyMs > t.latencyTargetMs ? styles.warnText : ""
+            }
+            title="p95 latency"
+          >
+            <Gauge size={13} /> {t.p95LatencyMs}ms
+          </span>
+          <span
+            className={t.errorRatePct > 1 ? styles.warnText : ""}
+            title="5xx error rate"
+          >
+            <AlertTriangle size={13} /> {t.errorRatePct.toFixed(2)}%
+          </span>
+          <span title="Cluster CPU / memory in use">
             <Cpu size={13} /> {totalCpu}m
           </span>
           <span>
-            <MemoryStick size={13} /> {totalMem} MiB
+            <MemoryStick size={13} /> {totalMem}Mi
           </span>
-          <span>
-            <Timer size={13} /> {clock(run.remainingTtlMs)} left
+          <span title="Time until automatic teardown">
+            <Timer size={13} /> {clock(run.remainingTtlMs)}
           </span>
           <button
             className={styles.danger}
             onClick={teardown}
             disabled={busy !== null}
           >
-            <Trash2 size={14} /> Tear down
+            <Trash2 size={13} /> Tear down
           </button>
         </div>
       </header>
 
-      {error && <p className={styles.error}>{error}</p>}
+      {error && (
+        <p className={styles.errorFloat} role="alert">
+          {error}
+        </p>
+      )}
 
-      <section className={styles.canvas}>
-        <div className={styles.canvasHead}>
-          <h2>
-            <Activity size={15} /> Request path
-          </h2>
-          <span className={styles.sub}>
-            {run.loadEnabled ? "traffic flowing" : "traffic stopped"} · measured
-            at the gateway
-          </span>
-        </div>
-
-        <div className={styles.flow}>
-          {TIERS.map((tier) => (
-            <div key={tier.id} className={styles.flowStep}>
-              <TierNode
-                label={tier.label}
-                role={tier.role}
-                Icon={tier.icon}
-                accent={tier.accent}
-                component={byName(tier.id)}
-                dimmed={tier.id === "k6" && !run.loadEnabled}
-                detail={
-                  tier.id === "envoy"
-                    ? `${t.requestsPerSec} req/s · p95 ${t.p95LatencyMs}ms`
-                    : tier.id === "checkout"
-                      ? `release ${run.releaseTrack} · pool ${run.targetPool}`
-                      : run.loadEnabled
-                        ? "closed-loop load"
-                        : "stopped"
-                }
-              />
-              <div
-                className={`${styles.link} ${run.loadEnabled ? styles.linkLive : ""}`}
-              >
-                <ArrowRight size={14} />
-              </div>
-            </div>
-          ))}
-
-          <div className={styles.dataCol}>
-            {DATA_TIERS.map((d) => (
-              <TierNode
-                key={d.id}
-                label={d.label}
-                role={d.role}
-                Icon={d.icon}
-                component={byName(d.id)}
-                dimmed={d.id === "redis" && !t.cacheActive}
-                detail={
-                  d.id === "postgres"
-                    ? `${t.postgresCpuPct}% of its CPU limit`
-                    : t.cacheActive
-                      ? "serving reads"
-                      : "not provisioned"
-                }
+      <div className={styles.body}>
+        {/* ── canvas ── */}
+        <div className={styles.canvas} ref={canvasRef}>
+          <svg className={styles.edges} aria-hidden="true">
+            {paths.map((p) => (
+              <path
+                key={p.id}
+                d={p.d}
+                className={`${styles.edge} ${flowing ? styles.edgeLive : ""}`}
               />
             ))}
-          </div>
-        </div>
+          </svg>
 
-        <div className={styles.metrics}>
-          <div className={styles.metric}>
-            <span>Throughput</span>
-            <strong>
-              {t.requestsPerSec}
-              <i>/s</i>
-            </strong>
-            <small>requests through Envoy</small>
-          </div>
-          <div
-            className={`${styles.metric} ${overSlo ? styles.bad : styles.good}`}
-          >
-            <span>p95 latency</span>
-            <strong>
-              {t.p95LatencyMs}
-              <i>ms</i>
-            </strong>
-            <small>objective &lt; {t.latencyTargetMs}ms</small>
-          </div>
-          <div
-            className={`${styles.metric} ${erroring ? styles.bad : styles.good}`}
-          >
-            <span>Error rate</span>
-            <strong>
-              {t.errorRatePct.toFixed(2)}
-              <i>%</i>
-            </strong>
-            <small>5xx responses</small>
-          </div>
-          <div className={styles.metric}>
-            <span>Pods</span>
-            <strong>{run.podCount ?? 0}</strong>
-            <small>{components.length} components</small>
-          </div>
-          <div className={styles.metric}>
-            <span>SLO score</span>
-            <strong>{t.score}</strong>
-            <small>latency + errors</small>
-          </div>
-        </div>
-      </section>
-
-      <div className={styles.grid}>
-        <div className={styles.main}>
-          <section className={styles.card}>
-            <div className={styles.cardHead}>
-              <h2>
-                <Layers size={15} /> Cluster activity
-              </h2>
-              <span className={styles.sub}>live Kubernetes events</span>
-            </div>
-            <div className={styles.events}>
-              {events.length === 0 ? (
-                <p className={styles.blank}>
-                  {provisioning ? "Scheduling workloads…" : "No recent events."}
-                </p>
-              ) : (
-                events
-                  .slice()
-                  .reverse()
-                  .map((e) => (
-                    <article key={e.id} className={styles.event}>
-                      <i
-                        className={
-                          e.severity === "warning" ? styles.evWarn : styles.evOk
-                        }
-                      />
-                      <div>
-                        <p>
-                          <b>{e.reason}</b>
-                          <span className={styles.evMeta}>
-                            {e.objectKind} · {ago(e.at)} ago
-                          </span>
-                        </p>
-                        <small>{e.message}</small>
-                      </div>
-                    </article>
-                  ))
-              )}
-            </div>
-          </section>
-
-          {trace && trace.spans.length > 0 && (
-            <section className={styles.card}>
-              <div className={styles.cardHead}>
-                <h2>
-                  <Gauge size={15} /> Request trace
-                </h2>
-                <span className={styles.sub}>
-                  {trace.durationMs}ms · {trace.release}
-                </span>
-              </div>
-              <div className={styles.trace}>
-                {trace.spans.map((s) => (
-                  <div key={s.spanId} className={styles.span}>
-                    <span className={styles.spanName}>{s.name}</span>
-                    <div className={styles.spanBar}>
-                      <i
-                        className={s.status === "error" ? styles.spanErr : ""}
-                        style={{
-                          width: `${Math.max(2, Math.min(100, (s.durationMs / Math.max(1, trace.durationMs)) * 100))}%`,
-                        }}
-                      />
-                    </div>
-                    <b>{Math.round(s.durationMs)}ms</b>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-        </div>
-
-        <div className={styles.side}>
-          <section className={`${styles.card} ${styles.drillCard}`}>
-            <div className={styles.cardHead}>
-              <h2>
-                <Gauge size={15} /> {drill ? "Active drill" : "Run a drill"}
-              </h2>
-              {drill && (
-                <span className={styles.sub}>
-                  {clock(run.elapsedMs)} / {clock(run.durationMs)}
-                </span>
-              )}
-            </div>
-
-            {!drill ? (
-              <>
-                <p className={styles.hint}>
-                  A drill sets an objective and a clock on this cluster, then
-                  unlocks its operator decisions. The workload stays up —
-                  nothing is reprovisioned.
-                </p>
-                <div className={styles.drills}>
-                  {drills.map((d, i) => (
-                    <button
-                      key={d.id}
-                      className={styles.drillItem}
-                      onClick={() =>
-                        act(`drill-${d.id}`, () => startDrill(run.runId, d.id))
-                      }
-                      disabled={busy !== null || provisioning}
-                    >
-                      <span className={styles.drillNo}>
-                        {String(i + 1).padStart(2, "0")}
-                      </span>
-                      <span>
-                        <b>{d.title}</b>
-                        <small>{d.summary}</small>
-                      </span>
-                      <ChevronRight size={15} />
-                    </button>
-                  ))}
-                </div>
-                {provisioning && (
-                  <p className={styles.hint}>
-                    Drills unlock once the workload is serving traffic.
-                  </p>
-                )}
-              </>
-            ) : (
-              <>
-                <div className={styles.objective}>
-                  <b>{run.drillTitle || drill.title}</b>
-                  <p>{run.drillObjective || drill.summary}</p>
-                </div>
-                <div className={styles.progress}>
-                  <i
-                    style={{
-                      width: `${Math.min(100, (run.elapsedMs / Math.max(1, run.durationMs)) * 100)}%`,
-                    }}
-                  />
-                </div>
-                <div className={styles.decisions}>
-                  {drill.decisions.map((d) => {
-                    const done = run.acceptedDecisions.some(
-                      (a) => a.id === d.id,
-                    );
-                    const open = run.availableDecisions.includes(d.id);
-                    return (
-                      <button
-                        key={d.id}
-                        className={`${styles.decision} ${done ? styles.decisionDone : ""}`}
-                        onClick={() =>
-                          act(`dec-${d.id}`, () =>
-                            liveDecision(run.runId, d.id),
-                          )
-                        }
-                        disabled={!open || done || busy !== null}
-                      >
-                        {done ? <Check size={15} /> : <Gauge size={15} />}
-                        <span>
-                          <b>{d.label}</b>
-                          <small>{d.description}</small>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-                {report && (
-                  <div className={styles.report}>
-                    <b>
-                      {report.outcome === "passed" ? (
-                        <Check size={15} />
-                      ) : (
-                        <AlertTriangle size={15} />
-                      )}
-                      {report.outcome} · {report.score}
-                    </b>
-                    <p>{report.summary}</p>
-                  </div>
-                )}
+          <div className={styles.graph}>
+            {NODES.map((n) => {
+              const c = byName(n.id);
+              const desired = c?.desired ?? 0;
+              const ready = c?.ready ?? 0;
+              const off = desired === 0;
+              const healthy = desired > 0 && ready === desired;
+              const limit = c?.cpuLimitMillicoresPerPod ?? 0;
+              const Icon = n.icon;
+              return (
                 <button
-                  className={styles.ghost}
-                  onClick={() => act("end-drill", () => endDrill(run.runId))}
-                  disabled={busy !== null}
+                  key={n.id}
+                  ref={(el) => {
+                    nodeRefs.current[n.id] = el;
+                  }}
+                  className={`${styles.node} ${off ? styles.nodeOff : ""} ${
+                    selected === n.id ? styles.nodeActive : ""
+                  }`}
+                  style={{ gridColumn: n.col, gridRow: n.row || undefined }}
+                  onClick={() => setSelected(selected === n.id ? null : n.id)}
                 >
-                  <Square size={13} /> End drill, keep cluster
-                </button>
-              </>
-            )}
-          </section>
+                  <span className={styles.nodeHead}>
+                    <span className={styles.nodeIcon}>
+                      <Icon size={14} />
+                    </span>
+                    <span className={styles.nodeTitle}>
+                      <b>{n.label}</b>
+                      <small>{n.role}</small>
+                    </span>
+                    <span
+                      className={`${styles.badge} ${
+                        off
+                          ? styles.badgeOff
+                          : healthy
+                            ? styles.badgeOk
+                            : styles.badgeWarn
+                      }`}
+                    >
+                      {off ? "off" : `${ready}/${desired}`}
+                    </span>
+                  </span>
 
-          <section className={styles.card}>
-            <div className={styles.cardHead}>
-              <h2>
-                <RefreshCw size={15} /> Cluster controls
-              </h2>
-              <span className={styles.sub}>reconciled live</span>
-            </div>
-            <div className={styles.controls}>
-              {controlGroups.map((g) => {
-                const activeId = g.active(run);
-                return (
-                  <div key={g.label} className={styles.control}>
-                    <label>{g.label}</label>
-                    <div className={styles.segments}>
-                      {g.options.map((o) => (
-                        <button
-                          key={o.id}
-                          className={activeId === o.id ? styles.segOn : ""}
-                          onClick={() =>
-                            act(o.id, () => practiceAction(run.runId, o.id))
-                          }
-                          disabled={busy !== null || activeId === o.id}
+                  {c && c.pods.length > 0 && (
+                    <span className={styles.nodePods}>
+                      {c.pods.map((p) => {
+                        const pct =
+                          limit > 0
+                            ? Math.min(100, (p.cpuMillicores / limit) * 100)
+                            : 0;
+                        return (
+                          <span key={p.name} className={styles.podRow}>
+                            <span className={styles.podBar}>
+                              <i
+                                className={pct > 85 ? styles.podHot : ""}
+                                style={{ width: `${Math.max(4, pct)}%` }}
+                              />
+                            </span>
+                            <span className={styles.podNum}>
+                              {p.cpuMillicores}m
+                            </span>
+                          </span>
+                        );
+                      })}
+                    </span>
+                  )}
+
+                  <span className={styles.nodeFoot}>
+                    {off ? (
+                      "not provisioned"
+                    ) : (
+                      <>
+                        <span>
+                          <Cpu size={10} /> {c?.cpuMillicores ?? 0}m
+                        </span>
+                        <span>
+                          <MemoryStick size={10} /> {c?.memoryMiB ?? 0}Mi
+                        </span>
+                      </>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className={styles.canvasFoot}>
+            <span className={flowing ? styles.liveChip : styles.idleChip}>
+              <i /> {flowing ? "traffic flowing" : "traffic stopped"}
+            </span>
+            <span>
+              {run.podCount ?? 0} pods · {components.length} services
+            </span>
+            <span>SLO score {t.score}</span>
+            {trace && trace.spans.length > 0 && (
+              <span>
+                trace {trace.durationMs}ms · {trace.release}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* ── inspector ── */}
+        <aside className={styles.inspector}>
+          {selectedComp || selectedNode ? (
+            <div className={styles.panel}>
+              <div className={styles.panelHead}>
+                <b>{selectedNode?.label}</b>
+                <button
+                  className={styles.iconBtn}
+                  onClick={() => setSelected(null)}
+                  aria-label="Close"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <p className={styles.panelSub}>{selectedNode?.role}</p>
+
+              {selectedComp ? (
+                <>
+                  <div className={styles.kv}>
+                    <span>Replicas</span>
+                    <b>
+                      {selectedComp.ready}/{selectedComp.desired}
+                    </b>
+                  </div>
+                  <div className={styles.kv}>
+                    <span>CPU</span>
+                    <b>
+                      {selectedComp.cpuMillicores}m of{" "}
+                      {selectedComp.cpuLimitMillicoresPerPod *
+                        Math.max(1, selectedComp.desired)}
+                      m
+                    </b>
+                  </div>
+                  <div className={styles.kv}>
+                    <span>Memory</span>
+                    <b>{selectedComp.memoryMiB} MiB</b>
+                  </div>
+
+                  <p className={styles.panelLabel}>Pods</p>
+                  <div className={styles.podList}>
+                    {selectedComp.pods.length === 0 && (
+                      <p className={styles.blank}>No pods scheduled.</p>
+                    )}
+                    {selectedComp.pods.map((p) => (
+                      <div key={p.name} className={styles.podItem}>
+                        <span className={styles.podId}>…{p.name}</span>
+                        <span>{p.cpuMillicores}m</span>
+                        <span>{p.memoryMiB}Mi</span>
+                        <span
+                          className={p.ready ? styles.okText : styles.warnText}
                         >
-                          {o.label}
+                          {p.ready ? p.phase : "starting"}
+                          {p.restarts > 0 ? ` ×${p.restarts}` : ""}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {selected === "checkout" && trace?.spans.length ? (
+                    <>
+                      <p className={styles.panelLabel}>Latest trace</p>
+                      <div className={styles.trace}>
+                        {trace.spans.map((s) => (
+                          <div key={s.spanId} className={styles.span}>
+                            <span>{s.name}</span>
+                            <div className={styles.spanBar}>
+                              <i
+                                className={
+                                  s.status === "error" ? styles.spanErr : ""
+                                }
+                                style={{
+                                  width: `${Math.max(2, Math.min(100, (s.durationMs / Math.max(1, trace.durationMs)) * 100))}%`,
+                                }}
+                              />
+                            </div>
+                            <b>{Math.round(s.durationMs)}ms</b>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                <p className={styles.blank}>
+                  This service is not provisioned right now.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className={styles.panel}>
+              <div className={styles.tabs}>
+                <button
+                  className={tab === "drills" ? styles.tabOn : ""}
+                  onClick={() => setTab("drills")}
+                >
+                  <Gauge size={13} /> Drills
+                </button>
+                <button
+                  className={tab === "controls" ? styles.tabOn : ""}
+                  onClick={() => setTab("controls")}
+                >
+                  <SlidersHorizontal size={13} /> Controls
+                </button>
+                <button
+                  className={tab === "activity" ? styles.tabOn : ""}
+                  onClick={() => setTab("activity")}
+                >
+                  <Layers size={13} /> Activity
+                </button>
+              </div>
+
+              {tab === "drills" &&
+                (!drill ? (
+                  <>
+                    <p className={styles.hint}>
+                      A drill sets an objective and a clock on this cluster and
+                      unlocks its operator decisions. Nothing is reprovisioned.
+                    </p>
+                    <div className={styles.drills}>
+                      {drills.map((d, i) => (
+                        <button
+                          key={d.id}
+                          className={styles.drillItem}
+                          onClick={() =>
+                            act(`drill-${d.id}`, () =>
+                              startDrill(run.runId, d.id),
+                            )
+                          }
+                          disabled={busy !== null || provisioning}
+                        >
+                          <span className={styles.drillNo}>
+                            {String(i + 1).padStart(2, "0")}
+                          </span>
+                          <span>
+                            <b>{d.title}</b>
+                            <small>{d.summary}</small>
+                          </span>
+                          <ChevronRight size={14} />
                         </button>
                       ))}
                     </div>
-                    <small>{g.hint}</small>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
+                    {provisioning && (
+                      <p className={styles.hint}>
+                        Drills unlock once the workload is serving traffic.
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className={styles.objective}>
+                      <b>{run.drillTitle || drill.title}</b>
+                      <p>{run.drillObjective || drill.summary}</p>
+                      <span>
+                        {clock(run.elapsedMs)} / {clock(run.durationMs)}
+                      </span>
+                    </div>
+                    <div className={styles.progress}>
+                      <i
+                        style={{
+                          width: `${Math.min(100, (run.elapsedMs / Math.max(1, run.durationMs)) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <div className={styles.decisions}>
+                      {drill.decisions.map((d) => {
+                        const done = run.acceptedDecisions.some(
+                          (a) => a.id === d.id,
+                        );
+                        const open = run.availableDecisions.includes(d.id);
+                        return (
+                          <button
+                            key={d.id}
+                            className={`${styles.decision} ${done ? styles.decisionDone : ""}`}
+                            onClick={() =>
+                              act(`dec-${d.id}`, () =>
+                                liveDecision(run.runId, d.id),
+                              )
+                            }
+                            disabled={!open || done || busy !== null}
+                          >
+                            {done ? <Check size={14} /> : <Gauge size={14} />}
+                            <span>
+                              <b>{d.label}</b>
+                              <small>{d.description}</small>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {report && (
+                      <div className={styles.report}>
+                        <b>
+                          {report.outcome} · {report.score}
+                        </b>
+                        <p>{report.summary}</p>
+                      </div>
+                    )}
+                    <button
+                      className={styles.ghost}
+                      onClick={() => act("end", () => endDrill(run.runId))}
+                      disabled={busy !== null}
+                    >
+                      <Square size={12} /> End drill, keep cluster
+                    </button>
+                  </>
+                ))}
 
-          <section className={`${styles.card} ${styles.notes}`}>
-            <p>
-              <Lock size={13} /> This cluster is private to your account and
-              cannot be reached by anyone else.
-            </p>
-            <p>
-              <CircleSlash size={13} /> Egress is denied by default; the
-              namespace is quota-capped and torn down automatically.
-            </p>
-          </section>
-        </div>
+              {tab === "controls" && (
+                <div className={styles.controls}>
+                  {controlGroups.map((g) => {
+                    const activeId = g.active(run);
+                    return (
+                      <div key={g.label} className={styles.control}>
+                        <label>{g.label}</label>
+                        <div className={styles.segments}>
+                          {g.options.map((o) => (
+                            <button
+                              key={o.id}
+                              className={activeId === o.id ? styles.segOn : ""}
+                              onClick={() =>
+                                act(o.id, () => practiceAction(run.runId, o.id))
+                              }
+                              disabled={busy !== null || activeId === o.id}
+                            >
+                              {o.label}
+                            </button>
+                          ))}
+                        </div>
+                        <small>{g.hint}</small>
+                      </div>
+                    );
+                  })}
+                  <p className={styles.note}>
+                    <Lock size={12} /> Private to your account.{" "}
+                    <CircleSlash size={12} /> Egress denied by default.
+                  </p>
+                </div>
+              )}
+
+              {tab === "activity" && (
+                <div className={styles.events}>
+                  {events.length === 0 ? (
+                    <p className={styles.blank}>
+                      {provisioning
+                        ? "Scheduling workloads…"
+                        : "No recent events."}
+                    </p>
+                  ) : (
+                    events
+                      .slice()
+                      .reverse()
+                      .map((e) => (
+                        <article key={e.id} className={styles.event}>
+                          <i
+                            className={
+                              e.severity === "warning"
+                                ? styles.evWarn
+                                : styles.evOk
+                            }
+                          />
+                          <div>
+                            <p>
+                              <b>{e.reason}</b>
+                              <span>
+                                {e.objectKind} · {ago(e.at)}
+                              </span>
+                            </p>
+                            <small>{e.message}</small>
+                          </div>
+                        </article>
+                      ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </aside>
       </div>
     </div>
   );
