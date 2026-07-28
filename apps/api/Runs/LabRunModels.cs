@@ -36,6 +36,8 @@ public sealed class LabRunSpec
 {
     [JsonPropertyName("scenarioId")] public string ScenarioId { get; set; } = "";
     [JsonPropertyName("runId")] public string RunId { get; set; } = "";
+    // Opaque per-user key (hash of the account id) identifying who provisioned this cluster.
+    [JsonPropertyName("owner")] public string Owner { get; set; } = "";
     [JsonPropertyName("resourceClass")] public string ResourceClass { get; set; } = "standard";
     [JsonPropertyName("ttlSeconds")] public int TtlSeconds { get; set; } = 900;
 
@@ -81,6 +83,25 @@ public sealed record RunTelemetry(
     int P95LatencyMs,
     double ErrorRatePct);
 
+// One pod of a cluster component, with its measured resource usage.
+public sealed record RunPod(
+    string Name,
+    string Phase,
+    bool Ready,
+    int Restarts,
+    int CpuMillicores,
+    int MemoryMiB);
+
+// One tier of the request path (a Deployment), with per-pod detail for the flowchart.
+public sealed record RunComponent(
+    string Name,
+    int Desired,
+    int Ready,
+    int CpuMillicores,
+    int MemoryMiB,
+    int CpuLimitMillicoresPerPod,
+    IReadOnlyList<RunPod> Pods);
+
 // A sanitized Kubernetes Event from the run namespace — real cluster activity (scheduling, image
 // pulls, probes, scaling), not a scripted timeline.
 public sealed record RunEventView(
@@ -97,6 +118,7 @@ public sealed record RunEventView(
 public sealed record RunView(
     string RunId,
     string ScenarioId,
+    string Owner,
     string Status,
     string? Namespace,
     int TtlSeconds,
@@ -176,6 +198,7 @@ public sealed record RunView(
         return new RunView(
             r.Spec.RunId,
             r.Spec.ScenarioId,
+            r.Spec.Owner ?? "",
             status,
             r.Status?.Namespace,
             r.Spec.TtlSeconds,

@@ -38,6 +38,10 @@ spec:
             # HOMELAB_RUNS_KEY disables the live panel until a key is issued and sealed.
             - name: HOMELAB_API_URL
               value: http://api
+            # Server-side session verification for the practice cluster: the BFF replays the
+            # visitor's SSO cookie against the auth service in-cluster before any provisioning.
+            - name: HOMELAB_AUTH_URL
+              value: http://auth-service
             - name: HOMELAB_RUNS_KEY
               valueFrom:
                 secretKeyRef:

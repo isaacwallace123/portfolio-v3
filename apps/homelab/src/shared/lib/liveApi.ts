@@ -18,12 +18,16 @@ export function liveEnabled(): boolean {
 export async function liveFetch(
   path: string,
   init?: RequestInit,
+  owner?: string,
 ): Promise<Response> {
   return fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${RUNS_KEY}`,
+      // Identifies which signed-in person owns the cluster. Resolved server-side from the SSO
+      // session; the browser never supplies it, so it cannot be spoofed by a caller.
+      ...(owner ? { "X-Owner-Key": owner } : {}),
       ...init?.headers,
     },
     cache: "no-store",

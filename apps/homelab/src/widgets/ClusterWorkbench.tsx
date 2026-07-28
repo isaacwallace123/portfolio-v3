@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
-  Boxes,
+  ArrowRight,
   Check,
   ChevronRight,
   CircleSlash,
@@ -12,19 +12,23 @@ import {
   Database,
   Gauge,
   Layers,
+  Lock,
   MemoryStick,
   Play,
   Radio,
+  RefreshCw,
   Server,
   Square,
   Timer,
   Trash2,
   Zap,
 } from "lucide-react";
+import { AUTH_URL, HOMELAB_URL } from "@iw/core";
 import { homelabScenarios } from "@/entities/scenario";
 import {
   createLiveRun,
   endDrill,
+  fetchComponents,
   fetchLiveStatus,
   fetchPlatformStatus,
   fetchRunEvents,
@@ -39,20 +43,37 @@ import {
   type LivePlatformStatus,
   type LiveReport,
   type LiveRunView,
+  type LiveStatus,
   type LiveTrace,
+  type RunComponent,
 } from "@/shared/lib/liveClient";
 import styles from "./ClusterWorkbench.module.css";
 
 const SANDBOX = "practice-cluster";
-
-// The drill catalog is every scenario except the open sandbox itself.
 const drills = homelabScenarios.filter((s) => s.id !== SANDBOX);
 
-// Allowlisted cluster controls. Each maps to one broker-side reconciliation of the live workload.
+// Each tier of the request path, in flow order, mapped to the Deployment that backs it.
+const TIERS = [
+  { id: "k6", label: "k6", role: "load generator", icon: Zap, accent: "load" },
+  { id: "envoy", label: "Envoy", role: "gateway", icon: Radio, accent: "edge" },
+  {
+    id: "checkout",
+    label: "checkout",
+    role: "API",
+    icon: Server,
+    accent: "app",
+  },
+] as const;
+
+const DATA_TIERS = [
+  { id: "postgres", label: "Postgres", role: "database", icon: Database },
+  { id: "redis", label: "Redis", role: "cache", icon: Database },
+] as const;
+
 const controlGroups = [
   {
     label: "Checkout replicas",
-    hint: "Capacity. Each replica adds CPU, so more replicas lower p95 under load.",
+    hint: "Each replica adds CPU, so capacity scales and p95 falls under load.",
     options: [
       { id: "scale-1", label: "1" },
       { id: "scale-3", label: "3" },
@@ -67,7 +88,7 @@ const controlGroups = [
   },
   {
     label: "Cache tier",
-    hint: "Redis in front of Postgres. Serving from cache skips the request's CPU work entirely.",
+    hint: "Redis in front of Postgres. Cache hits skip the request's work entirely.",
     options: [
       { id: "cache-off", label: "Off" },
       { id: "cache-on", label: "On" },
@@ -77,7 +98,7 @@ const controlGroups = [
   },
   {
     label: "Release track",
-    hint: "The candidate build contains a real slow, occasionally failing pricing path.",
+    hint: "The candidate build has a real slow, occasionally failing pricing path.",
     options: [
       { id: "release-stable", label: "Stable" },
       { id: "release-candidate", label: "Candidate" },
@@ -86,7 +107,7 @@ const controlGroups = [
   },
   {
     label: "Traffic",
-    hint: "The k6 load generator driving real requests through Envoy.",
+    hint: "The k6 load generator driving real requests through the gateway.",
     options: [
       { id: "traffic-off", label: "Off" },
       { id: "traffic-on", label: "On" },
@@ -105,8 +126,8 @@ const controlGroups = [
 ] as const;
 
 function clock(ms: number) {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+  const t = Math.max(0, Math.floor(ms / 1000));
+  return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
 }
 
 function ago(iso: string) {
@@ -116,25 +137,110 @@ function ago(iso: string) {
   return `${Math.floor(s / 3600)}h`;
 }
 
+/** A tier node in the flowchart: live readiness, aggregate usage, and every pod behind it. */
+function TierNode({
+  label,
+  role,
+  Icon,
+  component,
+  accent,
+  detail,
+  dimmed,
+}: {
+  label: string;
+  role: string;
+  Icon: typeof Server;
+  component?: RunComponent;
+  accent?: string;
+  detail?: string;
+  dimmed?: boolean;
+}) {
+  const desired = component?.desired ?? 0;
+  const ready = component?.ready ?? 0;
+  const healthy = desired > 0 && ready === desired;
+  const pods = component?.pods ?? [];
+  const limit = component?.cpuLimitMillicoresPerPod ?? 0;
+
+  return (
+    <div
+      className={`${styles.tier} ${dimmed ? styles.tierDim : ""} ${
+        accent ? (styles[`tier-${accent}`] ?? "") : ""
+      }`}
+    >
+      <div className={styles.tierTop}>
+        <span className={styles.tierIcon}>
+          <Icon size={15} />
+        </span>
+        <div className={styles.tierName}>
+          <b>{label}</b>
+          <small>{role}</small>
+        </div>
+        <span
+          className={`${styles.pill} ${
+            desired === 0
+              ? styles.pillIdle
+              : healthy
+                ? styles.pillOk
+                : styles.pillWarn
+          }`}
+        >
+          {desired === 0 ? "off" : `${ready}/${desired}`}
+        </span>
+      </div>
+
+      {detail && <p className={styles.tierDetail}>{detail}</p>}
+
+      {pods.length > 0 && (
+        <div className={styles.pods}>
+          {pods.map((p) => {
+            const pct =
+              limit > 0 ? Math.min(100, (p.cpuMillicores / limit) * 100) : 0;
+            return (
+              <div key={p.name} className={styles.pod} title={`pod …${p.name}`}>
+                <span className={styles.podId}>…{p.name}</span>
+                <div className={styles.podBar}>
+                  <i
+                    className={pct > 85 ? styles.podBarHot : ""}
+                    style={{ width: `${Math.max(3, pct)}%` }}
+                  />
+                </div>
+                <span className={styles.podStat}>{p.cpuMillicores}m</span>
+                <span className={styles.podStat}>{p.memoryMiB}Mi</span>
+                {!p.ready && <span className={styles.podWarn}>starting</span>}
+                {p.restarts > 0 && (
+                  <span className={styles.podWarn}>×{p.restarts}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {component && pods.length > 0 && (
+        <div className={styles.tierTotals}>
+          <span>
+            <Cpu size={11} /> {component.cpuMillicores}m
+          </span>
+          <span>
+            <MemoryStick size={11} /> {component.memoryMiB} MiB
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ClusterWorkbench() {
-  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [status, setStatus] = useState<LiveStatus | null>(null);
   const [platform, setPlatform] = useState<LivePlatformStatus | null>(null);
   const [run, setRun] = useState<LiveRunView | null>(null);
+  const [components, setComponents] = useState<RunComponent[]>([]);
   const [events, setEvents] = useState<ClusterEvent[]>([]);
   const [trace, setTrace] = useState<LiveTrace | null>(null);
   const [report, setReport] = useState<LiveReport | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const poll = useRef<number | null>(null);
-
-  useEffect(() => {
-    fetchLiveStatus()
-      .then((s) => setEnabled(s.enabled))
-      .catch(() => setEnabled(false));
-    fetchPlatformStatus()
-      .then(setPlatform)
-      .catch(() => setPlatform(null));
-  }, []);
 
   const stopPolling = useCallback(() => {
     if (poll.current !== null) {
@@ -145,17 +251,19 @@ export default function ClusterWorkbench() {
   useEffect(() => stopPolling, [stopPolling]);
 
   const refresh = useCallback(async (runId: string) => {
-    const [view, evts, tr] = await Promise.all([
+    const [view, comps, evts, tr] = await Promise.all([
       getLiveRun(runId),
+      fetchComponents(runId).catch(() => [] as RunComponent[]),
       fetchRunEvents(runId).catch(() => [] as ClusterEvent[]),
       getLiveTrace(runId).catch(() => null),
     ]);
     setRun(view);
+    setComponents(comps);
     setEvents(evts);
     if (tr) setTrace(tr);
-    if (view.drillComplete)
-      setReport(await getLiveReport(runId).catch(() => null));
-    else setReport(null);
+    setReport(
+      view.drillComplete ? await getLiveReport(runId).catch(() => null) : null,
+    );
   }, []);
 
   const startPolling = useCallback(
@@ -167,6 +275,29 @@ export default function ClusterWorkbench() {
     },
     [refresh, stopPolling],
   );
+
+  // Resume the cluster this account already owns, so a reload never orphans one.
+  useEffect(() => {
+    fetchLiveStatus()
+      .then((s) => {
+        setStatus(s);
+        if (s.myRunId) {
+          refresh(s.myRunId).catch(() => undefined);
+          startPolling(s.myRunId);
+        }
+      })
+      .catch(() =>
+        setStatus({
+          enabled: false,
+          signedIn: false,
+          displayName: null,
+          myRunId: null,
+        }),
+      );
+    fetchPlatformStatus()
+      .then(setPlatform)
+      .catch(() => setPlatform(null));
+  }, [refresh, startPolling]);
 
   const provision = useCallback(async () => {
     setBusy("provision");
@@ -206,6 +337,7 @@ export default function ClusterWorkbench() {
       await teardownLiveRun(run.runId);
       stopPolling();
       setRun(null);
+      setComponents([]);
       setEvents([]);
       setTrace(null);
       setReport(null);
@@ -219,9 +351,16 @@ export default function ClusterWorkbench() {
     }
   }, [run, stopPolling]);
 
-  // ── empty state ────────────────────────────────────────────────────────────
+  const byName = (n: string) => components.find((c) => c.name === n);
+
+  // ── signed out / no cluster ────────────────────────────────────────────────
   if (!run) {
+    const signedIn = status?.signedIn === true;
     const slots = platform?.slotsAvailable ?? null;
+    const signInUrl = `${AUTH_URL}/login?returnUrl=${encodeURIComponent(
+      `${HOMELAB_URL}/practice`,
+    )}`;
+
     return (
       <div className={styles.page}>
         <div className={styles.empty}>
@@ -231,42 +370,57 @@ export default function ClusterWorkbench() {
           <h1>Build a cluster. Then break it.</h1>
           <p className={styles.lede}>
             Provision a disposable Kubernetes workspace on the live homelab — an
-            isolated namespace with a checkout API, Postgres, Redis, an Envoy
+            isolated namespace running a checkout API, Postgres, Redis, an Envoy
             gateway and a k6 load generator. Operate it freely, or run a drill
             on it and work a real incident.
           </p>
 
           <ul className={styles.included}>
             <li>
-              <Server size={15} /> Isolated namespace, quota &amp; default-deny
-              network policy
+              <Server size={15} /> Isolated namespace with a quota and a
+              default-deny network policy
             </li>
             <li>
-              <Layers size={15} /> checkout · postgres · redis · envoy · k6
+              <Activity size={15} /> Every metric measured from the running
+              workload
             </li>
             <li>
-              <Activity size={15} /> Metrics measured by the run&apos;s own
-              Envoy gateway
+              <Lock size={15} /> Private to your account — one cluster at a time
             </li>
             <li>
               <Timer size={15} /> Self-destructs after 15 minutes
             </li>
           </ul>
 
-          <button
-            className={styles.primary}
-            onClick={provision}
-            disabled={enabled !== true || busy !== null || slots === 0}
-          >
-            <Play size={16} fill="currentColor" />
-            {busy === "provision"
-              ? "Provisioning…"
-              : enabled === false
-                ? "Live control offline"
-                : slots === 0
-                  ? "All cluster slots busy"
-                  : "Provision cluster"}
-          </button>
+          {signedIn ? (
+            <button
+              className={styles.primary}
+              onClick={provision}
+              disabled={
+                status?.enabled !== true || busy !== null || slots === 0
+              }
+            >
+              <Play size={16} fill="currentColor" />
+              {busy === "provision"
+                ? "Provisioning…"
+                : status?.enabled === false
+                  ? "Live control offline"
+                  : slots === 0
+                    ? "All cluster slots busy"
+                    : "Provision cluster"}
+            </button>
+          ) : (
+            <>
+              <a className={styles.primary} href={signInUrl}>
+                <Lock size={16} /> Sign in to provision
+              </a>
+              <p className={styles.capacity}>
+                Provisioning creates real infrastructure, so it is tied to an
+                account. Signing in takes a second and needs no password.
+              </p>
+            </>
+          )}
+
           {platform && (
             <p className={styles.capacity}>
               {platform.nodesReady}/{platform.nodesTotal} nodes ready ·{" "}
@@ -286,6 +440,8 @@ export default function ClusterWorkbench() {
   const overSlo = t.p95LatencyMs > t.latencyTargetMs;
   const erroring = t.errorRatePct > 1;
   const provisioning = run.status === "provisioning";
+  const totalCpu = components.reduce((a, c) => a + c.cpuMillicores, 0);
+  const totalMem = components.reduce((a, c) => a + c.memoryMiB, 0);
 
   return (
     <div className={styles.page}>
@@ -296,10 +452,14 @@ export default function ClusterWorkbench() {
           />
           <h1>Practice cluster</h1>
           <code className={styles.ns}>{run.namespace ?? run.runId}</code>
+          {drill && <span className={styles.drillTag}>{run.drillTitle}</span>}
         </div>
         <div className={styles.barMeta}>
           <span>
-            <Boxes size={13} /> {run.podCount ?? "—"} pods
+            <Cpu size={13} /> {totalCpu}m
+          </span>
+          <span>
+            <MemoryStick size={13} /> {totalMem} MiB
           </span>
           <span>
             <Timer size={13} /> {clock(run.remainingTtlMs)} left
@@ -316,94 +476,110 @@ export default function ClusterWorkbench() {
 
       {error && <p className={styles.error}>{error}</p>}
 
+      <section className={styles.canvas}>
+        <div className={styles.canvasHead}>
+          <h2>
+            <Activity size={15} /> Request path
+          </h2>
+          <span className={styles.sub}>
+            {run.loadEnabled ? "traffic flowing" : "traffic stopped"} · measured
+            at the gateway
+          </span>
+        </div>
+
+        <div className={styles.flow}>
+          {TIERS.map((tier) => (
+            <div key={tier.id} className={styles.flowStep}>
+              <TierNode
+                label={tier.label}
+                role={tier.role}
+                Icon={tier.icon}
+                accent={tier.accent}
+                component={byName(tier.id)}
+                dimmed={tier.id === "k6" && !run.loadEnabled}
+                detail={
+                  tier.id === "envoy"
+                    ? `${t.requestsPerSec} req/s · p95 ${t.p95LatencyMs}ms`
+                    : tier.id === "checkout"
+                      ? `release ${run.releaseTrack} · pool ${run.targetPool}`
+                      : run.loadEnabled
+                        ? "closed-loop load"
+                        : "stopped"
+                }
+              />
+              <div
+                className={`${styles.link} ${run.loadEnabled ? styles.linkLive : ""}`}
+              >
+                <ArrowRight size={14} />
+              </div>
+            </div>
+          ))}
+
+          <div className={styles.dataCol}>
+            {DATA_TIERS.map((d) => (
+              <TierNode
+                key={d.id}
+                label={d.label}
+                role={d.role}
+                Icon={d.icon}
+                component={byName(d.id)}
+                dimmed={d.id === "redis" && !t.cacheActive}
+                detail={
+                  d.id === "postgres"
+                    ? `${t.postgresCpuPct}% of its CPU limit`
+                    : t.cacheActive
+                      ? "serving reads"
+                      : "not provisioned"
+                }
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className={styles.metrics}>
+          <div className={styles.metric}>
+            <span>Throughput</span>
+            <strong>
+              {t.requestsPerSec}
+              <i>/s</i>
+            </strong>
+            <small>requests through Envoy</small>
+          </div>
+          <div
+            className={`${styles.metric} ${overSlo ? styles.bad : styles.good}`}
+          >
+            <span>p95 latency</span>
+            <strong>
+              {t.p95LatencyMs}
+              <i>ms</i>
+            </strong>
+            <small>objective &lt; {t.latencyTargetMs}ms</small>
+          </div>
+          <div
+            className={`${styles.metric} ${erroring ? styles.bad : styles.good}`}
+          >
+            <span>Error rate</span>
+            <strong>
+              {t.errorRatePct.toFixed(2)}
+              <i>%</i>
+            </strong>
+            <small>5xx responses</small>
+          </div>
+          <div className={styles.metric}>
+            <span>Pods</span>
+            <strong>{run.podCount ?? 0}</strong>
+            <small>{components.length} components</small>
+          </div>
+          <div className={styles.metric}>
+            <span>SLO score</span>
+            <strong>{t.score}</strong>
+            <small>latency + errors</small>
+          </div>
+        </div>
+      </section>
+
       <div className={styles.grid}>
-        {/* main column */}
         <div className={styles.main}>
-          <section className={styles.card}>
-            <div className={styles.cardHead}>
-              <h2>
-                <Activity size={15} /> Request path
-              </h2>
-              <span className={styles.sub}>measured at the gateway</span>
-            </div>
-
-            <div className={styles.path}>
-              <div
-                className={`${styles.node} ${run.loadEnabled ? "" : styles.nodeIdle}`}
-              >
-                <Zap size={15} />
-                <b>k6</b>
-                <small>{run.loadEnabled ? "driving load" : "stopped"}</small>
-              </div>
-              <ChevronRight size={16} className={styles.arrow} />
-              <div className={styles.node}>
-                <Radio size={15} />
-                <b>Envoy</b>
-                <small>{t.requestsPerSec}/s</small>
-              </div>
-              <ChevronRight size={16} className={styles.arrow} />
-              <div
-                className={`${styles.node} ${overSlo ? styles.nodeHot : ""}`}
-              >
-                <Server size={15} />
-                <b>checkout</b>
-                <small>{t.apiReplicas} replicas</small>
-              </div>
-              <ChevronRight size={16} className={styles.arrow} />
-              <div className={styles.stack}>
-                <div className={styles.node}>
-                  <Database size={14} />
-                  <b>postgres</b>
-                  <small>{t.postgresCpuPct}% cpu</small>
-                </div>
-                <div
-                  className={`${styles.node} ${t.cacheActive ? styles.nodeGood : styles.nodeIdle}`}
-                >
-                  <Database size={14} />
-                  <b>redis</b>
-                  <small>{t.cacheActive ? "serving" : "off"}</small>
-                </div>
-              </div>
-            </div>
-
-            <div className={styles.metrics}>
-              <div className={styles.metric}>
-                <span>Throughput</span>
-                <strong>
-                  {t.requestsPerSec}
-                  <i>/s</i>
-                </strong>
-              </div>
-              <div
-                className={`${styles.metric} ${overSlo ? styles.bad : styles.good}`}
-              >
-                <span>p95 latency</span>
-                <strong>
-                  {t.p95LatencyMs}
-                  <i>ms</i>
-                </strong>
-                <small>target &lt; {t.latencyTargetMs}ms</small>
-              </div>
-              <div
-                className={`${styles.metric} ${erroring ? styles.bad : styles.good}`}
-              >
-                <span>Errors</span>
-                <strong>
-                  {t.errorRatePct.toFixed(2)}
-                  <i>%</i>
-                </strong>
-              </div>
-              <div className={styles.metric}>
-                <span>Resources</span>
-                <strong>
-                  {run.cpuMillicores ?? 0}
-                  <i>m</i>
-                </strong>
-                <small>{run.memoryMiB ?? 0} MiB</small>
-              </div>
-            </div>
-          </section>
-
           <section className={styles.card}>
             <div className={styles.cardHead}>
               <h2>
@@ -472,7 +648,6 @@ export default function ClusterWorkbench() {
           )}
         </div>
 
-        {/* side column */}
         <div className={styles.side}>
           <section className={`${styles.card} ${styles.drillCard}`}>
             <div className={styles.cardHead}>
@@ -490,7 +665,7 @@ export default function ClusterWorkbench() {
               <>
                 <p className={styles.hint}>
                   A drill sets an objective and a clock on this cluster, then
-                  unlocks the operator decisions for it. The workload stays up —
+                  unlocks its operator decisions. The workload stays up —
                   nothing is reprovisioned.
                 </p>
                 <div className={styles.drills}>
@@ -533,7 +708,6 @@ export default function ClusterWorkbench() {
                     }}
                   />
                 </div>
-
                 <div className={styles.decisions}>
                   {drill.decisions.map((d) => {
                     const done = run.acceptedDecisions.some(
@@ -560,7 +734,6 @@ export default function ClusterWorkbench() {
                     );
                   })}
                 </div>
-
                 {report && (
                   <div className={styles.report}>
                     <b>
@@ -574,7 +747,6 @@ export default function ClusterWorkbench() {
                     <p>{report.summary}</p>
                   </div>
                 )}
-
                 <button
                   className={styles.ghost}
                   onClick={() => act("end-drill", () => endDrill(run.runId))}
@@ -589,9 +761,9 @@ export default function ClusterWorkbench() {
           <section className={styles.card}>
             <div className={styles.cardHead}>
               <h2>
-                <Cpu size={15} /> Cluster controls
+                <RefreshCw size={15} /> Cluster controls
               </h2>
-              <span className={styles.sub}>applied to the live workload</span>
+              <span className={styles.sub}>reconciled live</span>
             </div>
             <div className={styles.controls}>
               {controlGroups.map((g) => {
@@ -622,12 +794,12 @@ export default function ClusterWorkbench() {
 
           <section className={`${styles.card} ${styles.notes}`}>
             <p>
-              <CircleSlash size={13} /> Egress is denied by default; the
-              namespace is quota-capped and torn down automatically.
+              <Lock size={13} /> This cluster is private to your account and
+              cannot be reached by anyone else.
             </p>
             <p>
-              <MemoryStick size={13} /> Every number on this page is measured
-              from the running workload.
+              <CircleSlash size={13} /> Egress is denied by default; the
+              namespace is quota-capped and torn down automatically.
             </p>
           </section>
         </div>

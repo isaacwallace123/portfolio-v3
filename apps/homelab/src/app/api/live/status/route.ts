@@ -1,12 +1,35 @@
 import { NextResponse } from "next/server";
-import { liveEnabled } from "@/shared/lib/liveApi";
+import { liveEnabled, liveFetch } from "@/shared/lib/liveApi";
+import { getCaller } from "@/shared/lib/session";
 
-// GET /api/live/status — whether live provisioning against the real cluster is configured.
+// GET /api/live/status — what this visitor may do right now: whether live control is configured,
+// whether they are signed in, and (if so) the cluster they already own so a reload resumes it.
 export const dynamic = "force-dynamic";
 
-export function GET() {
+export async function GET(req: Request) {
+  const enabled = liveEnabled();
+  const caller = enabled ? await getCaller(req) : null;
+
+  let myRunId: string | null = null;
+  if (caller) {
+    try {
+      const res = await liveFetch("/v1/runs", undefined, caller.owner);
+      if (res.ok) {
+        const runs = (await res.json()) as { runId: string; status: string }[];
+        myRunId = runs.find((r) => r.status !== "deleting")?.runId ?? null;
+      }
+    } catch {
+      /* treated as "no cluster yet" */
+    }
+  }
+
   return NextResponse.json(
-    { enabled: liveEnabled(), scenarioId: "checkout-traffic-spike" },
-    { headers: { "Cache-Control": "no-store" } },
+    {
+      enabled,
+      signedIn: caller !== null,
+      displayName: caller?.displayName ?? null,
+      myRunId,
+    },
+    { headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex" } },
   );
 }

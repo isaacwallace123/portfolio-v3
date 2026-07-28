@@ -50,7 +50,7 @@ public sealed class RunReaper(IServiceScopeFactory scopes, ILogger<RunReaper> lo
                 log.LogInformation(
                     "Reaping expired run {RunId} (age {Age}s > ttl {Ttl}s).",
                     run.RunId, (int)ageSeconds, ttl);
-                await broker.DeleteRunAsync(run.RunId, ct);
+                await broker.DeleteExpiredAsync(run.RunId, ct);
             }
         }
     }

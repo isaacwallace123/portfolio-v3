@@ -1,48 +1,54 @@
-import { NextResponse } from "next/server";
-import { liveEnabled, liveFetch } from "@/shared/lib/liveApi";
+import { guard, jsonNoStore } from "@/shared/lib/guard";
+import { liveFetch } from "@/shared/lib/liveApi";
 import { toLiveRunView } from "@/shared/lib/liveView";
 
-// GET /api/live/runs/{runId} — the real run merged with its live telemetry.
-// DELETE /api/live/runs/{runId} — tear the run down.
+// GET    /api/live/runs/{runId} — the caller's cluster, merged with its live telemetry.
+// DELETE /api/live/runs/{runId} — tear the caller's cluster down.
+// The API answers 404 for a cluster the caller does not own, so ids cannot be probed.
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ runId: string }> },
 ) {
-  if (!liveEnabled())
-    return NextResponse.json({ error: "Live disabled." }, { status: 503 });
-
   const { runId } = await params;
-  const runRes = await liveFetch(`/v1/runs/${runId}`);
-  if (runRes.status === 404)
-    return NextResponse.json({ error: "No such run." }, { status: 404 });
-  const run = await runRes.json().catch(() => ({}));
-  if (!runRes.ok) return NextResponse.json(run, { status: runRes.status });
+  const g = await guard(req, { runId });
+  if (!g.ok) return g.response;
 
-  // Best-effort telemetry — a run that is still provisioning has no metrics yet.
+  const runRes = await liveFetch(
+    `/v1/runs/${runId}`,
+    undefined,
+    g.caller.owner,
+  );
+  const run = await runRes.json().catch(() => ({}));
+  if (!runRes.ok) return jsonNoStore(run, runRes.status);
+
   let telemetry = null;
   try {
-    const tRes = await liveFetch(`/v1/runs/${runId}/telemetry`);
-    if (tRes.ok) telemetry = await tRes.json();
+    const t = await liveFetch(
+      `/v1/runs/${runId}/telemetry`,
+      undefined,
+      g.caller.owner,
+    );
+    if (t.ok) telemetry = await t.json();
   } catch {
-    /* leave telemetry null */
+    /* the next poll fills it in */
   }
-
-  return NextResponse.json(toLiveRunView({ ...run, telemetry }), {
-    headers: { "Cache-Control": "no-store" },
-  });
+  return jsonNoStore(toLiveRunView({ ...run, telemetry }));
 }
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ runId: string }> },
 ) {
-  if (!liveEnabled())
-    return NextResponse.json({ error: "Live disabled." }, { status: 503 });
-
   const { runId } = await params;
-  const res = await liveFetch(`/v1/runs/${runId}`, { method: "DELETE" });
-  const payload = await res.json().catch(() => ({}));
-  return NextResponse.json(payload, { status: res.status });
+  const g = await guard(req, { runId });
+  if (!g.ok) return g.response;
+
+  const res = await liveFetch(
+    `/v1/runs/${runId}`,
+    { method: "DELETE" },
+    g.caller.owner,
+  );
+  return jsonNoStore(await res.json().catch(() => ({})), res.status);
 }

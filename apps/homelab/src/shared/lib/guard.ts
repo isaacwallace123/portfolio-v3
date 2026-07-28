@@ -1,0 +1,93 @@
+import "server-only";
+import { NextResponse } from "next/server";
+import {
+  getCaller,
+  isValidRunId,
+  type CallerIdentity,
+} from "@/shared/lib/session";
+import { liveEnabled } from "@/shared/lib/liveApi";
+
+// Shared guard for every /api/live route that touches a practice cluster.
+//
+// Layers, in order: live control must be configured, the caller must be signed in, the run id must
+// be well-formed, and the caller must be inside their rate budget. Ownership itself is enforced
+// upstream by the API (which stores the owner on the cluster), so a caller cannot act on someone
+// else's cluster even if they guess its id.
+
+// Fixed-window budgets per user. Provisioning is the expensive, abusable action; ordinary control
+// actions are cheap but still bounded. Deliberately small — this is a public demo on real hardware.
+const LIMITS = {
+  provision: { max: 5, windowMs: 60 * 60_000 }, // 5 clusters per hour
+  action: { max: 120, windowMs: 60_000 }, // 120 control actions per minute
+} as const;
+
+type Bucket = { count: number; resetAt: number };
+// Process-local; each replica enforces its own share. The authoritative caps (one cluster per user,
+// global concurrency) live in the API, so this layer is throttling, not the security boundary.
+const buckets = new Map<string, Bucket>();
+
+function rateLimit(key: string, kind: keyof typeof LIMITS): boolean {
+  const { max, windowMs } = LIMITS[kind];
+  const now = Date.now();
+  const id = `${kind}:${key}`;
+  const bucket = buckets.get(id);
+
+  if (!bucket || now >= bucket.resetAt) {
+    buckets.set(id, { count: 1, resetAt: now + windowMs });
+    // Opportunistic cleanup so the map can't grow without bound.
+    if (buckets.size > 5000)
+      for (const [k, v] of buckets) if (now >= v.resetAt) buckets.delete(k);
+    return true;
+  }
+  if (bucket.count >= max) return false;
+  bucket.count += 1;
+  return true;
+}
+
+export type GuardResult =
+  { ok: true; caller: CallerIdentity } | { ok: false; response: NextResponse };
+
+const NO_STORE = { "Cache-Control": "no-store", "X-Robots-Tag": "noindex" };
+
+function deny(status: number, error: string): NextResponse {
+  return NextResponse.json({ error }, { status, headers: NO_STORE });
+}
+
+export async function guard(
+  req: Request,
+  opts: { runId?: string; kind?: keyof typeof LIMITS } = {},
+): Promise<GuardResult> {
+  if (!liveEnabled())
+    return {
+      ok: false,
+      response: deny(503, "Live control is not configured."),
+    };
+
+  const caller = await getCaller(req);
+  if (!caller)
+    return {
+      ok: false,
+      response: deny(401, "Sign in to use the practice cluster."),
+    };
+
+  if (opts.runId !== undefined && !isValidRunId(opts.runId))
+    return { ok: false, response: deny(400, "Malformed run id.") };
+
+  const kind = opts.kind ?? "action";
+  if (!rateLimit(caller.owner, kind))
+    return {
+      ok: false,
+      response: deny(
+        429,
+        kind === "provision"
+          ? "You have provisioned too many clusters recently. Try again later."
+          : "Too many actions. Slow down for a moment.",
+      ),
+    };
+
+  return { ok: true, caller };
+}
+
+export function jsonNoStore(body: unknown, status = 200): NextResponse {
+  return NextResponse.json(body, { status, headers: NO_STORE });
+}

@@ -1,38 +1,34 @@
-import { NextResponse } from "next/server";
-import { liveEnabled, liveFetch } from "@/shared/lib/liveApi";
+import { guard, jsonNoStore } from "@/shared/lib/guard";
+import { liveFetch } from "@/shared/lib/liveApi";
 import { toLiveRunView } from "@/shared/lib/liveView";
 
-// POST /api/live/runs — provision a real run on the homelab cluster. Body: { scenarioId }.
-// Forwards to the real API's POST /v1/runs with the server-side runs:write key.
+// POST /api/live/runs — provision a practice cluster for the signed-in caller.
+// Requires a valid session; the API caps one live cluster per owner.
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  if (!liveEnabled()) {
-    return NextResponse.json(
-      { error: "Live provisioning is not configured." },
-      { status: 503 },
-    );
-  }
+  const g = await guard(req, { kind: "provision" });
+  if (!g.ok) return g.response;
 
   let body: { scenarioId?: string } = {};
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Expected JSON body." }, { status: 400 });
+    /* defaults below */
   }
 
-  const scenarioId = String(body.scenarioId ?? "checkout-traffic-spike");
-  const res = await liveFetch("/v1/runs", {
-    method: "POST",
-    body: JSON.stringify({ scenarioId }),
-  });
+  const res = await liveFetch(
+    "/v1/runs",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        scenarioId: String(body.scenarioId ?? "practice-cluster"),
+      }),
+    },
+    g.caller.owner,
+  );
 
   const payload = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    return NextResponse.json(payload, { status: res.status });
-  }
-  return NextResponse.json(toLiveRunView(payload), {
-    status: res.status,
-    headers: { "Cache-Control": "no-store" },
-  });
+  if (!res.ok) return jsonNoStore(payload, res.status);
+  return jsonNoStore(toLiveRunView(payload), res.status);
 }

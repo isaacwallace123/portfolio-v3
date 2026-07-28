@@ -42,17 +42,29 @@ public sealed class RunBroker
             .OfType<ScenarioDefinition>()
             .ToArray();
 
-    public async Task<BrokerResult> CreateRunAsync(string scenarioId, CancellationToken ct)
+    public async Task<BrokerResult> CreateRunAsync(
+        string scenarioId, string owner, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(scenarioId))
             return BrokerResult.Fail(400, "scenarioId is required.");
+        // Provisioning is never anonymous: the caller must present a resolved owner key.
+        if (!IsValidOwner(owner))
+            return BrokerResult.Fail(401, "Sign in to provision a cluster.");
         if (!_options.Scenarios.Contains(scenarioId) ||
             !ScenarioDefinitions.All.TryGetValue(scenarioId, out var scenario))
             return BrokerResult.Fail(404, $"Unknown scenario '{scenarioId}'.");
 
-        var active = (await ListAsync(ct)).Count(r => r.Status is "provisioning" or "ready");
-        if (active >= _options.MaxConcurrentRuns)
-            return BrokerResult.Fail(429, "No run slots are free. Try again shortly.");
+        var all = await ListAsync(ct);
+        var live = all.Where(r => r.Status is "provisioning" or "ready").ToArray();
+
+        // One cluster per person. Returning the existing cluster (rather than an error) makes the
+        // page idempotent: a reload or a second tab lands back on the cluster you already own.
+        var mine = live.FirstOrDefault(r => r.Owner == owner);
+        if (mine is not null)
+            return BrokerResult.Accepted(mine);
+
+        if (live.Length >= _options.MaxConcurrentRuns)
+            return BrokerResult.Fail(429, "No cluster slots are free. Try again shortly.");
 
         var runId = $"run-hl-{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(5))}";
         var body = new LabRunResource
@@ -62,6 +74,7 @@ public sealed class RunBroker
             {
                 ScenarioId = scenarioId,
                 RunId = runId,
+                Owner = owner,
                 ResourceClass = "standard",
                 TtlSeconds = _options.DefaultTtlSeconds,
                 ApiReplicas = scenario.InitialApiReplicas,
@@ -87,9 +100,29 @@ public sealed class RunBroker
         }
     }
 
-    public async Task<BrokerResult> SubmitDecisionAsync(string runId, string decisionId, CancellationToken ct)
+    // Owner keys are opaque hex digests issued by the front end after verifying the SSO session.
+    private static bool IsValidOwner(string? owner) =>
+        !string.IsNullOrEmpty(owner) &&
+        owner.Length is >= 16 and <= 64 &&
+        owner.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+
+    // Fetch a cluster only if the caller owns it. Mismatches return null so the API answers 404 for
+    // "not yours" exactly as it does for "does not exist" — a caller cannot probe for other people's
+    // clusters. Clusters created before ownership existed have an empty owner and are unclaimable.
+    private async Task<LabRunResource?> GetOwnedResourceAsync(
+        string runId, string owner, CancellationToken ct)
     {
         var resource = await GetResourceAsync(runId, ct);
+        if (resource is null) return null;
+        if (!IsValidOwner(owner)) return null;
+        return string.Equals(resource.Spec.Owner, owner, StringComparison.Ordinal)
+            ? resource
+            : null;
+    }
+
+    public async Task<BrokerResult> SubmitDecisionAsync(string runId, string decisionId, string owner, CancellationToken ct)
+    {
+        var resource = await GetOwnedResourceAsync(runId, owner, ct);
         if (resource is null)
             return BrokerResult.Fail(404, "No such run.");
 
@@ -142,9 +175,9 @@ public sealed class RunBroker
     // Start a drill ON an already-running cluster: set the objective/clock and reset the workload to
     // the drill's starting conditions. The namespace and its workload are untouched, so the drill
     // begins against live traffic instead of waiting out another provisioning cycle.
-    public async Task<BrokerResult> StartDrillAsync(string runId, string drillId, CancellationToken ct)
+    public async Task<BrokerResult> StartDrillAsync(string runId, string drillId, string owner, CancellationToken ct)
     {
-        var resource = await GetResourceAsync(runId, ct);
+        var resource = await GetOwnedResourceAsync(runId, owner, ct);
         if (resource is null)
             return BrokerResult.Fail(404, "No such run.");
         if (!ScenarioDefinitions.IsDrill(drillId) ||
@@ -179,9 +212,9 @@ public sealed class RunBroker
     }
 
     // End the active drill and return the cluster to open-sandbox baseline.
-    public async Task<BrokerResult> EndDrillAsync(string runId, CancellationToken ct)
+    public async Task<BrokerResult> EndDrillAsync(string runId, string owner, CancellationToken ct)
     {
-        var resource = await GetResourceAsync(runId, ct);
+        var resource = await GetOwnedResourceAsync(runId, owner, ct);
         if (resource is null)
             return BrokerResult.Fail(404, "No such run.");
 
@@ -221,11 +254,99 @@ public sealed class RunBroker
         }
     }
 
+    // Per-component, per-pod view of the caller's cluster: what is running, whether it is ready, and
+    // the CPU/memory each pod is actually using. This is what the request-path flowchart renders, so
+    // every tier shows measured numbers rather than a static diagram. Pod names are reduced to their
+    // short suffix and node placement is never exposed.
+    public async Task<IReadOnlyList<RunComponent>?> GetComponentsAsync(
+        string runId, string owner, CancellationToken ct)
+    {
+        var run = await GetRunAsync(runId, owner, ct);
+        if (run is null) return null;
+        var ns = run.Namespace ?? runId;
+
+        // Measured usage per pod (metrics-server); absent for pods that have not been sampled yet.
+        var usage = new Dictionary<string, (int Cpu, int Mem)>(StringComparer.Ordinal);
+        try
+        {
+            var raw = await _k8s.CustomObjects.ListNamespacedCustomObjectAsync(
+                "metrics.k8s.io", "v1beta1", ns, "pods", cancellationToken: ct);
+            var list = KubernetesJson.Deserialize<PodMetricsList>(KubernetesJson.Serialize(raw));
+            foreach (var pod in list.Items)
+            {
+                double cpu = 0, mem = 0;
+                foreach (var c in pod.Containers)
+                {
+                    cpu += ParseCpuMillicores(c.Usage.Cpu);
+                    mem += ParseMemoryMiB(c.Usage.Memory);
+                }
+                usage[pod.Metadata?.Name ?? ""] = ((int)Math.Round(cpu), (int)Math.Round(mem));
+            }
+        }
+        catch (HttpOperationException) { /* metrics not ready yet */ }
+
+        List<RunComponent> components = [];
+        try
+        {
+            var deployments = await _k8s.AppsV1.ListNamespacedDeploymentAsync(ns, cancellationToken: ct);
+            var pods = await _k8s.CoreV1.ListNamespacedPodAsync(ns, cancellationToken: ct);
+
+            foreach (var d in deployments.Items.OrderBy(d => d.Metadata.Name, StringComparer.Ordinal))
+            {
+                var app = d.Metadata.Name;
+                var mine = pods.Items
+                    .Where(p => p.Metadata.Labels is { } l &&
+                                l.TryGetValue("app", out var a) && a == app)
+                    .ToArray();
+
+                var podViews = mine.Select(p =>
+                {
+                    var name = p.Metadata.Name ?? "";
+                    var shortName = name.Length > 5 ? name[^5..] : name;
+                    var containerReady =
+                        p.Status?.ContainerStatuses?.All(c => c.Ready) ?? false;
+                    var restarts = p.Status?.ContainerStatuses?.Sum(c => c.RestartCount) ?? 0;
+                    var u = usage.GetValueOrDefault(name);
+                    return new RunPod(
+                        shortName,
+                        p.Status?.Phase ?? "Pending",
+                        containerReady,
+                        restarts,
+                        u.Cpu,
+                        u.Mem);
+                }).ToArray();
+
+                components.Add(new RunComponent(
+                    app,
+                    d.Spec?.Replicas ?? 0,
+                    d.Status?.ReadyReplicas ?? 0,
+                    podViews.Sum(p => p.CpuMillicores),
+                    podViews.Sum(p => p.MemoryMiB),
+                    // Per-replica CPU ceiling, so the UI can show saturation honestly.
+                    ParseCpuLimit(d),
+                    podViews));
+            }
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogDebug(ex, "Components unavailable for {RunId}.", runId);
+        }
+
+        return components;
+    }
+
+    private static int ParseCpuLimit(k8s.Models.V1Deployment d)
+    {
+        var limits = d.Spec?.Template?.Spec?.Containers?.FirstOrDefault()?.Resources?.Limits;
+        if (limits is null || !limits.TryGetValue("cpu", out var q) || q is null) return 0;
+        return (int)Math.Round(ParseCpuMillicores(q.ToString() ?? "0"));
+    }
+
     // Real Kubernetes Events from the run's namespace, sanitized to a small public shape. This is the
     // arena's event stream: actual scheduling, image pull, probe, and scaling activity.
-    public async Task<IReadOnlyList<RunEventView>?> GetEventsAsync(string runId, CancellationToken ct)
+    public async Task<IReadOnlyList<RunEventView>?> GetEventsAsync(string runId, string owner, CancellationToken ct)
     {
-        var view = await GetRunAsync(runId, ct);
+        var view = await GetRunAsync(runId, owner, ct);
         if (view is null) return null;
         var ns = view.Namespace ?? runId;
 
@@ -269,9 +390,9 @@ public sealed class RunBroker
         return text.Replace("\n", " ").Trim();
     }
 
-    public async Task<RunView?> GetRunAsync(string runId, CancellationToken ct)
+    public async Task<RunView?> GetRunAsync(string runId, string owner, CancellationToken ct)
     {
-        var resource = await GetResourceAsync(runId, ct);
+        var resource = await GetOwnedResourceAsync(runId, owner, ct);
         return resource is null ? null : RunView.From(resource);
     }
 
@@ -320,9 +441,9 @@ public sealed class RunBroker
         _inventory.GetTopologyAsync(ct);
 
     public async Task<BrokerResult> SubmitPracticeActionAsync(
-        string runId, string actionId, CancellationToken ct)
+        string runId, string actionId, string owner, CancellationToken ct)
     {
-        var resource = await GetResourceAsync(runId, ct);
+        var resource = await GetOwnedResourceAsync(runId, owner, ct);
         if (resource is null)
             return BrokerResult.Fail(404, "No such practice cluster.");
         if (resource.Spec.ScenarioId != "practice-cluster")
@@ -381,23 +502,23 @@ public sealed class RunBroker
         params (string Key, object Value)[] fields) =>
         fields.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
 
-    public async Task<RunTrace?> GetTraceAsync(string runId, CancellationToken ct)
+    public async Task<RunTrace?> GetTraceAsync(string runId, string owner, CancellationToken ct)
     {
-        var run = await GetRunAsync(runId, ct);
+        var run = await GetRunAsync(runId, owner, ct);
         if (run?.Namespace is null) return null;
         return await _traces.ScrapeAsync(runId, run.Namespace, ct);
     }
 
-    public async Task<RunReport?> GetReportAsync(string runId, CancellationToken ct)
+    public async Task<RunReport?> GetReportAsync(string runId, string owner, CancellationToken ct)
     {
-        var run = await GetRunAsync(runId, ct);
+        var run = await GetRunAsync(runId, owner, ct);
         if (run is null || run.CreatedAt is null) return null;
         if (!ScenarioDefinitions.All.TryGetValue(run.ScenarioId, out var scenario)) return null;
 
         var elapsed = (DateTime.UtcNow - run.CreatedAt.Value).TotalSeconds - 16;
         if (elapsed < scenario.DurationSeconds) return RunReport.NotReady(runId, run.ScenarioId);
 
-        var telemetry = await GetTelemetryAsync(runId, ct);
+        var telemetry = await GetTelemetryAsync(runId, owner, ct);
         var passedState = run.ScenarioId switch
         {
             "checkout-bad-release" => run.ReleaseTrack == "stable",
@@ -442,9 +563,9 @@ public sealed class RunBroker
     // Real telemetry: sum the run namespace's actual CPU/memory usage from metrics-server, plus the
     // decision-driven state. Returns null only when the run itself is gone; if metrics aren't ready
     // yet (pods still starting), usage reads as zero rather than failing.
-    public async Task<RunTelemetry?> GetTelemetryAsync(string runId, CancellationToken ct)
+    public async Task<RunTelemetry?> GetTelemetryAsync(string runId, string owner, CancellationToken ct)
     {
-        var run = await GetRunAsync(runId, ct);
+        var run = await GetRunAsync(runId, owner, ct);
         if (run is null) return null;
         var ns = run.Namespace ?? runId;
 
@@ -504,8 +625,25 @@ public sealed class RunBroker
         return double.Parse(q, CultureInfo.InvariantCulture) / (1024.0 * 1024.0); // bytes
     }
 
-    public async Task<bool> DeleteRunAsync(string runId, CancellationToken ct)
+    // Owner-free teardown used by the TTL reaper (the platform, not a user, is acting).
+    public async Task<bool> DeleteExpiredAsync(string runId, CancellationToken ct)
     {
+        try
+        {
+            await _k8s.CustomObjects.DeleteClusterCustomObjectAsync(
+                LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
+            return true;
+        }
+        catch (HttpOperationException ex) when (ex.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+    }
+
+    public async Task<bool> DeleteRunAsync(string runId, string owner, CancellationToken ct)
+    {
+        // Only the owner can tear a cluster down. The reaper uses DeleteExpiredAsync instead.
+        if (await GetOwnedResourceAsync(runId, owner, ct) is null) return false;
         try
         {
             await _k8s.CustomObjects.DeleteClusterCustomObjectAsync(

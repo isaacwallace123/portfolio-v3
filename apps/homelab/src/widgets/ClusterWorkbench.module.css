@@ -181,65 +181,262 @@
   white-space: nowrap;
 }
 
-/* ── request path ────────────────────────────────────────────────────────── */
-.path {
+/* ── flowchart canvas ────────────────────────────────────────────────────── */
+.canvas {
+  background:
+    radial-gradient(
+      120% 120% at 50% -20%,
+      color-mix(in srgb, var(--accent) 7%, transparent),
+      transparent 60%
+    ),
+    var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  padding: 20px;
+  margin-bottom: 18px;
+}
+.canvasHead {
   display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.canvasHead h2 {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-}
-.node {
-  flex: 1 1 0;
-  min-width: 108px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface-2) 45%, transparent);
-  transition: border-color var(--dur-base);
-}
-.node svg {
-  color: var(--accent);
-}
-.node b {
+  margin: 0;
   font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--ink);
 }
-.node small {
-  font-size: 11.5px;
-  color: var(--ink-dim);
+.canvasHead svg {
+  color: var(--accent);
 }
-.nodeIdle {
-  opacity: 0.5;
+
+.flow {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  padding-bottom: 6px;
 }
-.nodeHot {
-  border-color: color-mix(in srgb, var(--red) 55%, var(--line));
-}
-.nodeHot svg {
-  color: var(--red);
-}
-.nodeGood {
-  border-color: color-mix(in srgb, var(--mint) 45%, var(--line));
-}
-.stack {
+.flowStep {
+  display: flex;
+  align-items: center;
+  gap: 0;
   flex: 1 1 0;
-  min-width: 108px;
+  min-width: 210px;
+}
+.dataCol {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  flex: 1 1 0;
+  min-width: 210px;
 }
-.arrow {
-  color: var(--ink-dim);
+
+/* connector between tiers */
+.link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
   flex: none;
-  opacity: 0.6;
+  color: var(--ink-dim);
+  position: relative;
+}
+.link::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  height: 1px;
+  background: var(--line-2);
+}
+.link svg {
+  position: relative;
+  background: var(--base);
+  border-radius: 50%;
+}
+.linkLive {
+  color: var(--accent);
+}
+.linkLive::before {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 60%, transparent),
+    color-mix(in srgb, var(--accent) 15%, transparent)
+  );
+  background-size: 200% 100%;
+  animation: flowPulse 1.6s linear infinite;
+}
+@keyframes flowPulse {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* a tier node */
+.tier {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface-2) 40%, transparent);
+  transition:
+    border-color var(--dur-base),
+    transform var(--dur-fast);
+}
+.tier:hover {
+  border-color: var(--line-2);
+}
+.tierDim {
+  opacity: 0.5;
+}
+.tier-edge {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+}
+.tier-app {
+  border-color: color-mix(in srgb, var(--acid) 26%, var(--line));
+}
+.tierTop {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.tierIcon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  flex: none;
+}
+.tierName {
+  min-width: 0;
+  flex: 1;
+}
+.tierName b {
+  display: block;
+  font-size: 13.5px;
+  color: var(--ink);
+  line-height: 1.2;
+}
+.tierName small {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.pillOk {
+  color: var(--mint);
+  border-color: color-mix(in srgb, var(--mint) 40%, var(--line));
+}
+.pillWarn {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 40%, var(--line));
+}
+.pillIdle {
+  color: var(--ink-dim);
+}
+.tierDetail {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ink-mid);
+  font-variant-numeric: tabular-nums;
+}
+
+/* per-pod rows */
+.pods {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 3px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+.pod {
+  display: grid;
+  grid-template-columns: 44px 1fr auto auto;
+  align-items: center;
+  gap: 7px;
+  font-size: 10.5px;
+  color: var(--ink-dim);
+}
+.podId {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.podBar {
+  height: 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--line) 80%, transparent);
+  overflow: hidden;
+}
+.podBar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width var(--dur-base);
+}
+.podBarHot {
+  background: var(--amber) !important;
+}
+.podStat {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-mid);
+}
+.podWarn {
+  color: var(--amber);
+}
+.tierTotals {
+  display: flex;
+  gap: 12px;
+  font-size: 10.5px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.tierTotals span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tierTotals svg {
+  color: var(--accent);
+}
+
+.drillTag {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 99px;
+  color: var(--acid);
+  border: 1px solid color-mix(in srgb, var(--acid) 35%, var(--line));
+  white-space: nowrap;
 }
 
 .metrics {
+  margin-top: 18px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: 1px;
   margin-top: 18px;
   background: var(--line);

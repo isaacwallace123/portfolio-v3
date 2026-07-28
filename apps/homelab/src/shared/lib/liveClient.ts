@@ -92,11 +92,45 @@ async function asJson<T>(res: Response): Promise<T> {
   return body as T;
 }
 
-export async function fetchLiveStatus(): Promise<{
+export interface LiveStatus {
   enabled: boolean;
-  scenarioId: string;
-  platform?: LivePlatformStatus;
-}> {
+  /** Whether this visitor has a valid SSO session (verified server-side). */
+  signedIn: boolean;
+  displayName: string | null;
+  /** The cluster this visitor already owns, so a reload resumes it. */
+  myRunId: string | null;
+}
+
+/** One pod of a cluster component, with measured usage. */
+export interface RunPod {
+  name: string;
+  phase: string;
+  ready: boolean;
+  restarts: number;
+  cpuMillicores: number;
+  memoryMiB: number;
+}
+
+/** One tier of the request path, with per-pod detail. */
+export interface RunComponent {
+  name: string;
+  desired: number;
+  ready: number;
+  cpuMillicores: number;
+  memoryMiB: number;
+  cpuLimitMillicoresPerPod: number;
+  pods: RunPod[];
+}
+
+export async function fetchComponents(runId: string): Promise<RunComponent[]> {
+  const res = await fetch(`/api/live/runs/${runId}/components`, {
+    cache: "no-store",
+  });
+  if (!res.ok) return [];
+  return res.json().catch(() => []);
+}
+
+export async function fetchLiveStatus(): Promise<LiveStatus> {
   const res = await fetch("/api/live/status", { cache: "no-store" });
   return asJson(res);
 }
