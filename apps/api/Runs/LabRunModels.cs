@@ -257,8 +257,10 @@ public sealed record RunView(
             definition?.Objective ?? "",
             (int)Math.Round(elapsedSeconds),
             duration,
-            // Finishing the objective ends the drill just as the clock running out does.
-            drillComplete || solved,
+            // A drill ends when it is SOLVED. There is no deadline: the elapsed clock is only used to
+            // stagger when options unlock (so there is a baseline to judge against), and running past
+            // the nominal duration is not a failure state.
+            solved,
             solved,
             correctChosen,
             correctTotal,

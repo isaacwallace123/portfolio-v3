@@ -56,7 +56,7 @@ import {
 import styles from "./ClusterWorkbench.module.css";
 
 const SANDBOX = "practice-cluster";
-const POLL_MS = 2500;
+const POLL_MS = 1200;
 const HISTORY = 40; // ~100s of samples at the poll interval
 
 const drills = homelabScenarios.filter((s) => s.id !== SANDBOX);
@@ -364,6 +364,8 @@ export default function ClusterWorkbench() {
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("drills");
 
+  // Ticks once a second so the countdown and elapsed clock move smoothly between polls.
+  const [now, setNow] = useState(() => Date.now());
   const poll = useRef<number | null>(null);
   // Every mutation bumps this. A refresh captures it before fetching and drops its run payload if a
   // mutation happened meanwhile — otherwise an in-flight poll lands after an action and reverts it.
@@ -432,6 +434,11 @@ export default function ClusterWorkbench() {
     }
   }, []);
   useEffect(() => stopPolling, [stopPolling]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const refresh = useCallback(async (runId: string) => {
     const seq = mutationSeq.current;
@@ -671,6 +678,10 @@ export default function ClusterWorkbench() {
     : undefined;
   const totalCpu = components.reduce((a, c) => a + c.cpuMillicores, 0);
   const totalMem = components.reduce((a, c) => a + c.memoryMiB, 0);
+  // Counted down locally against the run's creation time, so it ticks every second rather than
+  // stepping whenever a poll happens to land.
+  const createdMs = run.createdAt ? Date.parse(run.createdAt) : now;
+  const remainingMs = Math.max(0, run.ttlMs - (now - createdMs));
 
   return (
     <div className={styles.shell}>
@@ -689,11 +700,14 @@ export default function ClusterWorkbench() {
           </div>
 
           <div className={styles.hudTopRight}>
-            <span title="Time until automatic teardown">
-              <Timer size={13} /> {clock(run.remainingTtlMs)}
+            <span
+              className={`${styles.hudCard} ${remainingMs < 60_000 ? styles.warnText : ""}`}
+              title="Time until this cluster is automatically destroyed"
+            >
+              <Timer size={13} /> {clock(remainingMs)}
             </span>
             <button
-              className={styles.danger}
+              className={`${styles.hudCard} ${styles.danger}`}
               onClick={teardown}
               disabled={busy !== null}
             >
@@ -1170,14 +1184,17 @@ export default function ClusterWorkbench() {
                       <b>{run.drillTitle || drill.title}</b>
                       <p>{run.drillObjective || drill.summary}</p>
                       <span>
-                        {clock(run.elapsedMs)} / {clock(run.durationMs)} ·{" "}
-                        {run.drillCorrectChosen}/{run.drillCorrectTotal} correct
+                        {run.drillCorrectChosen} of {run.drillCorrectTotal} key
+                        actions found · {clock(run.elapsedMs)} elapsed
                       </span>
                     </div>
-                    <div className={styles.progress}>
+                    <div
+                      className={styles.progress}
+                      title={`${run.drillCorrectChosen} of ${run.drillCorrectTotal} correct actions`}
+                    >
                       <i
                         style={{
-                          width: `${Math.min(100, (run.elapsedMs / Math.max(1, run.durationMs)) * 100)}%`,
+                          width: `${Math.min(100, (run.drillCorrectChosen / Math.max(1, run.drillCorrectTotal)) * 100)}%`,
                         }}
                       />
                     </div>

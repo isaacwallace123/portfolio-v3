@@ -1301,3 +1301,25 @@
   background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
   color: var(--ink) !important;
 }
+
+/* timer and teardown read as two separate controls sitting side by side */
+.hudTopRight {
+  padding: 0;
+  border: 0;
+  background: none;
+  backdrop-filter: none;
+  gap: 8px;
+}
+.hudCard {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-mid);
+}
