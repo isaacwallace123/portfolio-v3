@@ -90,7 +90,12 @@ public sealed record RunPod(
     bool Ready,
     int Restarts,
     int CpuMillicores,
-    int MemoryMiB);
+    int MemoryMiB,
+    // What the pod is actually doing right now ("ContainerCreating", "PodInitializing",
+    // "ImagePullBackOff", "Starting"), or empty once it is serving. Pod.Status.Phase alone says
+    // "Pending" for both "waiting for a node" and "pulling the image", which is exactly the
+    // difference a person watching a scale-up wants to see.
+    string Detail);
 
 // One tier of the request path (a Deployment), with per-pod detail for the flowchart.
 public sealed record RunComponent(

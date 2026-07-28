@@ -109,6 +109,8 @@ export interface RunPod {
   restarts: number;
   cpuMillicores: number;
   memoryMiB: number;
+  /** What the pod is doing while it is not ready ("ContainerCreating", "Scheduling"), else "". */
+  detail: string;
 }
 
 /** One tier of the request path, with per-pod detail. */

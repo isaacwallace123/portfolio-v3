@@ -368,6 +368,9 @@ export default function ClusterWorkbench() {
   const [levels, setLevels] = useState<Set<Level>>(new Set());
   const [phases, setPhases] = useState<Set<Phase>>(new Set());
   const [query, setQuery] = useState("");
+  // Slider positions mid-drag, before they are committed to the cluster.
+  const [drag, setDrag] = useState<Record<string, number>>({});
+  const commitTimers = useRef<Record<string, number>>({});
 
   // Ticks once a second so the countdown and elapsed clock move smoothly between polls.
   const [now, setNow] = useState(() => Date.now());
@@ -579,6 +582,35 @@ export default function ClusterWorkbench() {
 
   const byName = (n: string) => components.find((c) => c.name === n);
 
+  // What the operator has asked for. This is known the instant a slider moves, whereas the
+  // Deployment's own desired count only catches up a round-trip later — so the graph draws a card
+  // per intended replica immediately, and the ones that do not exist yet render as ghosts. Watching
+  // six squares appear and fill in is the feedback; waiting on two squares is not.
+  const intendedPods = (svc: ServiceId): number => {
+    if (!run) return 0;
+    switch (svc) {
+      case "checkout":
+        return run.telemetry.apiReplicas;
+      case "k6":
+        return run.loadGenerators;
+      case "redis":
+        return run.telemetry.cacheActive ? 1 : 0;
+      default:
+        return 1;
+    }
+  };
+
+  // The one tier that is currently not where it was asked to be. Drives the banner so a change is
+  // narrated from the click through to the last pod going ready, rather than being silent until it
+  // finishes.
+  const converging = (["checkout", "k6", "redis"] as ServiceId[])
+    .map((svc) => ({
+      svc,
+      want: intendedPods(svc),
+      have: byName(svc)?.pods.filter((p) => p.ready).length ?? 0,
+    }))
+    .find((x) => x.want !== x.have);
+
   // ── first paint: resolving the session ────────────────────────────────────
   if (status === null) {
     return (
@@ -749,9 +781,12 @@ export default function ClusterWorkbench() {
                   const limit = c?.cpuLimitMillicoresPerPod ?? 0;
                   const pods = c?.pods ?? [];
                   const active = selected === svc;
+                  // Replicas asked for but not yet reported by Kubernetes.
+                  const ghosts = Math.max(0, intendedPods(svc) - pods.length);
 
-                  // Nothing scheduled: a single placeholder so the shape of the graph stays readable.
-                  if (pods.length === 0) {
+                  // Nothing scheduled and nothing asked for: a single placeholder so the shape of
+                  // the graph stays readable.
+                  if (pods.length === 0 && ghosts === 0) {
                     return (
                       <button
                         key={svc}
@@ -775,30 +810,92 @@ export default function ClusterWorkbench() {
                     );
                   }
 
-                  return pods.map((p) => {
-                    const pct =
-                      limit > 0
-                        ? Math.min(100, (p.cpuMillicores / limit) * 100)
-                        : 0;
-                    return (
-                      <button
-                        key={`${svc}:${p.name}`}
-                        ref={(el) => {
-                          cardRefs.current[`${svc}:${p.name}`] = el;
-                        }}
-                        className={`${styles.card} ${!p.ready ? styles.cardStarting : ""} ${
-                          selected === `${svc}:${p.name}`
-                            ? styles.cardActive
-                            : ""
-                        } ${pct > 85 ? styles.cardHot : ""}`}
-                        onClick={() =>
-                          setSelected(
+                  return [
+                    ...pods.map((p) => {
+                      const pct =
+                        limit > 0
+                          ? Math.min(100, (p.cpuMillicores / limit) * 100)
+                          : 0;
+                      return (
+                        <button
+                          key={`${svc}:${p.name}`}
+                          ref={(el) => {
+                            cardRefs.current[`${svc}:${p.name}`] = el;
+                          }}
+                          className={`${styles.card} ${!p.ready ? styles.cardStarting : ""} ${
                             selected === `${svc}:${p.name}`
-                              ? null
-                              : `${svc}:${p.name}`,
-                          )
-                        }
-                        title={`${svc}-${p.name} · ${p.phase}`}
+                              ? styles.cardActive
+                              : ""
+                          } ${pct > 85 ? styles.cardHot : ""}`}
+                          onClick={() =>
+                            setSelected(
+                              selected === `${svc}:${p.name}`
+                                ? null
+                                : `${svc}:${p.name}`,
+                            )
+                          }
+                          title={`${svc}-${p.name} · ${p.phase}`}
+                        >
+                          <span className={styles.cardHead}>
+                            <span className={styles.cardIcon}>
+                              <Icon size={14} />
+                            </span>
+                            <span className={styles.cardTitle}>
+                              <b>{meta.label}</b>
+                              <small>
+                                {pods.length > 1 ? `…${p.name}` : meta.role}
+                              </small>
+                            </span>
+                            {!p.ready ? (
+                              <Loader2 size={12} className={styles.spin} />
+                            ) : (
+                              <span className={styles.readyDot} />
+                            )}
+                          </span>
+
+                          {/* this pod's CPU against its own limit */}
+                          <span className={styles.cardBar}>
+                            <i style={{ width: `${Math.max(3, pct)}%` }} />
+                          </span>
+
+                          <span className={styles.cardFoot}>
+                            {p.ready ? (
+                              <>
+                                <span>
+                                  <Cpu size={10} /> {p.cpuMillicores}m
+                                </span>
+                                <span>
+                                  <MemoryStick size={10} /> {p.memoryMiB}Mi
+                                </span>
+                                {p.restarts > 0 && (
+                                  <span className={styles.warnText}>
+                                    ×{p.restarts}
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              // Say what it is doing, not just that it is not done. "Scheduling",
+                              // "ContainerCreating" and "ImagePullBackOff" mean very different things
+                              // to whoever is watching the scale-up.
+                              <span className={styles.phaseText}>
+                                {p.detail || p.phase}
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      );
+                    }),
+
+                    // Asked for, not yet reported by the cluster. Drawn in place so the edges fan
+                    // out to their final positions the moment the slider moves.
+                    ...Array.from({ length: ghosts }, (_, i) => (
+                      <div
+                        key={`${svc}:ghost${i}`}
+                        ref={(el) => {
+                          cardRefs.current[`${svc}:ghost${i}`] = el;
+                        }}
+                        className={`${styles.card} ${styles.cardGhost}`}
+                        aria-hidden="true"
                       >
                         <span className={styles.cardHead}>
                           <span className={styles.cardIcon}>
@@ -806,42 +903,42 @@ export default function ClusterWorkbench() {
                           </span>
                           <span className={styles.cardTitle}>
                             <b>{meta.label}</b>
-                            <small>
-                              {pods.length > 1 ? `…${p.name}` : meta.role}
-                            </small>
+                            <small>pending</small>
                           </span>
-                          {!p.ready ? (
-                            <Loader2 size={12} className={styles.spin} />
-                          ) : (
-                            <span className={styles.readyDot} />
-                          )}
+                          <Loader2 size={12} className={styles.spin} />
                         </span>
-
-                        {/* this pod's CPU against its own limit */}
                         <span className={styles.cardBar}>
-                          <i style={{ width: `${Math.max(3, pct)}%` }} />
+                          <i className={styles.barPulse} />
                         </span>
-
                         <span className={styles.cardFoot}>
-                          <span>
-                            <Cpu size={10} /> {p.cpuMillicores}m
-                          </span>
-                          <span>
-                            <MemoryStick size={10} /> {p.memoryMiB}Mi
-                          </span>
-                          {p.restarts > 0 && (
-                            <span className={styles.warnText}>
-                              ×{p.restarts}
-                            </span>
-                          )}
+                          <span className={styles.phaseText}>requesting…</span>
                         </span>
-                      </button>
-                    );
-                  });
+                      </div>
+                    )),
+                  ];
                 })}
               </div>
             ))}
           </div>
+
+          {(converging || busy) && (
+            <div className={styles.hudTopCenter}>
+              <span className={styles.convergeChip}>
+                <Loader2 size={12} className={styles.spin} />
+                {converging ? (
+                  <>
+                    {converging.want > converging.have ? "Scaling" : "Draining"}{" "}
+                    <b>{SERVICES[converging.svc].label}</b> to {converging.want}
+                    <em>
+                      {converging.have} of {converging.want} ready
+                    </em>
+                  </>
+                ) : (
+                  <>Applying…</>
+                )}
+              </span>
+            </div>
+          )}
 
           <div className={styles.hudBottomLeft}>
             <span className={flowing ? styles.liveChip : styles.idleChip}>
@@ -1287,7 +1384,11 @@ export default function ClusterWorkbench() {
               {tab === "controls" && (
                 <div className={styles.controls}>
                   {SLIDERS.map((sl) => {
-                    const v = sl.value(run);
+                    // While dragging, the thumb follows the pointer locally and nothing is sent.
+                    // Committing on every step fired one patch per notch, and a burst of patches on
+                    // a single LabRun is exactly what holds Crossplane's realtime circuit breaker
+                    // open — so the drag itself was making the cluster slow to answer it.
+                    const v = drag[sl.prefix] ?? sl.value(run);
                     const pendingHere = busy?.startsWith(sl.prefix) ?? false;
                     return (
                       <div key={sl.label} className={styles.control}>
@@ -1307,15 +1408,31 @@ export default function ClusterWorkbench() {
                           max={sl.max}
                           step={1}
                           value={v}
-                          disabled={busy !== null}
                           onChange={(e) => {
                             const n = Number(e.target.value);
-                            if (n === v) return;
-                            act(
-                              `${sl.prefix}${n}`,
-                              () =>
-                                practiceAction(run.runId, `${sl.prefix}${n}`),
-                              (r) => sl.apply(r, n),
+                            setDrag((d) => ({ ...d, [sl.prefix]: n }));
+                            window.clearTimeout(
+                              commitTimers.current[sl.prefix],
+                            );
+                            commitTimers.current[sl.prefix] = window.setTimeout(
+                              () => {
+                                setDrag((d) => {
+                                  const next = { ...d };
+                                  delete next[sl.prefix];
+                                  return next;
+                                });
+                                if (n === sl.value(run)) return;
+                                act(
+                                  `${sl.prefix}${n}`,
+                                  () =>
+                                    practiceAction(
+                                      run.runId,
+                                      `${sl.prefix}${n}`,
+                                    ),
+                                  (r) => sl.apply(r, n),
+                                );
+                              },
+                              220,
                             );
                           }}
                         />

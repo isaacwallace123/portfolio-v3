@@ -163,6 +163,7 @@ public sealed class RunBroker
         {
             var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
                 patch, LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
+            await WriteThroughReplicasAsync(runId, decision.SpecPatch, ct);
             return BrokerResult.Accepted(RunView.From(Parse(updated)));
         }
         catch (HttpOperationException ex)
@@ -208,7 +209,12 @@ public sealed class RunBroker
                 loadReplicas = 1, // a drill always needs live traffic to measure against
             },
         };
-        return await PatchRunAsync(runId, patchBody, $"start drill {drillId}", ct);
+        var started = await PatchRunAsync(runId, patchBody, $"start drill {drillId}", ct);
+        await WriteThroughReplicasAsync(runId, Patch(
+            ("apiReplicas", drill.InitialApiReplicas),
+            ("cacheReplicas", drill.InitialCacheReplicas),
+            ("loadReplicas", 1)), ct);
+        return started;
     }
 
     // End the active drill and return the cluster to open-sandbox baseline.
@@ -226,15 +232,24 @@ public sealed class RunBroker
         var patchBody = new
         {
             metadata = new { annotations },
+            // Returns the cluster to open-sandbox baseline. These three replica counts are repeated
+            // in the write-through below and must stay identical to it, or Crossplane's next
+            // reconcile would undo the fast path.
             spec = new
             {
                 drillId = "",
                 drillStartedAt = "",
                 releaseTrack = "stable",
                 dataState = "healthy",
+                apiReplicas = 2,
+                cacheReplicas = 0,
+                loadReplicas = 0,
             },
         };
-        return await PatchRunAsync(runId, patchBody, "end drill", ct);
+        var ended = await PatchRunAsync(runId, patchBody, "end drill", ct);
+        await WriteThroughReplicasAsync(runId, Patch(
+            ("apiReplicas", 2), ("cacheReplicas", 0), ("loadReplicas", 0)), ct);
+        return ended;
     }
 
     private async Task<BrokerResult> PatchRunAsync(
@@ -303,17 +318,25 @@ public sealed class RunBroker
                 {
                     var name = p.Metadata.Name ?? "";
                     var shortName = name.Length > 5 ? name[^5..] : name;
-                    var containerReady =
-                        p.Status?.ContainerStatuses?.All(c => c.Ready) ?? false;
-                    var restarts = p.Status?.ContainerStatuses?.Sum(c => c.RestartCount) ?? 0;
+                    var statuses = p.Status?.ContainerStatuses;
+                    var containerReady = statuses?.All(c => c.Ready) ?? false;
+                    var restarts = statuses?.Sum(c => c.RestartCount) ?? 0;
                     var u = usage.GetValueOrDefault(name);
+                    var phase = p.Status?.Phase ?? "Pending";
+                    // Prefer the container's own waiting reason; it is the specific one.
+                    var detail =
+                        statuses?.Select(c => c.State?.Waiting?.Reason)
+                                 .FirstOrDefault(r => !string.IsNullOrEmpty(r))
+                        ?? (phase == "Pending" ? "Scheduling"
+                            : containerReady ? "" : "Starting");
                     return new RunPod(
                         shortName,
-                        p.Status?.Phase ?? "Pending",
+                        phase,
                         containerReady,
                         restarts,
                         u.Cpu,
-                        u.Mem);
+                        u.Mem,
+                        detail);
                 }).ToArray();
 
                 components.Add(new RunComponent(
@@ -451,12 +474,12 @@ public sealed class RunBroker
 
         // Sliders send an exact value ("scale-4", "load-2"). Parsing is bounded to the same range the
         // XRD enforces, so an arbitrary number still cannot reach the cluster.
-        if (TryRangedAction(actionId, "scale-", 1, 6, out var replicas))
-            return await ApplyPracticePatchAsync(runId, Patch(("apiReplicas", replicas)), ct);
-        if (TryRangedAction(actionId, "load-", 0, 4, out var load))
-            return await ApplyPracticePatchAsync(runId, Patch(("loadReplicas", load)), ct);
-
-        IReadOnlyDictionary<string, object> spec = actionId switch
+        IReadOnlyDictionary<string, object> spec =
+            TryRangedAction(actionId, "scale-", 1, 6, out var replicas)
+                ? Patch(("apiReplicas", replicas))
+            : TryRangedAction(actionId, "load-", 0, 4, out var load)
+                ? Patch(("loadReplicas", load))
+            : actionId switch
         {
             "cache-on" => Patch(("cacheReplicas", 1)),
             "cache-off" => Patch(("cacheReplicas", 0)),
@@ -494,12 +517,57 @@ public sealed class RunBroker
         {
             var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
                 patch, LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
+            await WriteThroughReplicasAsync(runId, spec, ct);
             return BrokerResult.Accepted(RunView.From(Parse(updated)));
         }
         catch (HttpOperationException ex)
         {
             _log.LogError(ex, "Failed practice action {Action} on {RunId}.", actionId, runId);
             return BrokerResult.Fail(502, "The practice controller rejected the action.");
+        }
+    }
+
+    // The composed Object that owns each scalable tier. Kept in one place so the write-through below
+    // cannot drift from the naming the Composition uses.
+    private static readonly (string SpecField, string ObjectSuffix)[] ReplicaTiers =
+    [
+        ("apiReplicas", "checkout"),
+        ("cacheReplicas", "redis"),
+        ("loadReplicas", "k6"),
+    ];
+
+    // Make a replica change visible now rather than a minute from now.
+    //
+    // Changing a LabRun's spec should reach the Deployment immediately, and on a settled run it does
+    // (~200ms). But Crossplane v2 guards realtime composition with a circuit breaker, and the twenty
+    // composed Objects in a run churn their own status often enough to hold that breaker open — so a
+    // spec change waits out the breaker's cooldown, up to a minute, which is most of a practice
+    // cluster's useful life. Measured on a fresh run: 55s through Crossplane, 228ms written through.
+    //
+    // So the broker writes the replica count it just stored on the LabRun straight to the composed
+    // Object as well. This is not a second source of truth: the LabRun still holds the value, and
+    // when Crossplane does reconcile it writes the identical number, so there is nothing to diverge
+    // and the workload cannot flap back. Best effort by design — if it fails, the run is exactly as
+    // correct as before, just slower to show it.
+    private async Task WriteThroughReplicasAsync(
+        string runId, IReadOnlyDictionary<string, object> spec, CancellationToken ct)
+    {
+        foreach (var (field, suffix) in ReplicaTiers)
+        {
+            if (!spec.TryGetValue(field, out var raw) || raw is not int replicas) continue;
+            var patch = new k8s.Models.V1Patch(
+                new { spec = new { forProvider = new { manifest = new { spec = new { replicas } } } } },
+                k8s.Models.V1Patch.PatchType.MergePatch);
+            try
+            {
+                await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+                    patch, "kubernetes.crossplane.io", "v1alpha2", "objects",
+                    $"{runId}-{suffix}", cancellationToken: ct);
+            }
+            catch (HttpOperationException ex)
+            {
+                _log.LogDebug(ex, "Write-through to {RunId}-{Suffix} failed.", runId, suffix);
+            }
         }
     }
 
@@ -514,10 +582,6 @@ public sealed class RunBroker
         value = parsed;
         return true;
     }
-
-    private async Task<BrokerResult> ApplyPracticePatchAsync(
-        string runId, IReadOnlyDictionary<string, object> spec, CancellationToken ct)
-        => await PatchRunAsync(runId, new { spec }, "apply practice action", ct);
 
     private static IReadOnlyDictionary<string, object> Patch(
         params (string Key, object Value)[] fields) =>
