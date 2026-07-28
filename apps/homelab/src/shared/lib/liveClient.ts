@@ -86,9 +86,25 @@ export interface LiveReport {
 // with a scoped key) to the real HomeOps API and merge the run with the scenario's incident model.
 // Everything returns the RunView shape the arena already renders.
 
+/** Carries the HTTP status, so a caller can tell "this cluster is gone" from "that request
+    failed". The difference decides whether polling gives up or simply tries again. */
+export class LiveError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "LiveError";
+    this.status = status;
+  }
+}
+
 async function asJson<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
+  if (!res.ok) {
+    throw new LiveError(
+      body.error ?? `Request failed (${res.status})`,
+      res.status,
+    );
+  }
   return body as T;
 }
 

@@ -1696,3 +1696,16 @@
   flex-shrink: 0;
   color: var(--amber);
 }
+
+/* Polls are failing. The numbers on screen are the last ones that arrived, not the current ones —
+   say so, because silently showing stale zeroes reads as a broken cluster. */
+.staleChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--line));
+  border-radius: 99px;
+  color: var(--amber);
+  font-size: 10.5px;
+}

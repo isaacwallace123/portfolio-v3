@@ -44,6 +44,7 @@ import {
   getLiveRun,
   getLiveTrace,
   liveDecision,
+  LiveError,
   practiceAction,
   renewRun,
   startDrill,
@@ -372,6 +373,9 @@ export default function ClusterWorkbench() {
   const [query, setQuery] = useState("");
   const [renewalDismissed, setRenewalDismissed] = useState(false);
   const [expired, setExpired] = useState(false);
+  // Consecutive failed polls. The page keeps trying regardless; this only decides when to admit it.
+  const [stale, setStale] = useState(false);
+  const failures = useRef(0);
 
   // Ticks once a second so the countdown and elapsed clock move smoothly between polls.
   const [now, setNow] = useState(() => Date.now());
@@ -452,6 +456,8 @@ export default function ClusterWorkbench() {
   // and "the API says it is being deleted" cannot each get it subtly different.
   const release = useCallback(() => {
     attached.current = null;
+    failures.current = 0;
+    setStale(false);
     setRenewalDismissed(false);
     stopPolling();
     setRun(null);
@@ -520,11 +526,31 @@ export default function ClusterWorkbench() {
     (runId: string) => {
       stopPolling();
       attached.current = runId;
+      failures.current = 0;
       poll.current = window.setInterval(() => {
-        refresh(runId).catch(() => stopPolling());
+        refresh(runId).then(
+          () => {
+            failures.current = 0;
+            setStale(false);
+          },
+          (e: unknown) => {
+            // 404 is the one honest "stop": the cluster no longer exists.
+            if (e instanceof LiveError && e.status === 404) {
+              release();
+              setExpired(true);
+              return;
+            }
+            // Everything else is transient — the workload is still starting, a metrics scrape
+            // timed out, the API pod rolled. Polling used to die on the first of these, which
+            // froze the page on stale numbers while the cluster ran perfectly well behind it;
+            // the only way out was a reload. Now it keeps trying and says so.
+            failures.current += 1;
+            setStale(failures.current >= 4);
+          },
+        );
       }, POLL_MS);
     },
-    [refresh, stopPolling],
+    [refresh, stopPolling, release],
   );
 
   // Resume the cluster this account already owns. The first paint is a skeleton rather than the
@@ -1066,6 +1092,14 @@ export default function ClusterWorkbench() {
             <span className={flowing ? styles.liveChip : styles.idleChip}>
               <i /> {flowing ? "traffic flowing" : "traffic stopped"}
             </span>
+            {stale && (
+              <span
+                className={styles.staleChip}
+                title="The cluster is still there; the page is having trouble reading it."
+              >
+                <Loader2 size={11} className={styles.spin} /> reconnecting…
+              </span>
+            )}
             <span>
               {components.reduce((a, c) => a + c.pods.length, 0)} pods ·{" "}
               {components.length} services
