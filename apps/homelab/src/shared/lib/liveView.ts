@@ -1,5 +1,16 @@
 import type { RunTelemetry, RunView } from "@iw/lab-runtime";
 
+/** One option in the active drill's quiz. Correctness is withheld until it is chosen. */
+export interface DrillOption {
+  id: string;
+  label: string;
+  description: string;
+  unlocked: boolean;
+  chosen: boolean;
+  isCorrect: boolean | null;
+  explanation: string;
+}
+
 // Projects the API's run model into the shape the arena renders. Everything here is real: the run is
 // a Crossplane LabRun (disposable namespace + live workload), the telemetry is measured by that run's
 // Envoy gateway and metrics-server, and the drill clock, decisions, and their unlock state are
@@ -33,6 +44,7 @@ export interface RealRun {
   drillElapsedSeconds?: number;
   drillDurationSeconds?: number;
   drillComplete?: boolean;
+  drillOptions?: DrillOption[];
   ttlSeconds: number;
   createdAt?: string;
   telemetry?: {
@@ -63,6 +75,7 @@ export interface LiveRunView extends RunView {
   drillTitle: string;
   drillObjective: string;
   drillComplete: boolean;
+  drillOptions: DrillOption[];
 }
 
 export function toLiveRunView(real: RealRun): LiveRunView {
@@ -152,5 +165,6 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     drillTitle: real.drillTitle ?? "",
     drillObjective: real.drillObjective ?? "",
     drillComplete: real.drillComplete ?? false,
+    drillOptions: real.drillOptions ?? [],
   };
 }

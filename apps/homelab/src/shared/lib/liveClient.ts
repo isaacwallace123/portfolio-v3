@@ -1,4 +1,4 @@
-import type { LiveRunView } from "@/shared/lib/liveView";
+import type { DrillOption, LiveRunView } from "@/shared/lib/liveView";
 
 export interface LivePlatformStatus {
   cluster: "ready" | "degraded" | "offline";
@@ -249,4 +249,4 @@ export async function getLiveReport(runId: string): Promise<LiveReport | null> {
   return asJson(res);
 }
 
-export type { LiveRunView };
+export type { DrillOption, LiveRunView };

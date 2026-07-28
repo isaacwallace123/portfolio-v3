@@ -102,6 +102,17 @@ public sealed record RunComponent(
     int CpuLimitMillicoresPerPod,
     IReadOnlyList<RunPod> Pods);
 
+// One option in the active drill's quiz. Correctness and its explanation are only revealed once the
+// option has been chosen, so the answer is not sitting in the page before you decide.
+public sealed record DrillOption(
+    string Id,
+    string Label,
+    string Description,
+    bool Unlocked,
+    bool Chosen,
+    bool? IsCorrect,
+    string Explanation);
+
 // A sanitized Kubernetes Event from the run namespace — real cluster activity (scheduling, image
 // pulls, probes, scaling), not a scripted timeline.
 public sealed record RunEventView(
@@ -138,7 +149,8 @@ public sealed record RunView(
     string DrillObjective,
     int DrillElapsedSeconds,
     int DrillDurationSeconds,
-    bool DrillComplete)
+    bool DrillComplete,
+    IReadOnlyList<DrillOption> DrillOptions)
 {
     // Map the LabRun's Crossplane conditions to a small, public lifecycle vocabulary, and surface the
     // decision-driven state (replica count, cache tier) so a caller can see the effect of a decision.
@@ -195,6 +207,20 @@ public sealed record RunView(
         var duration = definition?.DurationSeconds ?? 0;
         var drillComplete = definition is not null && elapsedSeconds >= duration;
 
+        var options = definition?.Decisions.Select(d =>
+        {
+            var chosen = acceptedIds.Contains(d.Id);
+            return new DrillOption(
+                d.Id,
+                d.Label,
+                d.Description,
+                elapsedSeconds >= d.AvailableAfterSeconds,
+                chosen,
+                // Withheld until the option is chosen, so the quiz cannot be read off the wire.
+                chosen ? d.IsCorrect : null,
+                chosen ? d.Explanation : "");
+        }).ToArray() ?? [];
+
         return new RunView(
             r.Spec.RunId,
             r.Spec.ScenarioId,
@@ -217,7 +243,8 @@ public sealed record RunView(
             definition?.Objective ?? "",
             (int)Math.Round(elapsedSeconds),
             duration,
-            drillComplete);
+            drillComplete,
+            options);
     }
 
     private static IReadOnlyList<AcceptedDecision> ReadAcceptedDecisions(

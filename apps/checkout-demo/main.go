@@ -29,17 +29,19 @@ import (
 )
 
 var (
-	pool         *pgxpool.Pool
-	rdb          *redis.Client
+	// pool is populated asynchronously by the background connector; dbMu guards the swap.
+	dbMu    sync.RWMutex
+	pool    *pgxpool.Pool
+	rdb     *redis.Client
 	cacheOn bool
 	// Fixed CPU work per request (sha256 rounds). Fixed *work* — not a fixed duration — so wall-clock
 	// latency rises when replicas are contended and falls when capacity is added.
 	workIterations = envInt("WORK_ITERATIONS", 3000)
-	releaseTrack = envString("RELEASE_TRACK", "stable")
-	dataState    = envString("DATA_STATE", "healthy")
-	requestCount atomic.Uint64
-	traces       = newTraceStore()
-	tracer       trace.Tracer
+	releaseTrack   = envString("RELEASE_TRACK", "stable")
+	dataState      = envString("DATA_STATE", "healthy")
+	requestCount   atomic.Uint64
+	traces         = newTraceStore()
+	tracer         trace.Tracer
 )
 
 func main() {
@@ -61,22 +63,34 @@ func main() {
 	}
 	cfg.MaxConns = int32(envInt("DB_MAX_CONNS", 4))
 
-	for i := 0; i < 30; i++ {
-		pool, err = pgxpool.NewWithConfig(ctx, cfg)
-		if err == nil && pool.Ping(ctx) == nil {
-			break
+	// Connect to Postgres in the BACKGROUND and start serving immediately. Blocking startup on the
+	// database meant the process did not listen at all until Postgres accepted connections, so the
+	// readiness probe got "connection refused" for over a minute and the whole cluster looked dead
+	// while it was really just waiting. Now the probe gets an honest answer from the first second:
+	// 503 until the pool is live, 200 the moment it is.
+	go func() {
+		for i := 0; i < 120; i++ {
+			p, e := pgxpool.NewWithConfig(ctx, cfg)
+			if e == nil && p.Ping(ctx) == nil {
+				_, _ = p.Exec(ctx,
+					`CREATE TABLE IF NOT EXISTS catalogue (id serial primary key, name text, price int)`)
+				_, _ = p.Exec(ctx,
+					`INSERT INTO catalogue (name, price)
+					 SELECT 'item-'||g, (random()*100)::int FROM generate_series(1,200) g
+					 WHERE NOT EXISTS (SELECT 1 FROM catalogue)`)
+				dbMu.Lock()
+				pool = p
+				dbMu.Unlock()
+				log.Printf("postgres ready after %d attempt(s)", i+1)
+				return
+			}
+			if p != nil {
+				p.Close()
+			}
+			time.Sleep(500 * time.Millisecond)
 		}
-		time.Sleep(2 * time.Second)
-	}
-	if err != nil || pool == nil {
-		log.Fatalf("postgres unreachable: %v", err)
-	}
-	_, _ = pool.Exec(ctx,
-		`CREATE TABLE IF NOT EXISTS catalogue (id serial primary key, name text, price int)`)
-	_, _ = pool.Exec(ctx,
-		`INSERT INTO catalogue (name, price)
-		 SELECT 'item-'||g, (random()*100)::int FROM generate_series(1,200) g
-		 WHERE NOT EXISTS (SELECT 1 FROM catalogue)`)
+		log.Printf("postgres still unreachable; serving 503 until it appears")
+	}()
 
 	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
 		rdb = redis.NewClient(&redis.Options{
@@ -89,7 +103,13 @@ func main() {
 	}
 	cacheOn = os.Getenv("CACHE_ENABLED") == "true"
 
+	// Ready means "can actually serve a request": the DB pool is live. Until then the probe gets a
+	// 503 rather than a refused connection, so Kubernetes reports Starting instead of Unhealthy.
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		if db() == nil {
+			http.Error(w, "database not ready", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	})
 	http.HandleFunc("/internal/traces/latest", handleLatestTrace)
@@ -132,7 +152,14 @@ func handleCheckout(w http.ResponseWriter, r *http.Request) {
 	dbCtx, dbSpan := tracer.Start(ctx, "postgres.query",
 		trace.WithAttributes(attribute.String("db.system", "postgresql")))
 	var count int
-	err := pool.QueryRow(dbCtx, `SELECT count(*) FROM catalogue`).Scan(&count)
+	p := db()
+	if p == nil {
+		dbSpan.SetStatus(codes.Error, "database not ready")
+		dbSpan.End()
+		fail(root, w, http.StatusServiceUnavailable, "database_starting")
+		return
+	}
+	err := p.QueryRow(dbCtx, `SELECT count(*) FROM catalogue`).Scan(&count)
 	if err != nil {
 		dbSpan.RecordError(err)
 		dbSpan.SetStatus(codes.Error, "query failed")
@@ -190,6 +217,13 @@ func handleCheckout(w http.ResponseWriter, r *http.Request) {
 
 // burnCPU performs a fixed amount of real hashing work. Fixed work per request (rather than a sleep)
 // is what ties the service's throughput to its CPU allocation, so replica count actually matters.
+// db returns the connection pool once the background connector has established it.
+func db() *pgxpool.Pool {
+	dbMu.RLock()
+	defer dbMu.RUnlock()
+	return pool
+}
+
 func burnCPU(rounds int) {
 	buf := make([]byte, 1024)
 	for i := 0; i < rounds; i++ {
