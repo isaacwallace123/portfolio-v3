@@ -1,4 +1,4 @@
-import type { LiveRunView } from "@/shared/lib/liveClient";
+import type { LiveRunView } from "@/shared/api/live-client";
 
 // Every control mirrors the broker's effect locally through `apply`, so the UI reflects the new
 // state the instant it is used rather than waiting a poll for the round trip.

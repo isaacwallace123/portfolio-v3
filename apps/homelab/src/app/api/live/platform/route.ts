@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { liveEnabled, liveFetch } from "@/shared/lib/liveApi";
+import { liveEnabled, liveFetch } from "@/shared/api/live-server";
 
 export const dynamic = "force-dynamic";
 

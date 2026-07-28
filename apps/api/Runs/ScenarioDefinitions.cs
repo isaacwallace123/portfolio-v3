@@ -12,6 +12,36 @@ public sealed record ScenarioDecisionDefinition(
     bool IsCorrect = true,
     string Explanation = "");
 
+// What it means to have actually resolved a drill, expressed against signals the platform measures
+// rather than against which buttons were pressed. A drill is over when the workload is genuinely in
+// the target state — that is the whole claim the exercise makes.
+public sealed record DrillGoal(
+    string Label,
+    // p95 | errors | throughput | release | data | pool
+    string Metric,
+    // Numeric goals compare against this; state goals ignore it.
+    double Threshold,
+    // State goals compare the run's spec against this; numeric goals leave it empty.
+    string State,
+    // Numeric goals only: whether lower is better.
+    bool Below = true)
+{
+    public string TargetText => Metric switch
+    {
+        "p95" => $"< {Threshold:0} ms",
+        "errors" => $"< {Threshold:0.#}%",
+        "throughput" => $"> {Threshold:0}/s",
+        _ => State,
+    };
+}
+
+// A goal with the run's current value attached, so the page can show progress rather than a verdict.
+public sealed record DrillGoalState(
+    string Label,
+    string Target,
+    string Current,
+    bool Met);
+
 public sealed record ScenarioDefinition(
     string Id,
     string Title,
@@ -26,7 +56,9 @@ public sealed record ScenarioDefinition(
     string InitialReleaseTrack,
     string InitialDataState,
     string InitialTargetPool,
-    IReadOnlyList<ScenarioDecisionDefinition> Decisions);
+    IReadOnlyList<ScenarioDecisionDefinition> Decisions,
+    // Empty for the open sandbox, which has nothing to achieve.
+    IReadOnlyList<DrillGoal> Goals);
 
 // This catalog is the public control plane's allowlist. A caller can choose an id and one of the
 // decisions below, but cannot supply an image, command, manifest, namespace, or arbitrary patch.
@@ -77,6 +109,11 @@ public static class ScenarioDefinitions
                         "Wrong. Silencing the load generator hides the incident instead of resolving it — "
                         + "real users would still be hitting a saturated service.", 12,
                         ("loadReplicas", 0)),
+                ],
+                [
+                    new DrillGoal("Live traffic", "throughput", 20, "", Below: false),
+                    new DrillGoal("p95 latency", "p95", 120, ""),
+                    new DrillGoal("Error rate", "errors", 1, ""),
                 ]),
             new ScenarioDefinition(
                 "checkout-bad-release",
@@ -104,6 +141,12 @@ public static class ScenarioDefinitions
                         "Wrong. Caching masks a fraction of the requests while the broken release stays in "
                         + "production — cache misses still hit it, and the error budget keeps burning.", 10,
                         ("cacheReplicas", 1)),
+                ],
+                [
+                    new DrillGoal("Live traffic", "throughput", 20, "", Below: false),
+                    new DrillGoal("Release", "release", 0, "stable"),
+                    new DrillGoal("Error rate", "errors", 1, ""),
+                    new DrillGoal("p95 latency", "p95", 200, ""),
                 ]),
             new ScenarioDefinition(
                 "catalogue-data-recovery",
@@ -131,6 +174,11 @@ public static class ScenarioDefinitions
                         "Wrong. The application is healthy; the data underneath it is not. More replicas "
                         + "read the same corrupt catalogue and fail at exactly the same rate.", 8,
                         ("apiReplicas", 6)),
+                ],
+                [
+                    new DrillGoal("Live traffic", "throughput", 20, "", Below: false),
+                    new DrillGoal("Catalogue", "data", 0, "recovered"),
+                    new DrillGoal("Error rate", "errors", 1, ""),
                 ]),
             new ScenarioDefinition(
                 "worker-evacuation",
@@ -158,6 +206,11 @@ public static class ScenarioDefinitions
                         "Wrong. Draining a node with a single replica means a window with no healthy pod "
                         + "at all — this is exactly how a routine migration becomes an outage.", 8,
                         ("apiReplicas", 1)),
+                ],
+                [
+                    new DrillGoal("Live traffic", "throughput", 20, "", Below: false),
+                    new DrillGoal("Worker pool", "pool", 0, "infra"),
+                    new DrillGoal("Error rate", "errors", 1, ""),
                 ]),
             new ScenarioDefinition(
                 "practice-cluster",
@@ -172,8 +225,27 @@ public static class ScenarioDefinitions
                 // serves a request, so every control the page offers has somewhere to go and its
                 // effect is visible against a baseline you chose rather than one already half set.
                 1, 0, "stable", "healthy", "apps",
-                []),
+                [], []),
         }.ToDictionary(s => s.Id, StringComparer.Ordinal);
+
+    // Judge a drill against what the cluster is actually doing. Every goal must hold at once — the
+    // traffic goal is what stops an idle cluster from passing a latency target by serving nothing.
+    public static IReadOnlyList<DrillGoalState> Evaluate(
+        ScenarioDefinition drill, RunTelemetry t, LabRunSpec spec) =>
+        drill.Goals.Select(g =>
+        {
+            var (current, met) = g.Metric switch
+            {
+                "p95" => ($"{t.P95LatencyMs} ms", t.P95LatencyMs < g.Threshold),
+                "errors" => ($"{t.ErrorRatePct:0.00}%", t.ErrorRatePct < g.Threshold),
+                "throughput" => ($"{t.RequestsPerSec}/s", t.RequestsPerSec > g.Threshold),
+                "release" => (spec.ReleaseTrack ?? "", spec.ReleaseTrack == g.State),
+                "data" => (spec.DataState ?? "", spec.DataState == g.State),
+                "pool" => (spec.TargetPool ?? "", spec.TargetPool == g.State),
+                _ => ("", false),
+            };
+            return new DrillGoalState(g.Label, g.TargetText, current, met);
+        }).ToArray();
 
     private static ScenarioDecisionDefinition Decision(
         string id,

@@ -10,7 +10,7 @@ import {
   Timer,
 } from "lucide-react";
 import { AUTH_URL, HOMELAB_URL } from "@iw/core";
-import type { LivePlatformStatus, LiveStatus } from "@/shared/lib/liveClient";
+import type { LivePlatformStatus, LiveStatus } from "@/shared/api/live-client";
 import styles from "../workbench.module.css";
 
 /** Shown when the visitor has no cluster: what one is, and the single button that makes it. */

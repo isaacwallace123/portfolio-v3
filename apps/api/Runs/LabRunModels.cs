@@ -160,13 +160,17 @@ public sealed record RunView(
     int DrillElapsedSeconds,
     int DrillDurationSeconds,
     bool DrillComplete,
-    // A drill is solved when every correct action has been taken. The counts let the UI show quiz
-    // progress ("1 of 2") without revealing WHICH options are the correct ones.
+    // A drill is solved when the WORKLOAD reaches the target state, not when a set of buttons has
+    // been pressed — see DrillGoals. The broker records the moment that first happens, so a later
+    // dip in a measured signal cannot un-solve it. The counts let the UI show quiz progress
+    // ("1 of 2") without revealing WHICH options are the correct ones.
     bool DrillSolved,
     int DrillCorrectChosen,
     int DrillCorrectTotal,
     int DrillWrongChosen,
-    IReadOnlyList<DrillOption> DrillOptions)
+    IReadOnlyList<DrillOption> DrillOptions,
+    // Live progress against the drill's objective. Empty unless telemetry was available.
+    IReadOnlyList<DrillGoalState> DrillGoals)
 {
     // Map the LabRun's Crossplane conditions to a small, public lifecycle vocabulary, and surface the
     // decision-driven state (replica count, cache tier) so a caller can see the effect of a decision.
@@ -226,7 +230,11 @@ public sealed record RunView(
         var correctTotal = definition?.Decisions.Count(d => d.IsCorrect) ?? 0;
         var correctChosen = definition?.Decisions.Count(d => d.IsCorrect && acceptedIds.Contains(d.Id)) ?? 0;
         var wrongChosen = definition?.Decisions.Count(d => !d.IsCorrect && acceptedIds.Contains(d.Id)) ?? 0;
-        var solved = definition is not null && correctTotal > 0 && correctChosen == correctTotal;
+        // Solved is a recorded fact, not a recomputation: the broker writes this annotation the first
+        // time the objective is actually met.
+        var solved =
+            drillId.Length > 0 &&
+            r.Metadata.Annotations?.ContainsKey(RunBroker.DrillSolvedAnnotation) == true;
 
         var options = definition?.Decisions.Select(d =>
         {
@@ -275,7 +283,8 @@ public sealed record RunView(
             correctChosen,
             correctTotal,
             wrongChosen,
-            options);
+            options,
+            []);
     }
 
     private static IReadOnlyList<AcceptedDecision> ReadAcceptedDecisions(

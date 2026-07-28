@@ -1,7 +1,8 @@
 "use client";
 
 import { Layers, X } from "lucide-react";
-import type { LiveTrace, RunComponent, RunPod } from "@/shared/lib/liveClient";
+import type { LiveTrace, RunComponent, RunPod } from "@/shared/api/live-client";
+import { sampled } from "../lib/format";
 import { SERVICES, type ServiceId } from "../model/topology";
 import type { Series } from "../model/useClusterRun";
 import { Spark } from "./Spark";
@@ -84,6 +85,7 @@ function PodDetail({
 }) {
   const limit = comp.cpuLimitMillicoresPerPod;
   const series = history[`${svc}:${pod.name}`] ?? [];
+  const measured = sampled(pod.memoryMiB);
 
   return (
     <>
@@ -95,17 +97,19 @@ function PodDetail({
       </div>
       <div className={styles.kv}>
         <span>CPU</span>
-        <b>
-          {pod.cpuMillicores}m / {limit}m
-        </b>
+        <b>{measured ? `${pod.cpuMillicores}m / ${limit}m` : "—"}</b>
       </div>
       <div className={styles.kv}>
         <span>Saturation</span>
-        <b>{limit ? Math.round((pod.cpuMillicores / limit) * 100) : 0}%</b>
+        <b>
+          {measured && limit
+            ? `${Math.round((pod.cpuMillicores / limit) * 100)}%`
+            : "—"}
+        </b>
       </div>
       <div className={styles.kv}>
         <span>Memory</span>
-        <b>{pod.memoryMiB} MiB</b>
+        <b>{measured ? `${pod.memoryMiB} MiB` : "awaiting metrics…"}</b>
       </div>
       <div className={styles.kv}>
         <span>Restarts</span>

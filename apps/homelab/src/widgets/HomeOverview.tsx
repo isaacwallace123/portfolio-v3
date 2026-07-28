@@ -16,7 +16,7 @@ import {
   Waypoints,
 } from "lucide-react";
 import { upcomingDrills } from "@/entities/scenario";
-import { fetchOverview, type PlatformOverview } from "@/shared/lib/liveClient";
+import { fetchOverview, type PlatformOverview } from "@/shared/api/live-client";
 
 function Metric({
   icon,

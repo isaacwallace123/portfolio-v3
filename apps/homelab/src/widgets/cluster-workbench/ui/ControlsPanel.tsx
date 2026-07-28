@@ -2,7 +2,7 @@
 
 import { CircleSlash, Loader2, Lock } from "lucide-react";
 import { RangeSlider } from "@iw/ui";
-import { practiceAction, type LiveRunView } from "@/shared/lib/liveClient";
+import { practiceAction, type LiveRunView } from "@/shared/api/live-client";
 import { CONTROLS, SLIDERS } from "../model/controls";
 import styles from "../workbench.module.css";
 

@@ -15,7 +15,7 @@ import {
   type LiveStatus,
   type LiveTrace,
   type RunComponent,
-} from "@/shared/lib/liveClient";
+} from "@/shared/api/live-client";
 
 const SANDBOX = "practice-cluster";
 const POLL_MS = 1200;

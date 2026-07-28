@@ -2,9 +2,10 @@
 
 import type { RefObject } from "react";
 import { AlertTriangle, Cpu, Loader2, MemoryStick } from "lucide-react";
-import type { RunComponent, RunPod } from "@/shared/lib/liveClient";
+import type { RunComponent, RunPod } from "@/shared/api/live-client";
 import { COLUMNS, SERVICES, type ServiceId } from "../model/topology";
 import type { EdgePath } from "../model/useClusterEdges";
+import { sampled } from "../lib/format";
 import styles from "../workbench.module.css";
 
 interface GraphProps {
@@ -72,7 +73,10 @@ function PodCard({
       </span>
 
       <span className={styles.cardFoot}>
-        {pod.ready ? (
+        {!pod.ready ? (
+          // Say what it is doing, not just that it is not done.
+          <span className={styles.phaseText}>{pod.detail || pod.phase}</span>
+        ) : sampled(pod.memoryMiB) ? (
           <>
             <span>
               <Cpu size={10} /> {pod.cpuMillicores}m
@@ -85,8 +89,7 @@ function PodCard({
             )}
           </>
         ) : (
-          // Say what it is doing, not just that it is not done.
-          <span className={styles.phaseText}>{pod.detail || pod.phase}</span>
+          <span className={styles.phaseText}>awaiting metrics…</span>
         )}
       </span>
     </button>

@@ -4,8 +4,8 @@ import {
   getCaller,
   isValidRunId,
   type CallerIdentity,
-} from "@/shared/lib/session";
-import { liveEnabled } from "@/shared/lib/liveApi";
+} from "@/shared/api/session";
+import { liveEnabled } from "@/shared/api/live-server";
 
 // Shared guard for every /api/live route that touches a practice cluster.
 //

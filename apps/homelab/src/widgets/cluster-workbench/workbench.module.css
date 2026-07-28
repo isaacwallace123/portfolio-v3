@@ -923,7 +923,10 @@
   border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--mint) 8%, transparent);
 }
-.solved svg {
+/* Scoped to the celebration mark. When this matched every icon in the card it also painted the
+   button's icon mint on a mint background — invisible, but still occupying its width and gap, which
+   read as the label being badly padded. */
+.solvedIcon svg {
   color: var(--mint);
 }
 .solved b {
@@ -943,6 +946,7 @@
 .primarySm {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 7px;
   margin-top: 4px;
   padding: 9px 16px;
@@ -953,6 +957,9 @@
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
+}
+.primarySm svg {
+  color: currentColor;
 }
 .primarySm:disabled {
   opacity: 0.5;
@@ -1708,4 +1715,50 @@
   border-radius: 99px;
   color: var(--amber);
   font-size: 10.5px;
+}
+
+/* ── drill objective: the conditions that actually end it ────────────────── */
+.goals {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 4px;
+}
+.goal {
+  display: grid;
+  grid-template-columns: 14px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 11.5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-dim);
+  transition:
+    border-color var(--dur-med) var(--ease),
+    color var(--dur-med) var(--ease);
+}
+.goal svg {
+  opacity: 0.55;
+}
+.goal b {
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.goal em {
+  font-style: normal;
+  font-size: 10.5px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.goalMet {
+  border-color: color-mix(in srgb, var(--mint) 45%, var(--line));
+  color: var(--mint);
+}
+.goalMet svg {
+  opacity: 1;
+}
+.goalMet b {
+  color: var(--mint);
 }

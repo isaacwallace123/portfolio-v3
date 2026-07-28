@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Check,
   ChevronRight,
+  Circle,
   Gauge,
   Loader2,
   PartyPopper,
@@ -13,10 +14,11 @@ import {
   endDrill,
   liveDecision,
   startDrill,
+  type DrillGoal,
   type LiveRunView,
-} from "@/shared/lib/liveClient";
+} from "@/shared/api/live-client";
 import { homelabScenarios } from "@/entities/scenario";
-import { clock } from "../model/format";
+import { clock } from "../lib/format";
 import styles from "../workbench.module.css";
 
 const SANDBOX = "practice-cluster";
@@ -133,6 +135,30 @@ function DrillSolved({
   );
 }
 
+/**
+ * What the drill is actually waiting for, measured live. Showing the conditions rather than a
+ * verdict means the objective can be worked towards deliberately — and it is honest about why the
+ * drill has not ended yet.
+ */
+function GoalList({ goals }: { goals: DrillGoal[] }) {
+  if (goals.length === 0) return null;
+  return (
+    <div className={styles.goals}>
+      {goals.map((g) => (
+        <div
+          key={g.label}
+          className={`${styles.goal} ${g.met ? styles.goalMet : ""}`}
+        >
+          {g.met ? <Check size={12} /> : <Circle size={12} />}
+          <span>{g.label}</span>
+          <b>{g.current}</b>
+          <em>{g.target}</em>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** A drill in progress: the objective, and the decisions that are really applied to the cluster. */
 function DrillInProgress({
   run,
@@ -147,9 +173,10 @@ function DrillInProgress({
   busy: string | null;
   act: Act;
 }) {
+  const met = run.drillGoals.filter((g) => g.met).length;
   const progress = Math.min(
     100,
-    (run.drillCorrectChosen / Math.max(1, run.drillCorrectTotal)) * 100,
+    (met / Math.max(1, run.drillGoals.length)) * 100,
   );
 
   return (
@@ -158,19 +185,23 @@ function DrillInProgress({
         <b>{title}</b>
         <p>{objective}</p>
         <span>
-          {run.drillCorrectChosen} of {run.drillCorrectTotal} key actions found
-          · {clock(run.elapsedMs)} elapsed
+          {met} of {run.drillGoals.length} conditions met ·{" "}
+          {clock(run.elapsedMs)} elapsed
         </span>
       </div>
       <div
         className={styles.progress}
-        title={`${run.drillCorrectChosen} of ${run.drillCorrectTotal} correct actions`}
+        title={`${met} of ${run.drillGoals.length} objective conditions met`}
       >
         <i style={{ width: `${progress}%` }} />
       </div>
+
+      <GoalList goals={run.drillGoals} />
+
       <p className={styles.qHint}>
         Pick the actions you think resolve this. Every option is really applied
-        to your cluster — watch the measured signals to see whether it worked.
+        to your cluster — the drill ends when the objective above is actually
+        met, not when the right buttons have been pressed.
       </p>
 
       <div className={styles.decisions}>

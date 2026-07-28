@@ -89,8 +89,8 @@ public static class RunEndpoints
         app.MapGet("/v1/runs/{runId}/snapshot", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
             var owner = Owner(ctx);
-            var run = await broker.GetRunAsync(runId, owner, ct);
-            if (run is null) return Results.NotFound(new { error = "No such run." });
+            var resource = await broker.GetOwnedAsync(runId, owner, ct);
+            if (resource is null) return Results.NotFound(new { error = "No such run." });
 
             // Gathered concurrently: the slowest of these is the Envoy scrape, and serialising them
             // would put the whole frame behind it.
@@ -99,11 +99,19 @@ public static class RunEndpoints
             var eventsTask = broker.GetEventsAsync(runId, owner, ct);
             var traceTask = broker.GetTraceAsync(runId, owner, ct);
             await Task.WhenAll(telemetryTask, componentsTask, eventsTask, traceTask);
+            var telemetry = await telemetryTask;
+
+            // Judging the drill needs the run and its telemetry together, which is exactly what a
+            // snapshot has. Doing it here also means completion is recorded from the same numbers
+            // the page is about to render.
+            var goals = telemetry is null
+                ? []
+                : await broker.EvaluateDrillAsync(resource, telemetry, ct);
 
             return Results.Ok(new
             {
-                run,
-                telemetry = await telemetryTask,
+                run = RunView.From(resource) with { DrillGoals = goals },
+                telemetry,
                 components = await componentsTask ?? [],
                 events = await eventsTask ?? [],
                 trace = await traceTask,

@@ -1,6 +1,6 @@
-import { guard, jsonNoStore } from "@/shared/lib/guard";
-import { liveFetch } from "@/shared/lib/liveApi";
-import { toLiveRunView } from "@/shared/lib/liveView";
+import { guard, jsonNoStore } from "@/shared/api/guard";
+import { liveFetch } from "@/shared/api/live-server";
+import { toLiveRunView } from "@/shared/api/live-view";
 
 // POST /api/live/practice/{runId}/actions — one allowlisted reconciliation of the caller's cluster.
 export const dynamic = "force-dynamic";

@@ -1,4 +1,4 @@
-import type { ClusterEvent } from "@/shared/lib/liveClient";
+import type { ClusterEvent } from "@/shared/api/live-client";
 
 // Classification for the activity log. Kubernetes only tells us Normal vs Warning, which collapses
 // "pulled the image" and "scaled a replica set" into one grey blob. The reason string carries the real

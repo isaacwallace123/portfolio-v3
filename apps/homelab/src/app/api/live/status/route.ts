@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { liveEnabled, liveFetch } from "@/shared/lib/liveApi";
-import { getCaller } from "@/shared/lib/session";
+import { liveEnabled, liveFetch } from "@/shared/api/live-server";
+import { getCaller } from "@/shared/api/session";
 
 // GET /api/live/status — what this visitor may do right now: whether live control is configured,
 // whether they are signed in, and (if so) the cluster they already own so a reload resumes it.

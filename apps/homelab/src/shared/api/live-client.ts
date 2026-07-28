@@ -1,4 +1,4 @@
-import type { DrillOption, LiveRunView } from "@/shared/lib/liveView";
+import type { DrillOption, LiveRunView } from "@/shared/api/live-view";
 
 export interface LivePlatformStatus {
   cluster: "ready" | "degraded" | "offline";
@@ -218,6 +218,14 @@ export async function endDrill(runId: string): Promise<LiveRunView> {
 export async function renewRun(runId: string): Promise<LiveRunView> {
   const res = await fetch(`/api/live/runs/${runId}/renew`, { method: "POST" });
   return asJson(res);
+}
+
+/** One condition of a drill's objective, with the cluster's current value against it. */
+export interface DrillGoal {
+  label: string;
+  target: string;
+  current: string;
+  met: boolean;
 }
 
 export interface ClusterEvent {

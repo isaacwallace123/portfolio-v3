@@ -1,5 +1,5 @@
-import { guard, jsonNoStore } from "@/shared/lib/guard";
-import { liveFetch } from "@/shared/lib/liveApi";
+import { guard, jsonNoStore } from "@/shared/api/guard";
+import { liveFetch } from "@/shared/api/live-server";
 
 // GET /api/live/runs/{runId}/report — after-action report for the caller's completed drill.
 export const dynamic = "force-dynamic";

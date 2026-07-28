@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2, Timer } from "lucide-react";
-import { clock } from "../model/format";
+import { clock } from "../lib/format";
 import styles from "../workbench.module.css";
 
 /**

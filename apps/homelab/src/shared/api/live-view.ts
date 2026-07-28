@@ -1,4 +1,5 @@
 import type { RunTelemetry, RunView } from "@iw/lab-runtime";
+import type { DrillGoal } from "@/shared/api/live-client";
 
 /** One option in the active drill's quiz. Correctness is withheld until it is chosen. */
 export interface DrillOption {
@@ -52,6 +53,7 @@ export interface RealRun {
   drillCorrectTotal?: number;
   drillWrongChosen?: number;
   drillOptions?: DrillOption[];
+  drillGoals?: DrillGoal[];
   ttlSeconds: number;
   renewable: boolean;
   createdAt?: string;
@@ -94,6 +96,8 @@ export interface LiveRunView extends RunView {
   drillCorrectTotal: number;
   drillWrongChosen: number;
   drillOptions: DrillOption[];
+  /** Live progress against the drill's objective — what actually ends it. */
+  drillGoals: DrillGoal[];
 }
 
 export function toLiveRunView(real: RealRun): LiveRunView {
@@ -191,5 +195,6 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     drillCorrectTotal: real.drillCorrectTotal ?? 0,
     drillWrongChosen: real.drillWrongChosen ?? 0,
     drillOptions: real.drillOptions ?? [],
+    drillGoals: real.drillGoals ?? [],
   };
 }

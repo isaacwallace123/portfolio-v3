@@ -15,7 +15,7 @@ import {
   fetchTopology,
   type HomelabTopology,
   type TopologyNode,
-} from "@/shared/lib/liveClient";
+} from "@/shared/api/live-client";
 
 /* ── layer colours ────────────────────────────────────────────────────────── */
 const LAYER_COLORS: Record<string, string> = {

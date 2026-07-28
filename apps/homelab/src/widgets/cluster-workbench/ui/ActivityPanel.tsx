@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { ClusterEvent } from "@/shared/lib/liveClient";
+import type { ClusterEvent } from "@/shared/api/live-client";
 import {
   countByLevel,
   LEVELS,
@@ -12,7 +12,7 @@ import {
   type Level,
   type Phase,
 } from "@/shared/lib/activity";
-import { ago, toggle } from "../model/format";
+import { ago, toggle } from "../lib/format";
 import styles from "../workbench.module.css";
 
 /**

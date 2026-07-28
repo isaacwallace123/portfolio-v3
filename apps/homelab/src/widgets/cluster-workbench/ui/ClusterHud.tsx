@@ -5,8 +5,8 @@ import type {
   LiveRunView,
   LiveTrace,
   RunComponent,
-} from "@/shared/lib/liveClient";
-import { clock } from "../model/format";
+} from "@/shared/api/live-client";
+import { clock } from "../lib/format";
 import { SERVICES, type ServiceId } from "../model/topology";
 import styles from "../workbench.module.css";
 
@@ -89,7 +89,7 @@ export function ClusterHud({
       </div>
 
       {(converging || busy) && (
-        <div className={styles.hudTopCenter}>
+        <div className={styles.hudTopCenter} aria-live="polite">
           <span className={styles.convergeChip}>
             <Loader2 size={12} className={styles.spin} />
             {converging ? (

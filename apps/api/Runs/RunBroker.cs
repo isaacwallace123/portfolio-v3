@@ -109,6 +109,11 @@ public sealed class RunBroker
     // Fetch a cluster only if the caller owns it. Mismatches return null so the API answers 404 for
     // "not yours" exactly as it does for "does not exist" — a caller cannot probe for other people's
     // clusters. Clusters created before ownership existed have an empty owner and are unclaimable.
+    /// <summary>The caller's own LabRun, or null. Public so a caller that needs both the resource and
+    /// its telemetry (the snapshot) can fetch the resource once.</summary>
+    public Task<LabRunResource?> GetOwnedAsync(string runId, string owner, CancellationToken ct) =>
+        GetOwnedResourceAsync(runId, owner, ct);
+
     private async Task<LabRunResource?> GetOwnedResourceAsync(
         string runId, string owner, CancellationToken ct)
     {
@@ -185,10 +190,12 @@ public sealed class RunBroker
             !ScenarioDefinitions.All.TryGetValue(drillId, out var drill))
             return BrokerResult.Fail(404, $"Unknown drill '{drillId}'.");
 
-        // Clear any decision annotations from a previous drill so its decisions unlock again.
+        // Clear the previous drill's state so its decisions unlock again and, crucially, so its
+        // completion does not carry over — a recorded solve is a fact about one drill, not the run.
         var annotations = new Dictionary<string, string?>
         {
             ["homeops.isaacwallace.dev/drill-started"] = DateTime.UtcNow.ToString("O"),
+            [DrillSolvedAnnotation] = null, // null removes the annotation in a merge patch
         };
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
             if (key.StartsWith("homeops.isaacwallace.dev/decision-", StringComparison.Ordinal))
@@ -224,7 +231,10 @@ public sealed class RunBroker
         if (resource is null)
             return BrokerResult.Fail(404, "No such run.");
 
-        var annotations = new Dictionary<string, string?>();
+        var annotations = new Dictionary<string, string?>
+        {
+            [DrillSolvedAnnotation] = null,
+        };
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
             if (key.StartsWith("homeops.isaacwallace.dev/decision-", StringComparison.Ordinal))
                 annotations[key] = null;
@@ -708,6 +718,60 @@ public sealed class RunBroker
         if (q.EndsWith("Mi")) return v(2);
         if (q.EndsWith("Gi")) return v(2) * 1024.0;
         return double.Parse(q, CultureInfo.InvariantCulture) / (1024.0 * 1024.0); // bytes
+    }
+
+    public const string DrillSolvedAnnotation = "homeops.isaacwallace.dev/drill-solved-at";
+
+    // Judge the active drill against what the cluster is measurably doing, and record the first
+    // moment it is genuinely resolved.
+    //
+    // Completion used to mean "every correct option has been clicked", which announced success
+    // before the workload had actually recovered — and would have announced it even if the recovery
+    // never landed. It now means the objective itself holds: p95 under target, errors under budget,
+    // the release rolled back, with real traffic flowing so an idle cluster cannot pass by serving
+    // nothing. Writing the moment down rather than recomputing it means a later dip in a noisy
+    // signal cannot retract a result the operator has already earned.
+    public async Task<IReadOnlyList<DrillGoalState>> EvaluateDrillAsync(
+        LabRunResource resource, RunTelemetry telemetry, CancellationToken ct)
+    {
+        var view = RunView.From(resource);
+        if (view.DrillId.Length == 0 ||
+            !ScenarioDefinitions.All.TryGetValue(view.DrillId, out var drill) ||
+            drill.Goals.Count == 0)
+            return [];
+
+        var goals = ScenarioDefinitions.Evaluate(drill, telemetry, resource.Spec);
+        var alreadySolved =
+            resource.Metadata.Annotations?.ContainsKey(DrillSolvedAnnotation) == true;
+
+        if (!alreadySolved && goals.All(g => g.Met))
+        {
+            var patch = new k8s.Models.V1Patch(
+                new
+                {
+                    metadata = new
+                    {
+                        annotations = new Dictionary<string, string>
+                        {
+                            [DrillSolvedAnnotation] = DateTime.UtcNow.ToString("O"),
+                        },
+                    },
+                },
+                k8s.Models.V1Patch.PatchType.MergePatch);
+            try
+            {
+                await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+                    patch, LabRun.Group, LabRun.Version, LabRun.Plural,
+                    view.RunId, cancellationToken: ct);
+            }
+            catch (HttpOperationException ex)
+            {
+                // The next poll evaluates again; nothing is lost by failing to record it now.
+                _log.LogDebug(ex, "Could not record drill completion for {RunId}.", view.RunId);
+            }
+        }
+
+        return goals;
     }
 
     // One extension, on request, before the cluster expires.
