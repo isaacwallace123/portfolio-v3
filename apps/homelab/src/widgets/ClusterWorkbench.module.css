@@ -68,34 +68,6 @@
 }
 
 /* ── top bar ─────────────────────────────────────────────────────────────── */
-.topbar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 10px 20px;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
-}
-.identity {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-.identity b {
-  font-size: 14px;
-  color: var(--ink);
-  white-space: nowrap;
-}
-.identity code {
-  font-size: 11.5px;
-  color: var(--ink-dim);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 2px 7px;
-}
 .drillTag {
   font-size: 11px;
   padding: 2px 9px;
@@ -127,24 +99,6 @@
   100% {
     box-shadow: 0 0 0 0 transparent;
   }
-}
-.topStats {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  font-size: 12px;
-  color: var(--ink-mid);
-  font-variant-numeric: tabular-nums;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-.topStats > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.topStats svg {
-  color: var(--ink-dim);
 }
 .warnText {
   color: var(--amber);
@@ -983,5 +937,249 @@
 @keyframes segPulse {
   50% {
     opacity: 0.35;
+  }
+}
+
+/* ── floating canvas chrome (replaces the old second navbar) ─────────────── */
+.hudTopLeft,
+.hudTopRight,
+.hudBottomLeft,
+.hudBottomRight {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+  color: var(--ink-mid);
+}
+.hudTopLeft {
+  top: 16px;
+  left: 16px;
+}
+.hudTopRight {
+  top: 16px;
+  right: 16px;
+}
+.hudBottomLeft {
+  bottom: 16px;
+  left: 16px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
+.hudBottomRight {
+  bottom: 16px;
+  right: 16px;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.hudTopLeft b {
+  font-size: 13.5px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.hudTopLeft code {
+  font-size: 11px;
+  color: var(--ink-dim);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
+.hudTopRight > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.hudBottomLeft > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* metric readouts, bottom right */
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 56px;
+}
+.stat span {
+  font-size: 9.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.stat b {
+  font-size: 14px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+.statBad b {
+  color: var(--amber);
+}
+
+/* ── loading + pending affordances ───────────────────────────────────────── */
+.booting {
+  margin: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+.spin {
+  animation: spin 0.9s linear infinite;
+  flex: none;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.starting {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--amber);
+}
+.pending {
+  border-color: var(--accent) !important;
+  background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
+}
+
+/* ── solved drill ────────────────────────────────────────────────────────── */
+.solved {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 18px 12px;
+  border: 1px solid color-mix(in srgb, var(--mint) 40%, var(--line));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--mint) 8%, transparent);
+}
+.solved svg {
+  color: var(--mint);
+}
+.solved b {
+  font-size: 16px;
+  color: var(--ink);
+}
+.solved p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-mid);
+}
+.solvedSub {
+  color: var(--ink-dim) !important;
+  font-size: 11.5px !important;
+}
+.primarySm {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+  padding: 9px 16px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.primarySm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── confetti ────────────────────────────────────────────────────────────── */
+.confetti {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+  overflow: hidden;
+}
+.confetti i {
+  position: absolute;
+  top: -12px;
+  width: 7px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0;
+  animation: fall 2.6s ease-in forwards;
+}
+.confetti i:nth-child(3n) {
+  background: var(--acid);
+}
+.confetti i:nth-child(3n + 1) {
+  background: var(--amber);
+}
+@keyframes fall {
+  0% {
+    opacity: 1;
+    transform: translateY(0) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(100vh) rotate(540deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .confetti {
+    display: none;
+  }
+  .spin,
+  .edgeLive {
+    animation: none;
+  }
+}
+
+/* the error toast now floats over the canvas */
+.errorFloat {
+  position: absolute;
+  z-index: 4;
+  top: 62px;
+  left: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--red) 45%, var(--line));
+  background: color-mix(in srgb, var(--red) 14%, var(--panel));
+  color: var(--red);
+  font-size: 12px;
+}
+.errorFloat button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+}
+
+@media (max-width: 900px) {
+  .hudTopLeft,
+  .hudTopRight,
+  .hudBottomLeft,
+  .hudBottomRight {
+    position: static;
+    backdrop-filter: none;
+  }
+  .canvas {
+    gap: 12px;
   }
 }

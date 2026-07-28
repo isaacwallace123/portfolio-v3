@@ -18,8 +18,10 @@ import {
   Database,
   Gauge,
   Layers,
+  Loader2,
   Lock,
   MemoryStick,
+  PartyPopper,
   Play,
   Radio,
   Server,
@@ -39,7 +41,6 @@ import {
   fetchLiveStatus,
   fetchPlatformStatus,
   fetchRunEvents,
-  getLiveReport,
   getLiveRun,
   getLiveTrace,
   liveDecision,
@@ -48,7 +49,6 @@ import {
   teardownLiveRun,
   type ClusterEvent,
   type LivePlatformStatus,
-  type LiveReport,
   type LiveRunView,
   type LiveStatus,
   type LiveTrace,
@@ -57,12 +57,13 @@ import {
 import styles from "./ClusterWorkbench.module.css";
 
 const SANDBOX = "practice-cluster";
+const POLL_MS = 2500;
+const HISTORY = 40; // ~100s of samples at the poll interval
+
 const drills = homelabScenarios.filter((s) => s.id !== SANDBOX);
 
-// Canvas layout: which service sits in which column/row, and how the request flows between them.
-// The graph is fixed (it is the scenario's architecture); only its live state changes.
-// Explicit 1-based grid rows. The data tier stacks in column 4: Postgres above, Redis below, with
-// the request tiers centred on row 2 between them.
+// The request graph. Explicit 1-based grid coordinates: the request tiers run along row 2, the data
+// tier stacks in column 4 with Postgres above and Redis below.
 const NODES = [
   { id: "k6", label: "k6", role: "load generator", icon: Zap, col: 1, row: 2 },
   { id: "envoy", label: "Envoy", role: "gateway", icon: Radio, col: 2, row: 2 },
@@ -99,70 +100,67 @@ const EDGES: [string, string][] = [
   ["checkout", "redis"],
 ];
 
-const controlGroups = [
+const withReplicas = (r: LiveRunView, n: number): LiveRunView => ({
+  ...r,
+  telemetry: { ...r.telemetry, apiReplicas: n },
+});
+const withCache = (r: LiveRunView, on: boolean): LiveRunView => ({
+  ...r,
+  telemetry: { ...r.telemetry, cacheActive: on },
+});
+
+// Allowlisted cluster controls. `apply` mirrors the broker's effect locally so a segment reflects the
+// new state the instant it is clicked, rather than waiting a poll for the round trip.
+const CONTROLS = [
   {
     label: "Checkout replicas",
     hint: "Each replica adds CPU, so capacity scales and p95 falls under load.",
-    options: [
-      {
-        id: "scale-1",
-        label: "1",
-        apply: (r: LiveRunView) => ({
-          ...r,
-          telemetry: { ...r.telemetry, apiReplicas: 1 },
-        }),
-      },
-      {
-        id: "scale-3",
-        label: "3",
-        apply: (r: LiveRunView) => ({
-          ...r,
-          telemetry: { ...r.telemetry, apiReplicas: 3 },
-        }),
-      },
-      {
-        id: "scale-6",
-        label: "6",
-        apply: (r: LiveRunView) => ({
-          ...r,
-          telemetry: { ...r.telemetry, apiReplicas: 6 },
-        }),
-      },
-    ],
     active: (r: LiveRunView) =>
       r.telemetry.apiReplicas <= 1
         ? "scale-1"
         : r.telemetry.apiReplicas >= 6
           ? "scale-6"
           : "scale-3",
+    options: [
+      {
+        id: "scale-1",
+        label: "1",
+        apply: (r: LiveRunView) => withReplicas(r, 1),
+      },
+      {
+        id: "scale-3",
+        label: "3",
+        apply: (r: LiveRunView) => withReplicas(r, 3),
+      },
+      {
+        id: "scale-6",
+        label: "6",
+        apply: (r: LiveRunView) => withReplicas(r, 6),
+      },
+    ],
   },
   {
     label: "Cache tier",
-    hint: "Redis in front of Postgres. Cache hits skip the request's work entirely.",
+    hint: "Redis in front of Postgres. A cache hit skips the request's work entirely.",
+    active: (r: LiveRunView) =>
+      r.telemetry.cacheActive ? "cache-on" : "cache-off",
     options: [
       {
         id: "cache-off",
         label: "Off",
-        apply: (r: LiveRunView) => ({
-          ...r,
-          telemetry: { ...r.telemetry, cacheActive: false },
-        }),
+        apply: (r: LiveRunView) => withCache(r, false),
       },
       {
         id: "cache-on",
         label: "On",
-        apply: (r: LiveRunView) => ({
-          ...r,
-          telemetry: { ...r.telemetry, cacheActive: true },
-        }),
+        apply: (r: LiveRunView) => withCache(r, true),
       },
     ],
-    active: (r: LiveRunView) =>
-      r.telemetry.cacheActive ? "cache-on" : "cache-off",
   },
   {
     label: "Release track",
-    hint: "The candidate build has a real slow, occasionally failing pricing path.",
+    hint: "The candidate build carries a real slow, occasionally failing pricing path.",
+    active: (r: LiveRunView) => `release-${r.releaseTrack}`,
     options: [
       {
         id: "release-stable",
@@ -178,11 +176,11 @@ const controlGroups = [
         }),
       },
     ],
-    active: (r: LiveRunView) => `release-${r.releaseTrack}`,
   },
   {
     label: "Traffic",
     hint: "The k6 load generator driving real requests through the gateway.",
+    active: (r: LiveRunView) => (r.loadEnabled ? "traffic-on" : "traffic-off"),
     options: [
       {
         id: "traffic-off",
@@ -195,11 +193,11 @@ const controlGroups = [
         apply: (r: LiveRunView) => ({ ...r, loadEnabled: true }),
       },
     ],
-    active: (r: LiveRunView) => (r.loadEnabled ? "traffic-on" : "traffic-off"),
   },
   {
     label: "Worker pool",
     hint: "Which node pool the checkout replicas are scheduled onto.",
+    active: (r: LiveRunView) => `move-${r.targetPool}`,
     options: [
       {
         id: "move-apps",
@@ -212,7 +210,6 @@ const controlGroups = [
         apply: (r: LiveRunView) => ({ ...r, targetPool: "infra" as const }),
       },
     ],
-    active: (r: LiveRunView) => `move-${r.targetPool}`,
   },
 ] as const;
 
@@ -228,9 +225,7 @@ function ago(iso: string) {
   return `${Math.floor(s / 3600)}h`;
 }
 
-type Tab = "drills" | "controls" | "activity";
-
-/** A small line chart of real measured samples (no axes — it is a trend, not a dashboard). */
+/** A line chart of real measured samples — a trend, not a dashboard. */
 function Spark({
   series,
   label,
@@ -243,15 +238,17 @@ function Spark({
   const max = Math.max(1, ...series);
   const last = series.at(-1) ?? 0;
   const w = 260;
-  const h = 42;
-  const pts = series.length < 2 ? [] : series;
-  const d = pts
-    .map((v, i) => {
-      const x = (i / (pts.length - 1)) * w;
-      const y = h - (v / max) * (h - 4) - 2;
-      return `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(" ");
+  const h = 40;
+  const d =
+    series.length < 2
+      ? ""
+      : series
+          .map((v, i) => {
+            const x = (i / (series.length - 1)) * w;
+            const y = h - (v / max) * (h - 4) - 2;
+            return `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+          })
+          .join(" ");
 
   return (
     <div className={styles.spark}>
@@ -267,7 +264,7 @@ function Spark({
         preserveAspectRatio="none"
         aria-hidden="true"
       >
-        {d ? (
+        {d && (
           <>
             <path
               d={`${d} L ${w} ${h} L 0 ${h} Z`}
@@ -275,15 +272,39 @@ function Spark({
             />
             <path d={d} className={styles.sparkLine} />
           </>
-        ) : null}
+        )}
       </svg>
       <small>
         peak {max}
-        {unit} · last {series.length} samples
+        {unit} · {series.length} samples
       </small>
     </div>
   );
 }
+
+/** Purely decorative celebration for a solved drill. */
+function Confetti() {
+  return (
+    <div className={styles.confetti} aria-hidden="true">
+      {Array.from({ length: 40 }, (_, i) => (
+        <i
+          key={i}
+          style={{
+            left: `${(i * 97) % 100}%`,
+            animationDelay: `${(i % 10) * 90}ms`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+type Tab = "drills" | "controls" | "activity";
+const TABS: { id: Tab; icon: typeof Gauge; label: string }[] = [
+  { id: "drills", icon: Gauge, label: "Drills" },
+  { id: "controls", icon: SlidersHorizontal, label: "Controls" },
+  { id: "activity", icon: Layers, label: "Activity" },
+];
 
 export default function ClusterWorkbench() {
   const [status, setStatus] = useState<LiveStatus | null>(null);
@@ -292,22 +313,20 @@ export default function ClusterWorkbench() {
   const [components, setComponents] = useState<RunComponent[]>([]);
   const [events, setEvents] = useState<ClusterEvent[]>([]);
   const [trace, setTrace] = useState<LiveTrace | null>(null);
-  const [report, setReport] = useState<LiveReport | null>(null);
+  const [history, setHistory] = useState<
+    Record<string, { cpu: number; mem: number }[]>
+  >({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("drills");
-  const poll = useRef<number | null>(null);
-  // Every mutation bumps this. A refresh captures it before fetching and discards its run payload if
-  // a mutation happened meanwhile — otherwise an in-flight poll lands after the action and briefly
-  // reverts the control the operator just clicked.
-  const mutationSeq = useRef(0);
-  // Rolling history of measured samples per service, so the inspector can graph real trends.
-  const [history, setHistory] = useState<
-    Record<string, { cpu: number; mem: number }[]>
-  >({});
 
-  // ── edge geometry: measure node boxes and draw curves between them ────────
+  const poll = useRef<number | null>(null);
+  // Every mutation bumps this. A refresh captures it before fetching and drops its run payload if a
+  // mutation happened meanwhile — otherwise an in-flight poll lands after an action and reverts it.
+  const mutationSeq = useRef(0);
+
+  // ── edges measured from the real node boxes, so the graph is correct at any width ──
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const nodeRefs = useRef<Record<string, HTMLElement | null>>({});
   const [paths, setPaths] = useState<{ id: string; d: string }[]>([]);
@@ -362,25 +381,21 @@ export default function ClusterWorkbench() {
       fetchRunEvents(runId).catch(() => [] as ClusterEvent[]),
       getLiveTrace(runId).catch(() => null),
     ]);
-    // Measured data is always safe to apply; the run's desired state is not if it raced a mutation.
+    // Measured data is always safe to apply; desired state is not if it raced a mutation.
     if (seq === mutationSeq.current) setRun(view);
     setComponents(comps);
     setEvents(evts);
+    if (tr) setTrace(tr);
     setHistory((prev) => {
       const next = { ...prev };
       for (const c of comps) {
-        const series = [
+        next[c.name] = [
           ...(next[c.name] ?? []),
           { cpu: c.cpuMillicores, mem: c.memoryMiB },
-        ];
-        next[c.name] = series.slice(-40); // ~100s of history at the 2.5s poll
+        ].slice(-HISTORY);
       }
       return next;
     });
-    if (tr) setTrace(tr);
-    setReport(
-      view.drillComplete ? await getLiveReport(runId).catch(() => null) : null,
-    );
   }, []);
 
   const startPolling = useCallback(
@@ -388,46 +403,41 @@ export default function ClusterWorkbench() {
       stopPolling();
       poll.current = window.setInterval(() => {
         refresh(runId).catch(() => stopPolling());
-      }, 2500);
+      }, POLL_MS);
     },
     [refresh, stopPolling],
   );
 
+  // Resume the cluster this account already owns. The first paint is a skeleton rather than the
+  // launch screen, so a reload never flashes "provision a cluster" at someone who already has one.
   useEffect(() => {
+    let alive = true;
     fetchLiveStatus()
-      .then((s) => {
-        setStatus(s);
+      .then(async (s) => {
+        if (!alive) return;
         if (s.myRunId) {
-          refresh(s.myRunId).catch(() => undefined);
+          await refresh(s.myRunId).catch(() => undefined);
+          if (!alive) return;
           startPolling(s.myRunId);
         }
+        setStatus(s);
       })
-      .catch(() =>
-        setStatus({
-          enabled: false,
-          signedIn: false,
-          displayName: null,
-          myRunId: null,
-        }),
-      );
+      .catch(() => {
+        if (alive)
+          setStatus({
+            enabled: false,
+            signedIn: false,
+            displayName: null,
+            myRunId: null,
+          });
+      });
     fetchPlatformStatus()
-      .then(setPlatform)
-      .catch(() => setPlatform(null));
+      .then((p) => alive && setPlatform(p))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
   }, [refresh, startPolling]);
-
-  const provision = useCallback(async () => {
-    setBusy("provision");
-    setError(null);
-    try {
-      const created = await createLiveRun(SANDBOX);
-      setRun(created);
-      startPolling(created.runId);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not provision.");
-    } finally {
-      setBusy(null);
-    }
-  }, [startPolling]);
 
   const act = useCallback(
     async (
@@ -438,15 +448,13 @@ export default function ClusterWorkbench() {
       setBusy(key);
       setError(null);
       mutationSeq.current += 1;
-      // Reflect the intent immediately so the control does not sit on its old value while the
-      // broker patches the LabRun.
       if (optimistic) setRun((r) => (r ? optimistic(r) : r));
       try {
         const next = await fn();
         mutationSeq.current += 1;
         if (next) setRun(next as LiveRunView);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Action rejected.");
+        setError(e instanceof Error ? e.message : "That action was rejected.");
         mutationSeq.current += 1;
       } finally {
         setBusy(null);
@@ -454,6 +462,22 @@ export default function ClusterWorkbench() {
     },
     [],
   );
+
+  const provision = useCallback(async () => {
+    setBusy("provision");
+    setError(null);
+    try {
+      const created = await createLiveRun(SANDBOX);
+      setRun(created);
+      startPolling(created.runId);
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Could not provision a cluster.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }, [startPolling]);
 
   const teardown = useCallback(async () => {
     if (!run) return;
@@ -465,11 +489,11 @@ export default function ClusterWorkbench() {
       setComponents([]);
       setEvents([]);
       setTrace(null);
-      setReport(null);
+      setHistory({});
       setSelected(null);
       fetchPlatformStatus()
         .then(setPlatform)
-        .catch(() => setPlatform(null));
+        .catch(() => undefined);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Teardown failed.");
     } finally {
@@ -477,19 +501,22 @@ export default function ClusterWorkbench() {
     }
   }, [run, stopPolling]);
 
-  const byName = useCallback(
-    (n: string) => components.find((c) => c.name === n),
-    [components],
-  );
+  const byName = (n: string) => components.find((c) => c.name === n);
 
-  // The React Compiler memoizes this; a manual useMemo here would only fight it.
-  const drill = run?.drillId
-    ? (drills.find((d) => d.id === run.drillId) ?? null)
-    : null;
+  // ── first paint: resolving the session ────────────────────────────────────
+  if (status === null) {
+    return (
+      <div className={styles.shell}>
+        <div className={styles.booting}>
+          <Loader2 size={18} className={styles.spin} />
+          <span>Looking for your cluster…</span>
+        </div>
+      </div>
+    );
+  }
 
-  // ── empty / signed-out ────────────────────────────────────────────────────
+  // ── no cluster yet ────────────────────────────────────────────────────────
   if (!run) {
-    const signedIn = status?.signedIn === true;
     const slots = platform?.slotsAvailable ?? null;
     const signInUrl = `${AUTH_URL}/login?returnUrl=${encodeURIComponent(
       `${HOMELAB_URL}/practice`,
@@ -525,18 +552,20 @@ export default function ClusterWorkbench() {
             </li>
           </ul>
 
-          {signedIn ? (
+          {status.signedIn ? (
             <button
               className={styles.primary}
               onClick={provision}
-              disabled={
-                status?.enabled !== true || busy !== null || slots === 0
-              }
+              disabled={!status.enabled || busy !== null || slots === 0}
             >
-              <Play size={16} fill="currentColor" />
+              {busy === "provision" ? (
+                <Loader2 size={16} className={styles.spin} />
+              ) : (
+                <Play size={16} fill="currentColor" />
+              )}
               {busy === "provision"
                 ? "Provisioning…"
-                : status?.enabled === false
+                : !status.enabled
                   ? "Live control offline"
                   : slots === 0
                     ? "All cluster slots busy"
@@ -561,73 +590,50 @@ export default function ClusterWorkbench() {
     );
   }
 
-  // ── live cluster: canvas + inspector ──────────────────────────────────────
+  // ── live cluster ──────────────────────────────────────────────────────────
   const t = run.telemetry;
+  const drill = run.drillId ? drills.find((d) => d.id === run.drillId) : null;
   const provisioning = run.status === "provisioning";
+  const flowing = run.loadEnabled && t.requestsPerSec > 0;
+  const selectedNode = NODES.find((n) => n.id === selected);
+  const selectedComp = selected ? byName(selected) : undefined;
   const totalCpu = components.reduce((a, c) => a + c.cpuMillicores, 0);
   const totalMem = components.reduce((a, c) => a + c.memoryMiB, 0);
-  const flowing = run.loadEnabled && t.requestsPerSec > 0;
-  const selectedComp = selected ? byName(selected) : null;
-  const selectedNode = NODES.find((n) => n.id === selected);
 
   return (
     <div className={styles.shell}>
-      {/* top bar */}
-      <header className={styles.topbar}>
-        <div className={styles.identity}>
-          <span
-            className={`${styles.dot} ${provisioning ? styles.dotWarn : styles.dotOk}`}
-          />
-          <b>Practice cluster</b>
-          <code>{run.namespace ?? run.runId}</code>
-          {drill && <span className={styles.drillTag}>{run.drillTitle}</span>}
-        </div>
-        <div className={styles.topStats}>
-          <span title="Requests per second through Envoy">
-            <Activity size={13} /> {t.requestsPerSec}/s
-          </span>
-          <span
-            className={
-              t.p95LatencyMs > t.latencyTargetMs ? styles.warnText : ""
-            }
-            title="p95 latency"
-          >
-            <Gauge size={13} /> {t.p95LatencyMs}ms
-          </span>
-          <span
-            className={t.errorRatePct > 1 ? styles.warnText : ""}
-            title="5xx error rate"
-          >
-            <AlertTriangle size={13} /> {t.errorRatePct.toFixed(2)}%
-          </span>
-          <span title="Cluster CPU / memory in use">
-            <Cpu size={13} /> {totalCpu}m
-          </span>
-          <span>
-            <MemoryStick size={13} /> {totalMem}Mi
-          </span>
-          <span title="Time until automatic teardown">
-            <Timer size={13} /> {clock(run.remainingTtlMs)}
-          </span>
-          <button
-            className={styles.danger}
-            onClick={teardown}
-            disabled={busy !== null}
-          >
-            <Trash2 size={13} /> Tear down
-          </button>
-        </div>
-      </header>
-
-      {error && (
-        <p className={styles.errorFloat} role="alert">
-          {error}
-        </p>
-      )}
+      {run.drillSolved && <Confetti />}
 
       <div className={styles.body}>
-        {/* ── canvas ── */}
         <div className={styles.canvas} ref={canvasRef}>
+          {/* the canvas carries its own chrome — no second navbar */}
+          <div className={styles.hudTopLeft}>
+            <span
+              className={`${styles.dot} ${provisioning ? styles.dotWarn : styles.dotOk}`}
+            />
+            <b>Practice cluster</b>
+            <code>{run.namespace ?? run.runId}</code>
+            {drill && <span className={styles.drillTag}>{run.drillTitle}</span>}
+          </div>
+
+          <div className={styles.hudTopRight}>
+            <span title="Time until automatic teardown">
+              <Timer size={13} /> {clock(run.remainingTtlMs)}
+            </span>
+            <button
+              className={styles.danger}
+              onClick={teardown}
+              disabled={busy !== null}
+            >
+              {busy === "teardown" ? (
+                <Loader2 size={13} className={styles.spin} />
+              ) : (
+                <Trash2 size={13} />
+              )}
+              Tear down
+            </button>
+          </div>
+
           <svg className={styles.edges} aria-hidden="true">
             {paths.map((p) => (
               <path
@@ -644,7 +650,7 @@ export default function ClusterWorkbench() {
               const desired = c?.desired ?? 0;
               const ready = c?.ready ?? 0;
               const off = desired === 0;
-              const healthy = desired > 0 && ready === desired;
+              const starting = desired > 0 && ready < desired;
               const limit = c?.cpuLimitMillicoresPerPod ?? 0;
               const Icon = n.icon;
               return (
@@ -671,9 +677,9 @@ export default function ClusterWorkbench() {
                       className={`${styles.badge} ${
                         off
                           ? styles.badgeOff
-                          : healthy
-                            ? styles.badgeOk
-                            : styles.badgeWarn
+                          : starting
+                            ? styles.badgeWarn
+                            : styles.badgeOk
                       }`}
                     >
                       {off ? "off" : `${ready}/${desired}`}
@@ -707,6 +713,10 @@ export default function ClusterWorkbench() {
                   <span className={styles.nodeFoot}>
                     {off ? (
                       "not provisioned"
+                    ) : starting ? (
+                      <span className={styles.starting}>
+                        <Loader2 size={10} className={styles.spin} /> starting
+                      </span>
                     ) : (
                       <>
                         <span>
@@ -723,25 +733,64 @@ export default function ClusterWorkbench() {
             })}
           </div>
 
-          <div className={styles.canvasFoot}>
+          <div className={styles.hudBottomLeft}>
             <span className={flowing ? styles.liveChip : styles.idleChip}>
               <i /> {flowing ? "traffic flowing" : "traffic stopped"}
             </span>
             <span>
               {run.podCount ?? 0} pods · {components.length} services
             </span>
-            <span>SLO score {t.score}</span>
             {trace && trace.spans.length > 0 && (
               <span>
                 trace {trace.durationMs}ms · {trace.release}
               </span>
             )}
           </div>
+
+          <div className={styles.hudBottomRight}>
+            <div className={styles.stat}>
+              <span>Throughput</span>
+              <b>{t.requestsPerSec}/s</b>
+            </div>
+            <div
+              className={`${styles.stat} ${t.p95LatencyMs > t.latencyTargetMs ? styles.statBad : ""}`}
+            >
+              <span>p95</span>
+              <b>{t.p95LatencyMs}ms</b>
+            </div>
+            <div
+              className={`${styles.stat} ${t.errorRatePct > 1 ? styles.statBad : ""}`}
+            >
+              <span>Errors</span>
+              <b>{t.errorRatePct.toFixed(2)}%</b>
+            </div>
+            <div className={styles.stat}>
+              <span>CPU</span>
+              <b>{totalCpu}m</b>
+            </div>
+            <div className={styles.stat}>
+              <span>Memory</span>
+              <b>{totalMem}Mi</b>
+            </div>
+            <div className={styles.stat}>
+              <span>SLO</span>
+              <b>{t.score}</b>
+            </div>
+          </div>
+
+          {error && (
+            <p className={styles.errorFloat} role="alert">
+              <AlertTriangle size={13} /> {error}
+              <button onClick={() => setError(null)} aria-label="Dismiss">
+                <X size={12} />
+              </button>
+            </p>
+          )}
         </div>
 
         {/* ── inspector ── */}
         <aside className={styles.inspector}>
-          {selectedComp || selectedNode ? (
+          {selectedNode ? (
             <div className={styles.panel}>
               <button
                 className={styles.backBtn}
@@ -750,7 +799,7 @@ export default function ClusterWorkbench() {
                 <ChevronLeft size={14} /> Drills, controls &amp; activity
               </button>
               <div className={styles.panelHead}>
-                <b>{selectedNode?.label}</b>
+                <b>{selectedNode.label}</b>
                 <button
                   className={styles.iconBtn}
                   onClick={() => setSelected(null)}
@@ -759,9 +808,9 @@ export default function ClusterWorkbench() {
                   <X size={14} />
                 </button>
               </div>
-              <p className={styles.panelSub}>{selectedNode?.role}</p>
+              <p className={styles.panelSub}>{selectedNode.role}</p>
 
-              {selectedComp ? (
+              {selectedComp && selectedComp.desired > 0 ? (
                 <>
                   <div className={styles.kv}>
                     <span>Replicas</span>
@@ -771,21 +820,12 @@ export default function ClusterWorkbench() {
                   </div>
                   <div className={styles.kv}>
                     <span>CPU</span>
-                    <b>
-                      {selectedComp.cpuMillicores}m of{" "}
-                      {selectedComp.cpuLimitMillicoresPerPod *
-                        Math.max(1, selectedComp.desired)}
-                      m
-                    </b>
+                    <b>{selectedComp.cpuMillicores}m</b>
                   </div>
                   <div className={styles.kv}>
-                    <span>Memory</span>
-                    <b>{selectedComp.memoryMiB} MiB</b>
-                  </div>
-                  <div className={styles.kv}>
-                    <span>CPU per replica</span>
+                    <span>Per replica</span>
                     <b>
-                      {selectedComp.pods.length > 0
+                      {selectedComp.pods.length
                         ? Math.round(
                             selectedComp.cpuMillicores /
                               selectedComp.pods.length,
@@ -797,8 +837,8 @@ export default function ClusterWorkbench() {
                   <div className={styles.kv}>
                     <span>Saturation</span>
                     <b>
-                      {selectedComp.cpuLimitMillicoresPerPod > 0 &&
-                      selectedComp.pods.length > 0
+                      {selectedComp.cpuLimitMillicoresPerPod &&
+                      selectedComp.pods.length
                         ? Math.round(
                             (selectedComp.cpuMillicores /
                               (selectedComp.cpuLimitMillicoresPerPod *
@@ -806,8 +846,12 @@ export default function ClusterWorkbench() {
                               100,
                           )
                         : 0}
-                      % of limit
+                      %
                     </b>
+                  </div>
+                  <div className={styles.kv}>
+                    <span>Memory</span>
+                    <b>{selectedComp.memoryMiB} MiB</b>
                   </div>
                   <div className={styles.kv}>
                     <span>Restarts</span>
@@ -834,9 +878,6 @@ export default function ClusterWorkbench() {
 
                   <p className={styles.panelLabel}>Pods</p>
                   <div className={styles.podList}>
-                    {selectedComp.pods.length === 0 && (
-                      <p className={styles.blank}>No pods scheduled.</p>
-                    )}
                     {selectedComp.pods.map((p) => (
                       <div key={p.name} className={styles.podItem}>
                         <span className={styles.podId}>…{p.name}</span>
@@ -885,24 +926,15 @@ export default function ClusterWorkbench() {
           ) : (
             <div className={styles.panel}>
               <div className={styles.tabs}>
-                <button
-                  className={tab === "drills" ? styles.tabOn : ""}
-                  onClick={() => setTab("drills")}
-                >
-                  <Gauge size={13} /> Drills
-                </button>
-                <button
-                  className={tab === "controls" ? styles.tabOn : ""}
-                  onClick={() => setTab("controls")}
-                >
-                  <SlidersHorizontal size={13} /> Controls
-                </button>
-                <button
-                  className={tab === "activity" ? styles.tabOn : ""}
-                  onClick={() => setTab("activity")}
-                >
-                  <Layers size={13} /> Activity
-                </button>
+                {TABS.map(({ id, icon: Icon, label }) => (
+                  <button
+                    key={id}
+                    className={tab === id ? styles.tabOn : ""}
+                    onClick={() => setTab(id)}
+                  >
+                    <Icon size={13} /> {label}
+                  </button>
+                ))}
               </div>
 
               {tab === "drills" &&
@@ -910,7 +942,8 @@ export default function ClusterWorkbench() {
                   <>
                     <p className={styles.hint}>
                       A drill sets an objective and a clock on this cluster and
-                      unlocks its operator decisions. Nothing is reprovisioned.
+                      unlocks its operator decisions. Nothing is reprovisioned —
+                      the workload stays up.
                     </p>
                     <div className={styles.drills}>
                       {drills.map((d, i) => (
@@ -925,7 +958,11 @@ export default function ClusterWorkbench() {
                           disabled={busy !== null || provisioning}
                         >
                           <span className={styles.drillNo}>
-                            {String(i + 1).padStart(2, "0")}
+                            {busy === `drill-${d.id}` ? (
+                              <Loader2 size={12} className={styles.spin} />
+                            ) : (
+                              String(i + 1).padStart(2, "0")
+                            )}
                           </span>
                           <span>
                             <b>{d.title}</b>
@@ -941,13 +978,42 @@ export default function ClusterWorkbench() {
                       </p>
                     )}
                   </>
+                ) : run.drillSolved ? (
+                  <div className={styles.solved}>
+                    <PartyPopper size={26} />
+                    <b>Drill complete</b>
+                    <p>
+                      You found all {run.drillCorrectTotal} correct actions
+                      {run.drillWrongChosen > 0
+                        ? ` after ${run.drillWrongChosen} misstep${run.drillWrongChosen > 1 ? "s" : ""}`
+                        : " with no missteps"}
+                      .
+                    </p>
+                    <p className={styles.solvedSub}>
+                      The cluster is still yours. Run another drill on it, or
+                      keep experimenting with the controls.
+                    </p>
+                    <button
+                      className={styles.primarySm}
+                      onClick={() => act("end", () => endDrill(run.runId))}
+                      disabled={busy !== null}
+                    >
+                      {busy === "end" ? (
+                        <Loader2 size={14} className={styles.spin} />
+                      ) : (
+                        <Gauge size={14} />
+                      )}
+                      Choose another drill
+                    </button>
+                  </div>
                 ) : (
                   <>
                     <div className={styles.objective}>
                       <b>{run.drillTitle || drill.title}</b>
                       <p>{run.drillObjective || drill.summary}</p>
                       <span>
-                        {clock(run.elapsedMs)} / {clock(run.durationMs)}
+                        {clock(run.elapsedMs)} / {clock(run.durationMs)} ·{" "}
+                        {run.drillCorrectChosen}/{run.drillCorrectTotal} correct
                       </span>
                     </div>
                     <div className={styles.progress}>
@@ -966,6 +1032,7 @@ export default function ClusterWorkbench() {
                       {run.drillOptions.map((o) => {
                         const answered = o.chosen;
                         const right = o.isCorrect === true;
+                        const pending = busy === `dec-${o.id}`;
                         return (
                           <div key={o.id} className={styles.qWrap}>
                             <button
@@ -975,7 +1042,7 @@ export default function ClusterWorkbench() {
                                     ? styles.qRight
                                     : styles.qWrong
                                   : ""
-                              }`}
+                              } ${pending ? styles.pending : ""}`}
                               onClick={() =>
                                 act(`dec-${o.id}`, () =>
                                   liveDecision(run.runId, o.id),
@@ -985,7 +1052,9 @@ export default function ClusterWorkbench() {
                                 !o.unlocked || answered || busy !== null
                               }
                             >
-                              {answered ? (
+                              {pending ? (
+                                <Loader2 size={14} className={styles.spin} />
+                              ) : answered ? (
                                 right ? (
                                   <Check size={14} />
                                 ) : (
@@ -996,7 +1065,11 @@ export default function ClusterWorkbench() {
                               )}
                               <span>
                                 <b>{o.label}</b>
-                                <small>{o.description}</small>
+                                <small>
+                                  {pending
+                                    ? "Applying to the cluster…"
+                                    : o.description}
+                                </small>
                               </span>
                             </button>
                             {answered && o.explanation && (
@@ -1010,27 +1083,24 @@ export default function ClusterWorkbench() {
                         );
                       })}
                     </div>
-                    {report && (
-                      <div className={styles.report}>
-                        <b>
-                          {report.outcome} · {report.score}
-                        </b>
-                        <p>{report.summary}</p>
-                      </div>
-                    )}
                     <button
                       className={styles.ghost}
                       onClick={() => act("end", () => endDrill(run.runId))}
                       disabled={busy !== null}
                     >
-                      <Square size={12} /> End drill, keep cluster
+                      {busy === "end" ? (
+                        <Loader2 size={12} className={styles.spin} />
+                      ) : (
+                        <Square size={12} />
+                      )}
+                      End drill, keep cluster
                     </button>
                   </>
                 ))}
 
               {tab === "controls" && (
                 <div className={styles.controls}>
-                  {controlGroups.map((g) => {
+                  {CONTROLS.map((g) => {
                     const activeId = g.active(run);
                     return (
                       <div key={g.label} className={styles.control}>
@@ -1039,7 +1109,7 @@ export default function ClusterWorkbench() {
                           {g.options.map((o) => (
                             <button
                               key={o.id}
-                              className={`${activeId === o.id ? styles.segOn : ""} ${busy === o.id ? styles.segBusy : ""}`}
+                              className={`${activeId === o.id ? styles.segOn : ""} ${busy === o.id ? styles.pending : ""}`}
                               onClick={() =>
                                 act(
                                   o.id,
@@ -1049,7 +1119,11 @@ export default function ClusterWorkbench() {
                               }
                               disabled={busy !== null || activeId === o.id}
                             >
-                              {o.label}
+                              {busy === o.id ? (
+                                <Loader2 size={12} className={styles.spin} />
+                              ) : (
+                                o.label
+                              )}
                             </button>
                           ))}
                         </div>

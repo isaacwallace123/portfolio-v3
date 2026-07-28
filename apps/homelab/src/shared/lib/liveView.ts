@@ -44,6 +44,10 @@ export interface RealRun {
   drillElapsedSeconds?: number;
   drillDurationSeconds?: number;
   drillComplete?: boolean;
+  drillSolved?: boolean;
+  drillCorrectChosen?: number;
+  drillCorrectTotal?: number;
+  drillWrongChosen?: number;
   drillOptions?: DrillOption[];
   ttlSeconds: number;
   createdAt?: string;
@@ -75,6 +79,10 @@ export interface LiveRunView extends RunView {
   drillTitle: string;
   drillObjective: string;
   drillComplete: boolean;
+  drillSolved: boolean;
+  drillCorrectChosen: number;
+  drillCorrectTotal: number;
+  drillWrongChosen: number;
   drillOptions: DrillOption[];
 }
 
@@ -165,6 +173,10 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     drillTitle: real.drillTitle ?? "",
     drillObjective: real.drillObjective ?? "",
     drillComplete: real.drillComplete ?? false,
+    drillSolved: real.drillSolved ?? false,
+    drillCorrectChosen: real.drillCorrectChosen ?? 0,
+    drillCorrectTotal: real.drillCorrectTotal ?? 0,
+    drillWrongChosen: real.drillWrongChosen ?? 0,
     drillOptions: real.drillOptions ?? [],
   };
 }

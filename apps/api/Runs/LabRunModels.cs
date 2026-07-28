@@ -150,6 +150,12 @@ public sealed record RunView(
     int DrillElapsedSeconds,
     int DrillDurationSeconds,
     bool DrillComplete,
+    // A drill is solved when every correct action has been taken. The counts let the UI show quiz
+    // progress ("1 of 2") without revealing WHICH options are the correct ones.
+    bool DrillSolved,
+    int DrillCorrectChosen,
+    int DrillCorrectTotal,
+    int DrillWrongChosen,
     IReadOnlyList<DrillOption> DrillOptions)
 {
     // Map the LabRun's Crossplane conditions to a small, public lifecycle vocabulary, and surface the
@@ -207,6 +213,11 @@ public sealed record RunView(
         var duration = definition?.DurationSeconds ?? 0;
         var drillComplete = definition is not null && elapsedSeconds >= duration;
 
+        var correctTotal = definition?.Decisions.Count(d => d.IsCorrect) ?? 0;
+        var correctChosen = definition?.Decisions.Count(d => d.IsCorrect && acceptedIds.Contains(d.Id)) ?? 0;
+        var wrongChosen = definition?.Decisions.Count(d => !d.IsCorrect && acceptedIds.Contains(d.Id)) ?? 0;
+        var solved = definition is not null && correctTotal > 0 && correctChosen == correctTotal;
+
         var options = definition?.Decisions.Select(d =>
         {
             var chosen = acceptedIds.Contains(d.Id);
@@ -243,7 +254,12 @@ public sealed record RunView(
             definition?.Objective ?? "",
             (int)Math.Round(elapsedSeconds),
             duration,
-            drillComplete,
+            // Finishing the objective ends the drill just as the clock running out does.
+            drillComplete || solved,
+            solved,
+            correctChosen,
+            correctTotal,
+            wrongChosen,
             options);
     }
 
