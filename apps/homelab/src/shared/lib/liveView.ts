@@ -6,6 +6,8 @@ export interface DrillOption {
   label: string;
   description: string;
   unlocked: boolean;
+  /** Seconds until this option unlocks, so the UI can explain the wait. */
+  unlocksInSeconds: number;
   chosen: boolean;
   isCorrect: boolean | null;
   explanation: string;

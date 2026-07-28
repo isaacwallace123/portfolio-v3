@@ -109,6 +109,8 @@ public sealed record DrillOption(
     string Label,
     string Description,
     bool Unlocked,
+    // Seconds until this option unlocks, so the UI can explain the wait instead of just greying out.
+    int UnlocksInSeconds,
     bool Chosen,
     bool? IsCorrect,
     string Explanation);
@@ -226,6 +228,7 @@ public sealed record RunView(
                 d.Label,
                 d.Description,
                 elapsedSeconds >= d.AvailableAfterSeconds,
+                Math.Max(0, (int)Math.Ceiling(d.AvailableAfterSeconds - elapsedSeconds)),
                 chosen,
                 // Withheld until the option is chosen, so the quiz cannot be read off the wire.
                 chosen ? d.IsCorrect : null,

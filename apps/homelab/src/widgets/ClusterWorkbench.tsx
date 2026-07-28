@@ -11,7 +11,6 @@ import {
   Activity,
   AlertTriangle,
   Check,
-  ChevronLeft,
   ChevronRight,
   CircleSlash,
   Cpu,
@@ -282,18 +281,70 @@ function Spark({
   );
 }
 
-/** Purely decorative celebration for a solved drill. */
-function Confetti() {
+/** Purely decorative celebration for a solved drill: random confetti plus a few firework bursts.
+    Generated once per mount so the randomness does not resample on every poll. */
+function Celebration() {
+  const [pieces] = useState(() =>
+    Array.from({ length: 90 }, () => ({
+      left: Math.random() * 100,
+      delay: Math.random() * 1400,
+      duration: 2200 + Math.random() * 2200,
+      drift: Math.random() * 160 - 80,
+      spin: Math.random() * 900 - 450,
+      size: 5 + Math.random() * 7,
+      hue: Math.floor(Math.random() * 3),
+    })),
+  );
+  const [bursts] = useState(() =>
+    Array.from({ length: 4 }, (_, i) => ({
+      x: 18 + Math.random() * 64,
+      y: 18 + Math.random() * 42,
+      delay: i * 420 + Math.random() * 220,
+      sparks: Array.from({ length: 16 }, (_, k) => ({
+        angle: (k / 16) * 360 + Math.random() * 12,
+        distance: 70 + Math.random() * 70,
+      })),
+    })),
+  );
+
   return (
-    <div className={styles.confetti} aria-hidden="true">
-      {Array.from({ length: 40 }, (_, i) => (
+    <div className={styles.celebration} aria-hidden="true">
+      {pieces.map((p, i) => (
         <i
           key={i}
-          style={{
-            left: `${(i * 97) % 100}%`,
-            animationDelay: `${(i % 10) * 90}ms`,
-          }}
+          className={styles[`c${p.hue}` as keyof typeof styles]}
+          style={
+            {
+              left: `${p.left}%`,
+              width: p.size,
+              height: p.size * 1.6,
+              animationDelay: `${p.delay}ms`,
+              animationDuration: `${p.duration}ms`,
+              "--drift": `${p.drift}px`,
+              "--spin": `${p.spin}deg`,
+            } as React.CSSProperties
+          }
         />
+      ))}
+      {bursts.map((b, i) => (
+        <span
+          key={i}
+          className={styles.burst}
+          style={{ left: `${b.x}%`, top: `${b.y}%` }}
+        >
+          {b.sparks.map((s, k) => (
+            <em
+              key={k}
+              style={
+                {
+                  animationDelay: `${b.delay}ms`,
+                  "--angle": `${s.angle}deg`,
+                  "--dist": `${s.distance}px`,
+                } as React.CSSProperties
+              }
+            />
+          ))}
+        </span>
       ))}
     </div>
   );
@@ -329,6 +380,8 @@ export default function ClusterWorkbench() {
   // ── edges measured from the real node boxes, so the graph is correct at any width ──
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const nodeRefs = useRef<Record<string, HTMLElement | null>>({});
+  // Each replica square is its own edge target, so the gateway visibly fans out to every pod.
+  const replicaRefs = useRef<Record<string, HTMLElement | null>>({});
   const [paths, setPaths] = useState<{ id: string; d: string }[]>([]);
 
   const measure = useCallback(() => {
@@ -336,19 +389,35 @@ export default function ClusterWorkbench() {
     if (!canvas) return;
     const base = canvas.getBoundingClientRect();
     const next: { id: string; d: string }[] = [];
-    for (const [from, to] of EDGES) {
-      const a = nodeRefs.current[from]?.getBoundingClientRect();
-      const b = nodeRefs.current[to]?.getBoundingClientRect();
-      if (!a || !b) continue;
+    const curve = (a: DOMRect, b: DOMRect, id: string) => {
       const x1 = a.right - base.left;
       const y1 = a.top + a.height / 2 - base.top;
       const x2 = b.left - base.left;
       const y2 = b.top + b.height / 2 - base.top;
-      const dx = Math.max(28, (x2 - x1) * 0.5);
+      const dx = Math.max(24, (x2 - x1) * 0.5);
       next.push({
-        id: `${from}-${to}`,
+        id,
         d: `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`,
       });
+    };
+
+    for (const [from, to] of EDGES) {
+      const a = nodeRefs.current[from]?.getBoundingClientRect();
+      const b = nodeRefs.current[to]?.getBoundingClientRect();
+      if (!a || !b) continue;
+      // The gateway load-balances per request, so draw it reaching each checkout replica rather
+      // than the box as a whole — the fan-out is the point of scaling.
+      if (from === "envoy" && to === "checkout") {
+        const squares = Object.entries(replicaRefs.current).filter(
+          ([k, el]) => k.startsWith("checkout:") && el,
+        );
+        if (squares.length > 0) {
+          for (const [k, el] of squares)
+            curve(a, el!.getBoundingClientRect(), `envoy-${k}`);
+          continue;
+        }
+      }
+      curve(a, b, `${from}-${to}`);
     }
     setPaths(next);
   }, []);
@@ -362,7 +431,7 @@ export default function ClusterWorkbench() {
       ro.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [measure, components.length, run?.runId]);
+  }, [measure, components, run?.runId]);
 
   // ── data ──────────────────────────────────────────────────────────────────
   const stopPolling = useCallback(() => {
@@ -602,7 +671,7 @@ export default function ClusterWorkbench() {
 
   return (
     <div className={styles.shell}>
-      {run.drillSolved && <Confetti />}
+      {run.drillSolved && <Celebration />}
 
       <div className={styles.body}>
         <div className={styles.canvas} ref={canvasRef}>
@@ -687,23 +756,26 @@ export default function ClusterWorkbench() {
                   </span>
 
                   {c && c.pods.length > 0 && (
-                    <span className={styles.nodePods}>
+                    <span className={styles.replicas}>
                       {c.pods.map((p) => {
                         const pct =
                           limit > 0
                             ? Math.min(100, (p.cpuMillicores / limit) * 100)
                             : 0;
                         return (
-                          <span key={p.name} className={styles.podRow}>
-                            <span className={styles.podBar}>
-                              <i
-                                className={pct > 85 ? styles.podHot : ""}
-                                style={{ width: `${Math.max(4, pct)}%` }}
-                              />
-                            </span>
-                            <span className={styles.podNum}>
-                              {p.cpuMillicores}m
-                            </span>
+                          <span
+                            key={p.name}
+                            ref={(el) => {
+                              replicaRefs.current[`${n.id}:${p.name}`] = el;
+                            }}
+                            className={`${styles.replica} ${!p.ready ? styles.replicaStarting : ""} ${
+                              pct > 85 ? styles.replicaHot : ""
+                            }`}
+                            title={`${p.name} · ${p.cpuMillicores}m · ${p.memoryMiB}Mi${p.restarts ? ` · ${p.restarts} restarts` : ""}`}
+                          >
+                            {/* fill height tracks this replica's CPU against its own limit */}
+                            <i style={{ height: `${Math.max(6, pct)}%` }} />
+                            {!p.ready && <b className={styles.replicaSpin} />}
                           </span>
                         );
                       })}
@@ -792,12 +864,6 @@ export default function ClusterWorkbench() {
         <aside className={styles.inspector}>
           {selectedNode ? (
             <div className={styles.panel}>
-              <button
-                className={styles.backBtn}
-                onClick={() => setSelected(null)}
-              >
-                <ChevronLeft size={14} /> Drills, controls &amp; activity
-              </button>
               <div className={styles.panelHead}>
                 <b>{selectedNode.label}</b>
                 <button
@@ -980,17 +1046,37 @@ export default function ClusterWorkbench() {
                   </>
                 ) : run.drillSolved ? (
                   <div className={styles.solved}>
-                    <PartyPopper size={26} />
+                    <span className={styles.solvedIcon}>
+                      <PartyPopper size={22} />
+                    </span>
                     <b>Drill complete</b>
-                    <p>
-                      You found all {run.drillCorrectTotal} correct actions
-                      {run.drillWrongChosen > 0
-                        ? ` after ${run.drillWrongChosen} misstep${run.drillWrongChosen > 1 ? "s" : ""}`
-                        : " with no missteps"}
-                      .
+                    <p className={styles.solvedName}>
+                      {run.drillTitle || drill.title}
                     </p>
+                    <div className={styles.scoreRow}>
+                      <div>
+                        <span>Correct</span>
+                        <b>
+                          {run.drillCorrectChosen}/{run.drillCorrectTotal}
+                        </b>
+                      </div>
+                      <div>
+                        <span>Missteps</span>
+                        <b
+                          className={
+                            run.drillWrongChosen ? styles.warnText : ""
+                          }
+                        >
+                          {run.drillWrongChosen}
+                        </b>
+                      </div>
+                      <div>
+                        <span>Time</span>
+                        <b>{clock(run.elapsedMs)}</b>
+                      </div>
+                    </div>
                     <p className={styles.solvedSub}>
-                      The cluster is still yours. Run another drill on it, or
+                      The cluster is still yours — run another drill on it, or
                       keep experimenting with the controls.
                     </p>
                     <button
@@ -1052,7 +1138,7 @@ export default function ClusterWorkbench() {
                                 !o.unlocked || answered || busy !== null
                               }
                             >
-                              {pending ? (
+                              {pending || !o.unlocked ? (
                                 <Loader2 size={14} className={styles.spin} />
                               ) : answered ? (
                                 right ? (
@@ -1068,7 +1154,9 @@ export default function ClusterWorkbench() {
                                 <small>
                                   {pending
                                     ? "Applying to the cluster…"
-                                    : o.description}
+                                    : !o.unlocked
+                                      ? `Collecting a baseline from live traffic — unlocks in ${o.unlocksInSeconds}s`
+                                      : o.description}
                                 </small>
                               </span>
                             </button>
