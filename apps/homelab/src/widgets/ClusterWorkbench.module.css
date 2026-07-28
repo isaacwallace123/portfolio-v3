@@ -156,111 +156,15 @@
 .graph {
   position: relative;
   flex: 1;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
-  grid-template-rows: repeat(3, auto);
-  align-content: center;
+  display: flex;
   align-items: center;
-  gap: 18px 52px;
+  justify-content: space-between;
+  gap: 56px;
   min-height: 0;
+  padding: 8px 0;
 }
 
 /* ── a service node ──────────────────────────────────────────────────────── */
-.node {
-  /* Placement comes from the node's own col/row — a CSS default here previously collapsed the data
-     tier into one cell, stacking Postgres and Redis on top of each other. */
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  text-align: left;
-  padding: 12px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-lg);
-  background: var(--panel);
-  box-shadow: var(--shadow-2);
-  color: inherit;
-  cursor: pointer;
-  transition:
-    border-color var(--dur-fast),
-    transform var(--dur-fast);
-}
-.node:hover {
-  border-color: var(--accent);
-  transform: translateY(-1px);
-}
-.nodeActive {
-  border-color: var(--accent);
-  box-shadow:
-    var(--shadow-2),
-    0 0 0 1px var(--accent);
-}
-.nodeOff {
-  opacity: 0.55;
-  border-style: dashed;
-}
-.nodeHead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.nodeIcon {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--accent) 13%, transparent);
-  color: var(--accent);
-  flex: none;
-}
-.nodeTitle {
-  min-width: 0;
-  flex: 1;
-}
-.nodeTitle b {
-  display: block;
-  font-size: 13px;
-  color: var(--ink);
-  line-height: 1.2;
-}
-.nodeTitle small {
-  font-size: 10.5px;
-  color: var(--ink-dim);
-}
-.badge {
-  font-size: 10.5px;
-  padding: 2px 7px;
-  border-radius: 99px;
-  border: 1px solid var(--line);
-  font-variant-numeric: tabular-nums;
-  flex: none;
-}
-.badgeOk {
-  color: var(--mint);
-  border-color: color-mix(in srgb, var(--mint) 40%, var(--line));
-}
-.badgeWarn {
-  color: var(--amber);
-  border-color: color-mix(in srgb, var(--amber) 40%, var(--line));
-}
-.badgeOff {
-  color: var(--ink-dim);
-}
-.nodeFoot {
-  display: flex;
-  gap: 11px;
-  font-size: 10.5px;
-  color: var(--ink-dim);
-  font-variant-numeric: tabular-nums;
-}
-.nodeFoot span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .canvasFoot {
   flex: none;
   display: flex;
@@ -775,12 +679,14 @@
 }
 @media (max-width: 720px) {
   .graph {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 14px;
-  }
-  .node {
-    grid-column: 1 !important;
-    grid-row: auto !important;
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 56px;
+    min-height: 0;
+    padding: 8px 0;
   }
   .edges {
     display: none;
@@ -1099,63 +1005,7 @@
 }
 
 /* ── replicas as individual units ────────────────────────────────────────── */
-.replicas {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  padding-top: 2px;
-}
-.replica {
-  position: relative;
-  width: 17px;
-  height: 22px;
-  border-radius: 4px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  overflow: hidden;
-  display: block;
-  transition:
-    border-color var(--dur-base),
-    transform var(--dur-fast);
-  animation: replicaIn var(--dur-slow) ease-out both;
-}
 /* fill height is this replica's CPU against its own limit */
-.replica i {
-  position: absolute;
-  inset-inline: 0;
-  bottom: 0;
-  display: block;
-  background: var(--accent);
-  transition: height var(--dur-base) ease-out;
-}
-.replicaHot {
-  border-color: var(--amber);
-}
-.replicaHot i {
-  background: var(--amber);
-}
-.replicaStarting {
-  border-style: dashed;
-  border-color: var(--amber);
-}
-.replicaSpin {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  border: 1.5px solid var(--amber);
-  border-top-color: transparent;
-  animation: spin 0.8s linear infinite;
-}
-@keyframes replicaIn {
-  from {
-    opacity: 0;
-    transform: translateY(4px) scale(0.8);
-  }
-}
-
 /* ── celebration: confetti + firework bursts ─────────────────────────────── */
 .celebration {
   position: fixed;
@@ -1226,9 +1076,6 @@
   .celebration {
     display: none;
   }
-  .replica {
-    animation: none;
-  }
 }
 
 /* ── completed drill panel ───────────────────────────────────────────────── */
@@ -1274,4 +1121,143 @@
   font-size: 15px;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
+}
+
+/* ── a column of services, and one card per pod ──────────────────────────── */
+.column {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  flex: 1 1 0;
+  min-width: 150px;
+  max-width: 230px;
+}
+.card {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 11px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-2);
+  color: inherit;
+  cursor: pointer;
+  animation: cardIn var(--dur-slow) cubic-bezier(0.2, 0.9, 0.3, 1) both;
+  transition:
+    border-color var(--dur-fast),
+    transform var(--dur-fast),
+    box-shadow var(--dur-fast);
+}
+.card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.cardActive {
+  border-color: var(--accent);
+  box-shadow:
+    var(--shadow-2),
+    0 0 0 1px var(--accent);
+}
+.cardOff {
+  opacity: 0.5;
+  border-style: dashed;
+  box-shadow: none;
+}
+.cardStarting {
+  border-color: color-mix(in srgb, var(--amber) 55%, var(--line));
+}
+.cardHot {
+  border-color: color-mix(in srgb, var(--amber) 65%, var(--line));
+}
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+}
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cardIcon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+  flex: none;
+}
+.cardTitle {
+  min-width: 0;
+  flex: 1;
+}
+.cardTitle b {
+  display: block;
+  font-size: 12.5px;
+  color: var(--ink);
+  line-height: 1.2;
+}
+.cardTitle small {
+  display: block;
+  font-size: 10px;
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.readyDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mint);
+  flex: none;
+}
+.cardBar {
+  display: block;
+  height: 3px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--line) 85%, transparent);
+  overflow: hidden;
+}
+.cardBar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width var(--dur-base) ease-out;
+}
+.cardHot .cardBar i {
+  background: var(--amber);
+}
+.cardFoot {
+  display: flex;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.cardFoot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+@media (max-width: 900px) {
+  .graph {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+  .column {
+    max-width: none;
+  }
 }

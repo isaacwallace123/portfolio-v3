@@ -63,36 +63,28 @@ const drills = homelabScenarios.filter((s) => s.id !== SANDBOX);
 
 // The request graph. Explicit 1-based grid coordinates: the request tiers run along row 2, the data
 // tier stacks in column 4 with Postgres above and Redis below.
-const NODES = [
-  { id: "k6", label: "k6", role: "load generator", icon: Zap, col: 1, row: 2 },
-  { id: "envoy", label: "Envoy", role: "gateway", icon: Radio, col: 2, row: 2 },
-  {
-    id: "checkout",
-    label: "checkout",
-    role: "API",
-    icon: Server,
-    col: 3,
-    row: 2,
-  },
-  {
-    id: "postgres",
-    label: "Postgres",
-    role: "database",
-    icon: Database,
-    col: 4,
-    row: 1,
-  },
-  {
-    id: "redis",
-    label: "Redis",
-    role: "cache",
-    icon: Database,
-    col: 4,
-    row: 3,
-  },
-] as const;
+// The services in the request path, laid out in columns. Every POD renders as its own card, so a
+// checkout scaled to six shows six cards the gateway is balancing across — the graph grows with the
+// workload instead of a replica counter changing.
+const SERVICES = {
+  k6: { label: "k6", role: "load generator", icon: Zap },
+  envoy: { label: "Envoy", role: "gateway", icon: Radio },
+  checkout: { label: "checkout", role: "API", icon: Server },
+  postgres: { label: "Postgres", role: "database", icon: Database },
+  redis: { label: "Redis", role: "cache", icon: Database },
+} as const;
 
-const EDGES: [string, string][] = [
+type ServiceId = keyof typeof SERVICES;
+
+const COLUMNS: ServiceId[][] = [
+  ["k6"],
+  ["envoy"],
+  ["checkout"],
+  ["postgres", "redis"],
+];
+
+// Traffic flows column to column; edges are drawn card-to-card, so they fan out across replicas.
+const FLOWS: [ServiceId, ServiceId][] = [
   ["k6", "envoy"],
   ["envoy", "checkout"],
   ["checkout", "postgres"],
@@ -379,9 +371,8 @@ export default function ClusterWorkbench() {
 
   // ── edges measured from the real node boxes, so the graph is correct at any width ──
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const nodeRefs = useRef<Record<string, HTMLElement | null>>({});
-  // Each replica square is its own edge target, so the gateway visibly fans out to every pod.
-  const replicaRefs = useRef<Record<string, HTMLElement | null>>({});
+  // One entry per rendered card ("checkout:abc12"), so edges can be drawn between individual pods.
+  const cardRefs = useRef<Record<string, HTMLElement | null>>({});
   const [paths, setPaths] = useState<{ id: string; d: string }[]>([]);
 
   const measure = useCallback(() => {
@@ -389,35 +380,35 @@ export default function ClusterWorkbench() {
     if (!canvas) return;
     const base = canvas.getBoundingClientRect();
     const next: { id: string; d: string }[] = [];
-    const curve = (a: DOMRect, b: DOMRect, id: string) => {
-      const x1 = a.right - base.left;
-      const y1 = a.top + a.height / 2 - base.top;
-      const x2 = b.left - base.left;
-      const y2 = b.top + b.height / 2 - base.top;
-      const dx = Math.max(24, (x2 - x1) * 0.5);
+
+    const curve = (from: DOMRect, to: DOMRect, id: string) => {
+      const x1 = from.right - base.left;
+      const y1 = from.top + from.height / 2 - base.top;
+      const x2 = to.left - base.left;
+      const y2 = to.top + to.height / 2 - base.top;
+      const dx = Math.max(24, (x2 - x1) * 0.55);
       next.push({
         id,
         d: `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`,
       });
     };
 
-    for (const [from, to] of EDGES) {
-      const a = nodeRefs.current[from]?.getBoundingClientRect();
-      const b = nodeRefs.current[to]?.getBoundingClientRect();
-      if (!a || !b) continue;
-      // The gateway load-balances per request, so draw it reaching each checkout replica rather
-      // than the box as a whole — the fan-out is the point of scaling.
-      if (from === "envoy" && to === "checkout") {
-        const squares = Object.entries(replicaRefs.current).filter(
-          ([k, el]) => k.startsWith("checkout:") && el,
-        );
-        if (squares.length > 0) {
-          for (const [k, el] of squares)
-            curve(a, el!.getBoundingClientRect(), `envoy-${k}`);
-          continue;
-        }
-      }
-      curve(a, b, `${from}-${to}`);
+    // Every card of the upstream service connects to every card of the downstream one, which is what
+    // per-request load balancing actually looks like.
+    for (const [from, to] of FLOWS) {
+      const sources = Object.entries(cardRefs.current).filter(
+        ([k, el]) => el && k.startsWith(`${from}:`),
+      );
+      const targets = Object.entries(cardRefs.current).filter(
+        ([k, el]) => el && k.startsWith(`${to}:`),
+      );
+      for (const [sk, sel] of sources)
+        for (const [tk, tel] of targets)
+          curve(
+            sel!.getBoundingClientRect(),
+            tel!.getBoundingClientRect(),
+            `${sk}->${tk}`,
+          );
     }
     setPaths(next);
   }, []);
@@ -664,7 +655,7 @@ export default function ClusterWorkbench() {
   const drill = run.drillId ? drills.find((d) => d.id === run.drillId) : null;
   const provisioning = run.status === "provisioning";
   const flowing = run.loadEnabled && t.requestsPerSec > 0;
-  const selectedNode = NODES.find((n) => n.id === selected);
+  const selectedNode = selected ? SERVICES[selected as ServiceId] : undefined;
   const selectedComp = selected ? byName(selected) : undefined;
   const totalCpu = components.reduce((a, c) => a + c.cpuMillicores, 0);
   const totalMem = components.reduce((a, c) => a + c.memoryMiB, 0);
@@ -714,95 +705,99 @@ export default function ClusterWorkbench() {
           </svg>
 
           <div className={styles.graph}>
-            {NODES.map((n) => {
-              const c = byName(n.id);
-              const desired = c?.desired ?? 0;
-              const ready = c?.ready ?? 0;
-              const off = desired === 0;
-              const starting = desired > 0 && ready < desired;
-              const limit = c?.cpuLimitMillicoresPerPod ?? 0;
-              const Icon = n.icon;
-              return (
-                <button
-                  key={n.id}
-                  ref={(el) => {
-                    nodeRefs.current[n.id] = el;
-                  }}
-                  className={`${styles.node} ${off ? styles.nodeOff : ""} ${
-                    selected === n.id ? styles.nodeActive : ""
-                  }`}
-                  style={{ gridColumn: n.col, gridRow: n.row }}
-                  onClick={() => setSelected(selected === n.id ? null : n.id)}
-                >
-                  <span className={styles.nodeHead}>
-                    <span className={styles.nodeIcon}>
-                      <Icon size={14} />
-                    </span>
-                    <span className={styles.nodeTitle}>
-                      <b>{n.label}</b>
-                      <small>{n.role}</small>
-                    </span>
-                    <span
-                      className={`${styles.badge} ${
-                        off
-                          ? styles.badgeOff
-                          : starting
-                            ? styles.badgeWarn
-                            : styles.badgeOk
-                      }`}
-                    >
-                      {off ? "off" : `${ready}/${desired}`}
-                    </span>
-                  </span>
+            {COLUMNS.map((column, ci) => (
+              <div key={ci} className={styles.column}>
+                {column.map((svc) => {
+                  const meta = SERVICES[svc];
+                  const c = byName(svc);
+                  const Icon = meta.icon;
+                  const limit = c?.cpuLimitMillicoresPerPod ?? 0;
+                  const pods = c?.pods ?? [];
+                  const active = selected === svc;
 
-                  {c && c.pods.length > 0 && (
-                    <span className={styles.replicas}>
-                      {c.pods.map((p) => {
-                        const pct =
-                          limit > 0
-                            ? Math.min(100, (p.cpuMillicores / limit) * 100)
-                            : 0;
-                        return (
-                          <span
-                            key={p.name}
-                            ref={(el) => {
-                              replicaRefs.current[`${n.id}:${p.name}`] = el;
-                            }}
-                            className={`${styles.replica} ${!p.ready ? styles.replicaStarting : ""} ${
-                              pct > 85 ? styles.replicaHot : ""
-                            }`}
-                            title={`${p.name} · ${p.cpuMillicores}m · ${p.memoryMiB}Mi${p.restarts ? ` · ${p.restarts} restarts` : ""}`}
-                          >
-                            {/* fill height tracks this replica's CPU against its own limit */}
-                            <i style={{ height: `${Math.max(6, pct)}%` }} />
-                            {!p.ready && <b className={styles.replicaSpin} />}
+                  // Nothing scheduled: a single placeholder so the shape of the graph stays readable.
+                  if (pods.length === 0) {
+                    return (
+                      <button
+                        key={svc}
+                        ref={(el) => {
+                          cardRefs.current[`${svc}:placeholder`] = el;
+                        }}
+                        className={`${styles.card} ${styles.cardOff} ${active ? styles.cardActive : ""}`}
+                        onClick={() => setSelected(active ? null : svc)}
+                      >
+                        <span className={styles.cardHead}>
+                          <span className={styles.cardIcon}>
+                            <Icon size={14} />
                           </span>
-                        );
-                      })}
-                    </span>
-                  )}
+                          <span className={styles.cardTitle}>
+                            <b>{meta.label}</b>
+                            <small>{meta.role}</small>
+                          </span>
+                        </span>
+                        <span className={styles.cardFoot}>not provisioned</span>
+                      </button>
+                    );
+                  }
 
-                  <span className={styles.nodeFoot}>
-                    {off ? (
-                      "not provisioned"
-                    ) : starting ? (
-                      <span className={styles.starting}>
-                        <Loader2 size={10} className={styles.spin} /> starting
-                      </span>
-                    ) : (
-                      <>
-                        <span>
-                          <Cpu size={10} /> {c?.cpuMillicores ?? 0}m
+                  return pods.map((p) => {
+                    const pct =
+                      limit > 0
+                        ? Math.min(100, (p.cpuMillicores / limit) * 100)
+                        : 0;
+                    return (
+                      <button
+                        key={`${svc}:${p.name}`}
+                        ref={(el) => {
+                          cardRefs.current[`${svc}:${p.name}`] = el;
+                        }}
+                        className={`${styles.card} ${!p.ready ? styles.cardStarting : ""} ${
+                          active ? styles.cardActive : ""
+                        } ${pct > 85 ? styles.cardHot : ""}`}
+                        onClick={() => setSelected(active ? null : svc)}
+                        title={`${svc}-${p.name} · ${p.phase}`}
+                      >
+                        <span className={styles.cardHead}>
+                          <span className={styles.cardIcon}>
+                            <Icon size={14} />
+                          </span>
+                          <span className={styles.cardTitle}>
+                            <b>{meta.label}</b>
+                            <small>
+                              {pods.length > 1 ? `…${p.name}` : meta.role}
+                            </small>
+                          </span>
+                          {!p.ready ? (
+                            <Loader2 size={12} className={styles.spin} />
+                          ) : (
+                            <span className={styles.readyDot} />
+                          )}
                         </span>
-                        <span>
-                          <MemoryStick size={10} /> {c?.memoryMiB ?? 0}Mi
+
+                        {/* this pod's CPU against its own limit */}
+                        <span className={styles.cardBar}>
+                          <i style={{ width: `${Math.max(3, pct)}%` }} />
                         </span>
-                      </>
-                    )}
-                  </span>
-                </button>
-              );
-            })}
+
+                        <span className={styles.cardFoot}>
+                          <span>
+                            <Cpu size={10} /> {p.cpuMillicores}m
+                          </span>
+                          <span>
+                            <MemoryStick size={10} /> {p.memoryMiB}Mi
+                          </span>
+                          {p.restarts > 0 && (
+                            <span className={styles.warnText}>
+                              ×{p.restarts}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    );
+                  });
+                })}
+              </div>
+            ))}
           </div>
 
           <div className={styles.hudBottomLeft}>
