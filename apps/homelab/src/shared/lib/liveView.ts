@@ -32,6 +32,7 @@ export interface RealRun {
   dataState?: "healthy" | "degraded" | "recovered";
   targetPool?: "apps" | "infra";
   loadEnabled?: boolean;
+  loadGenerators?: number;
   restartToken?: string;
   acceptedDecisions?: {
     id: string;
@@ -75,6 +76,8 @@ export interface LiveRunView extends RunView {
   dataState: "healthy" | "degraded" | "recovered";
   targetPool: "apps" | "infra";
   loadEnabled: boolean;
+  /** How many k6 generators are running — the load-intensity dial. */
+  loadGenerators: number;
   restartToken: string;
   // Active drill layered on this cluster ("" when it is an open sandbox).
   drillId: string;
@@ -170,6 +173,7 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     dataState: real.dataState ?? "healthy",
     targetPool: real.targetPool ?? "apps",
     loadEnabled: real.loadEnabled ?? true,
+    loadGenerators: real.loadGenerators ?? (real.loadEnabled === false ? 0 : 1),
     restartToken: real.restartToken ?? "baseline",
     drillId,
     drillTitle: real.drillTitle ?? "",

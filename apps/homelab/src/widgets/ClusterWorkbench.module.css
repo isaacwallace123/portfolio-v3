@@ -1323,3 +1323,182 @@
   font-variant-numeric: tabular-nums;
   color: var(--ink-mid);
 }
+
+/* ── sliders ─────────────────────────────────────────────────────────────── */
+.control label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sliderValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--line) 90%, transparent);
+  outline: none;
+  cursor: pointer;
+}
+.slider:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--base);
+  cursor: pointer;
+  transition: transform var(--dur-fast);
+}
+.slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+.slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--base);
+  cursor: pointer;
+}
+.ticks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  font-size: 9.5px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.tickOn {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── activity: filters + levelled log ────────────────────────────────────── */
+.filterBar {
+  display: flex;
+  gap: 6px;
+}
+.search {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 11.5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+}
+.search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.clearBtn {
+  padding: 7px 10px;
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.clearBtn:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  font-size: 10.5px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: transparent;
+  color: var(--ink-dim);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast),
+    color var(--dur-fast);
+}
+.chip:hover {
+  color: var(--ink);
+}
+.chip i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.chip em {
+  font-style: normal;
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+.chipOn {
+  border-color: currentColor;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.chipPhase {
+  text-transform: capitalize;
+}
+/* level colours: red error, orange warning, green success, blue info */
+.lvl-error {
+  color: var(--red);
+}
+.lvl-warn {
+  color: var(--amber);
+}
+.lvl-success {
+  color: var(--mint);
+}
+.lvl-info {
+  color: #6fb5ff;
+}
+.ev-error i {
+  background: var(--red) !important;
+}
+.ev-warn i {
+  background: var(--amber) !important;
+}
+.ev-success i {
+  background: var(--mint) !important;
+}
+.ev-info i {
+  background: #6fb5ff !important;
+}
+.ev-error b {
+  color: var(--red);
+}
+.ev-warn b {
+  color: var(--amber);
+}
+.evPhase {
+  font-size: 9.5px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+}

@@ -53,6 +53,16 @@ import {
   type LiveTrace,
   type RunComponent,
 } from "@/shared/lib/liveClient";
+import {
+  countByLevel,
+  LEVELS,
+  levelOf,
+  matches,
+  phaseOf,
+  PHASES,
+  type Level,
+  type Phase,
+} from "@/shared/lib/activity";
 import styles from "./ClusterWorkbench.module.css";
 
 const SANDBOX = "practice-cluster";
@@ -102,34 +112,36 @@ const withCache = (r: LiveRunView, on: boolean): LiveRunView => ({
 
 // Allowlisted cluster controls. `apply` mirrors the broker's effect locally so a segment reflects the
 // new state the instant it is clicked, rather than waiting a poll for the round trip.
-const CONTROLS = [
+// Continuous dials. The action id carries the exact value ("scale-4"); the API bounds it to the same
+// range the XRD enforces, so a slider can never ask for something the platform would not allow.
+const SLIDERS = [
   {
     label: "Checkout replicas",
-    hint: "Each replica adds CPU, so capacity scales and p95 falls under load.",
-    active: (r: LiveRunView) =>
-      r.telemetry.apiReplicas <= 1
-        ? "scale-1"
-        : r.telemetry.apiReplicas >= 6
-          ? "scale-6"
-          : "scale-3",
-    options: [
-      {
-        id: "scale-1",
-        label: "1",
-        apply: (r: LiveRunView) => withReplicas(r, 1),
-      },
-      {
-        id: "scale-3",
-        label: "3",
-        apply: (r: LiveRunView) => withReplicas(r, 3),
-      },
-      {
-        id: "scale-6",
-        label: "6",
-        apply: (r: LiveRunView) => withReplicas(r, 6),
-      },
-    ],
+    hint: "Each replica has its own CPU limit, so capacity scales with this and p95 falls under load.",
+    min: 1,
+    max: 6,
+    prefix: "scale-",
+    value: (r: LiveRunView) => r.telemetry.apiReplicas,
+    apply: (r: LiveRunView, n: number) => withReplicas(r, n),
+    unit: (n: number) => `${n} replica${n === 1 ? "" : "s"}`,
   },
+  {
+    label: "Load intensity",
+    hint: "Each generator runs the same closed-loop script — more generators mean more concurrent users.",
+    min: 0,
+    max: 4,
+    prefix: "load-",
+    value: (r: LiveRunView) => r.loadGenerators,
+    apply: (r: LiveRunView, n: number) => ({
+      ...r,
+      loadGenerators: n,
+      loadEnabled: n > 0,
+    }),
+    unit: (n: number) => (n === 0 ? "no traffic" : `${n}× generator`),
+  },
+] as const;
+
+const CONTROLS = [
   {
     label: "Cache tier",
     hint: "Redis in front of Postgres. A cache hit skips the request's work entirely.",
@@ -165,23 +177,6 @@ const CONTROLS = [
           ...r,
           releaseTrack: "candidate" as const,
         }),
-      },
-    ],
-  },
-  {
-    label: "Traffic",
-    hint: "The k6 load generator driving real requests through the gateway.",
-    active: (r: LiveRunView) => (r.loadEnabled ? "traffic-on" : "traffic-off"),
-    options: [
-      {
-        id: "traffic-off",
-        label: "Off",
-        apply: (r: LiveRunView) => ({ ...r, loadEnabled: false }),
-      },
-      {
-        id: "traffic-on",
-        label: "On",
-        apply: (r: LiveRunView) => ({ ...r, loadEnabled: true }),
       },
     ],
   },
@@ -342,6 +337,13 @@ function Celebration() {
   );
 }
 
+/** Toggle a value in a Set without mutating it. */
+function toggle<T>(set: Set<T>, value: T): Set<T> {
+  const next = new Set(set);
+  if (!next.delete(value)) next.add(value);
+  return next;
+}
+
 type Tab = "drills" | "controls" | "activity";
 const TABS: { id: Tab; icon: typeof Gauge; label: string }[] = [
   { id: "drills", icon: Gauge, label: "Drills" },
@@ -363,6 +365,9 @@ export default function ClusterWorkbench() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("drills");
+  const [levels, setLevels] = useState<Set<Level>>(new Set());
+  const [phases, setPhases] = useState<Set<Phase>>(new Set());
+  const [query, setQuery] = useState("");
 
   // Ticks once a second so the countdown and elapsed clock move smoothly between polls.
   const [now, setNow] = useState(() => Date.now());
@@ -680,6 +685,10 @@ export default function ClusterWorkbench() {
   const totalMem = components.reduce((a, c) => a + c.memoryMiB, 0);
   // Counted down locally against the run's creation time, so it ticks every second rather than
   // stepping whenever a poll happens to land.
+  // Newest first, then filtered — the counts stay on the full set so a chip always shows its total.
+  const ordered = [...events].reverse();
+  const counts = countByLevel(events);
+  const shown = ordered.filter((e) => matches(e, { levels, phases, query }));
   const createdMs = run.createdAt ? Date.parse(run.createdAt) : now;
   const remainingMs = Math.max(0, run.ttlMs - (now - createdMs));
 
@@ -1277,6 +1286,57 @@ export default function ClusterWorkbench() {
 
               {tab === "controls" && (
                 <div className={styles.controls}>
+                  {SLIDERS.map((sl) => {
+                    const v = sl.value(run);
+                    const pendingHere = busy?.startsWith(sl.prefix) ?? false;
+                    return (
+                      <div key={sl.label} className={styles.control}>
+                        <label>
+                          {sl.label}
+                          <b className={styles.sliderValue}>
+                            {pendingHere && (
+                              <Loader2 size={11} className={styles.spin} />
+                            )}
+                            {sl.unit(v)}
+                          </b>
+                        </label>
+                        <input
+                          className={styles.slider}
+                          type="range"
+                          min={sl.min}
+                          max={sl.max}
+                          step={1}
+                          value={v}
+                          disabled={busy !== null}
+                          onChange={(e) => {
+                            const n = Number(e.target.value);
+                            if (n === v) return;
+                            act(
+                              `${sl.prefix}${n}`,
+                              () =>
+                                practiceAction(run.runId, `${sl.prefix}${n}`),
+                              (r) => sl.apply(r, n),
+                            );
+                          }}
+                        />
+                        <div className={styles.ticks}>
+                          {Array.from(
+                            { length: sl.max - sl.min + 1 },
+                            (_, i) => sl.min + i,
+                          ).map((n) => (
+                            <span
+                              key={n}
+                              className={n === v ? styles.tickOn : ""}
+                            >
+                              {n}
+                            </span>
+                          ))}
+                        </div>
+                        <small>{sl.hint}</small>
+                      </div>
+                    );
+                  })}
+
                   {CONTROLS.map((g) => {
                     const activeId = g.active(run);
                     return (
@@ -1316,39 +1376,101 @@ export default function ClusterWorkbench() {
               )}
 
               {tab === "activity" && (
-                <div className={styles.events}>
-                  {events.length === 0 ? (
-                    <p className={styles.blank}>
-                      {provisioning
-                        ? "Scheduling workloads…"
-                        : "No recent events."}
-                    </p>
-                  ) : (
-                    events
-                      .slice()
-                      .reverse()
-                      .map((e) => (
-                        <article key={e.id} className={styles.event}>
-                          <i
-                            className={
-                              e.severity === "warning"
-                                ? styles.evWarn
-                                : styles.evOk
-                            }
-                          />
-                          <div>
-                            <p>
-                              <b>{e.reason}</b>
-                              <span>
-                                {e.objectKind} · {ago(e.at)}
-                              </span>
-                            </p>
-                            <small>{e.message}</small>
-                          </div>
-                        </article>
-                      ))
-                  )}
-                </div>
+                <>
+                  <div className={styles.filterBar}>
+                    <input
+                      className={styles.search}
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Search reason, message or object…"
+                      aria-label="Search activity"
+                    />
+                    {(levels.size > 0 || phases.size > 0 || query) && (
+                      <button
+                        className={styles.clearBtn}
+                        onClick={() => {
+                          setLevels(new Set());
+                          setPhases(new Set());
+                          setQuery("");
+                        }}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  <div className={styles.chips}>
+                    {LEVELS.map((l) => {
+                      const on = levels.has(l.id);
+                      const n = counts[l.id];
+                      return (
+                        <button
+                          key={l.id}
+                          className={`${styles.chip} ${styles[`lvl-${l.id}`]} ${on ? styles.chipOn : ""}`}
+                          onClick={() => setLevels(toggle(levels, l.id))}
+                          aria-pressed={on}
+                        >
+                          <i /> {l.label}
+                          <em>{n}</em>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className={styles.chips}>
+                    {PHASES.filter((ph) =>
+                      events.some((e) => phaseOf(e) === ph.id),
+                    ).map((ph) => {
+                      const on = phases.has(ph.id);
+                      return (
+                        <button
+                          key={ph.id}
+                          className={`${styles.chip} ${styles.chipPhase} ${on ? styles.chipOn : ""}`}
+                          onClick={() => setPhases(toggle(phases, ph.id))}
+                          aria-pressed={on}
+                        >
+                          {ph.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className={styles.events}>
+                    {shown.length === 0 ? (
+                      <p className={styles.blank}>
+                        {events.length === 0
+                          ? provisioning
+                            ? "Scheduling workloads…"
+                            : "No activity yet."
+                          : "Nothing matches these filters."}
+                      </p>
+                    ) : (
+                      shown.map((e) => {
+                        const lvl = levelOf(e);
+                        return (
+                          <article
+                            key={e.id}
+                            className={`${styles.event} ${styles[`ev-${lvl}`]}`}
+                          >
+                            <i />
+                            <div>
+                              <p>
+                                <b>{e.reason}</b>
+                                <span className={styles.evPhase}>
+                                  {phaseOf(e)}
+                                </span>
+                                <span>
+                                  {e.objectKind} · {ago(e.at)}
+                                </span>
+                              </p>
+                              <small>{e.message}</small>
+                            </div>
+                          </article>
+                        );
+                      })
+                    )}
+                  </div>
+                </>
               )}
             </div>
           )}

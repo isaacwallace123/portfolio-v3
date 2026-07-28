@@ -449,11 +449,15 @@ public sealed class RunBroker
         if (resource.Spec.ScenarioId != "practice-cluster")
             return BrokerResult.Fail(409, "This run is not a practice cluster.");
 
+        // Sliders send an exact value ("scale-4", "load-2"). Parsing is bounded to the same range the
+        // XRD enforces, so an arbitrary number still cannot reach the cluster.
+        if (TryRangedAction(actionId, "scale-", 1, 6, out var replicas))
+            return await ApplyPracticePatchAsync(runId, Patch(("apiReplicas", replicas)), ct);
+        if (TryRangedAction(actionId, "load-", 0, 4, out var load))
+            return await ApplyPracticePatchAsync(runId, Patch(("loadReplicas", load)), ct);
+
         IReadOnlyDictionary<string, object> spec = actionId switch
         {
-            "scale-1" => Patch(("apiReplicas", 1)),
-            "scale-3" => Patch(("apiReplicas", 3)),
-            "scale-6" => Patch(("apiReplicas", 6)),
             "cache-on" => Patch(("cacheReplicas", 1)),
             "cache-off" => Patch(("cacheReplicas", 0)),
             "release-candidate" => Patch(("releaseTrack", "candidate")),
@@ -461,6 +465,7 @@ public sealed class RunBroker
             "move-apps" => Patch(("targetPool", "apps")),
             "move-infra" => Patch(("targetPool", "infra")),
             "traffic-on" => Patch(("loadReplicas", 1)),
+            "cache-scale" => Patch(("cacheReplicas", 1)),
             "traffic-off" => Patch(("loadReplicas", 0)),
             "restart" => Patch(("restartToken", Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)))),
             "reset" => Patch(
@@ -497,6 +502,22 @@ public sealed class RunBroker
             return BrokerResult.Fail(502, "The practice controller rejected the action.");
         }
     }
+
+    // "scale-4" -> 4, bounded to [min,max]. Anything outside the range is not a valid action.
+    private static bool TryRangedAction(
+        string actionId, string prefix, int min, int max, out int value)
+    {
+        value = 0;
+        if (!actionId.StartsWith(prefix, StringComparison.Ordinal)) return false;
+        if (!int.TryParse(actionId[prefix.Length..], out var parsed)) return false;
+        if (parsed < min || parsed > max) return false;
+        value = parsed;
+        return true;
+    }
+
+    private async Task<BrokerResult> ApplyPracticePatchAsync(
+        string runId, IReadOnlyDictionary<string, object> spec, CancellationToken ct)
+        => await PatchRunAsync(runId, new { spec }, "apply practice action", ct);
 
     private static IReadOnlyDictionary<string, object> Patch(
         params (string Key, object Value)[] fields) =>
