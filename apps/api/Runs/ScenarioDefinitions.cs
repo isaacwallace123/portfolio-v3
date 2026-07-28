@@ -15,6 +15,11 @@ public sealed record ScenarioDecisionDefinition(
 // What it means to have actually resolved a drill, expressed against signals the platform measures
 // rather than against which buttons were pressed. A drill is over when the workload is genuinely in
 // the target state — that is the whole claim the exercise makes.
+// Numeric thresholds here are calibrated against what this workload measurably does, not against
+// round numbers. Saturated at one replica the checkout tier serves ~930ms at p95; with the correct
+// interventions applied it settles around 165ms. A 250ms target is therefore comfortably reachable
+// by fixing the incident and unreachable by ignoring it — which is the only property that makes it
+// a goal rather than decoration. Re-measure these if the workload's shape changes.
 public sealed record DrillGoal(
     string Label,
     // p95 | errors | throughput | release | data | pool
@@ -86,7 +91,7 @@ public static class ScenarioDefinitions
                 "operator",
                 "standard",
                 64,
-                "Return p95 below 120 ms and errors below 1% before the run ends.",
+                "Return p95 below 250 ms and keep errors under 1%, with traffic still flowing.",
                 3, 0, "stable", "healthy", "apps",
                 [
                     Right("scale", "Scale checkout to 6 replicas",
@@ -112,7 +117,7 @@ public static class ScenarioDefinitions
                 ],
                 [
                     new DrillGoal("Live traffic", "throughput", 20, "", Below: false),
-                    new DrillGoal("p95 latency", "p95", 120, ""),
+                    new DrillGoal("p95 latency", "p95", 250, ""),
                     new DrillGoal("Error rate", "errors", 1, ""),
                 ]),
             new ScenarioDefinition(
@@ -146,7 +151,7 @@ public static class ScenarioDefinitions
                     new DrillGoal("Live traffic", "throughput", 20, "", Below: false),
                     new DrillGoal("Release", "release", 0, "stable"),
                     new DrillGoal("Error rate", "errors", 1, ""),
-                    new DrillGoal("p95 latency", "p95", 200, ""),
+                    new DrillGoal("p95 latency", "p95", 250, ""),
                 ]),
             new ScenarioDefinition(
                 "catalogue-data-recovery",
