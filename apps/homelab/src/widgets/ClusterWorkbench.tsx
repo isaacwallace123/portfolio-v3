@@ -445,14 +445,18 @@ export default function ClusterWorkbench() {
     if (seq === mutationSeq.current) setRun(view);
     setComponents(comps);
     setEvents(evts);
-    if (tr) setTrace(tr);
+    setTrace(tr);
+    // Track a trend for the service as a whole AND for each pod, so the inspector can graph whichever
+    // one is selected.
     setHistory((prev) => {
       const next = { ...prev };
+      const push = (key: string, cpu: number, mem: number) => {
+        next[key] = [...(next[key] ?? []), { cpu, mem }].slice(-HISTORY);
+      };
       for (const c of comps) {
-        next[c.name] = [
-          ...(next[c.name] ?? []),
-          { cpu: c.cpuMillicores, mem: c.memoryMiB },
-        ].slice(-HISTORY);
+        push(c.name, c.cpuMillicores, c.memoryMiB);
+        for (const p of c.pods)
+          push(`${c.name}:${p.name}`, p.cpuMillicores, p.memoryMiB);
       }
       return next;
     });
@@ -655,8 +659,16 @@ export default function ClusterWorkbench() {
   const drill = run.drillId ? drills.find((d) => d.id === run.drillId) : null;
   const provisioning = run.status === "provisioning";
   const flowing = run.loadEnabled && t.requestsPerSec > 0;
-  const selectedNode = selected ? SERVICES[selected as ServiceId] : undefined;
-  const selectedComp = selected ? byName(selected) : undefined;
+  // A selection is either a service ("redis") or one of its pods ("checkout:hl4k9").
+  const [selectedSvc, selectedPodName] = (selected ?? "").split(":") as [
+    ServiceId | "",
+    string | undefined,
+  ];
+  const selectedNode = selectedSvc ? SERVICES[selectedSvc] : undefined;
+  const selectedComp = selectedSvc ? byName(selectedSvc) : undefined;
+  const selectedPod = selectedPodName
+    ? selectedComp?.pods.find((p) => p.name === selectedPodName)
+    : undefined;
   const totalCpu = components.reduce((a, c) => a + c.cpuMillicores, 0);
   const totalMem = components.reduce((a, c) => a + c.memoryMiB, 0);
 
@@ -752,9 +764,17 @@ export default function ClusterWorkbench() {
                           cardRefs.current[`${svc}:${p.name}`] = el;
                         }}
                         className={`${styles.card} ${!p.ready ? styles.cardStarting : ""} ${
-                          active ? styles.cardActive : ""
+                          selected === `${svc}:${p.name}`
+                            ? styles.cardActive
+                            : ""
                         } ${pct > 85 ? styles.cardHot : ""}`}
-                        onClick={() => setSelected(active ? null : svc)}
+                        onClick={() =>
+                          setSelected(
+                            selected === `${svc}:${p.name}`
+                              ? null
+                              : `${svc}:${p.name}`,
+                          )
+                        }
                         title={`${svc}-${p.name} · ${p.phase}`}
                       >
                         <span className={styles.cardHead}>
@@ -860,7 +880,12 @@ export default function ClusterWorkbench() {
           {selectedNode ? (
             <div className={styles.panel}>
               <div className={styles.panelHead}>
-                <b>{selectedNode.label}</b>
+                <b>
+                  {selectedNode.label}
+                  {selectedPod && (
+                    <span className={styles.podTag}>…{selectedPod.name}</span>
+                  )}
+                </b>
                 <button
                   className={styles.iconBtn}
                   onClick={() => setSelected(null)}
@@ -869,9 +894,129 @@ export default function ClusterWorkbench() {
                   <X size={14} />
                 </button>
               </div>
-              <p className={styles.panelSub}>{selectedNode.role}</p>
+              <p className={styles.panelSub}>
+                {selectedPod
+                  ? `one replica · ${selectedNode.role}`
+                  : selectedNode.role}
+              </p>
 
-              {selectedComp && selectedComp.desired > 0 ? (
+              {selectedPod && selectedComp ? (
+                <>
+                  <div className={styles.kv}>
+                    <span>Status</span>
+                    <b
+                      className={
+                        selectedPod.ready ? styles.okText : styles.warnText
+                      }
+                    >
+                      {selectedPod.ready ? selectedPod.phase : "Starting"}
+                    </b>
+                  </div>
+                  <div className={styles.kv}>
+                    <span>CPU</span>
+                    <b>
+                      {selectedPod.cpuMillicores}m /{" "}
+                      {selectedComp.cpuLimitMillicoresPerPod}m
+                    </b>
+                  </div>
+                  <div className={styles.kv}>
+                    <span>Saturation</span>
+                    <b>
+                      {selectedComp.cpuLimitMillicoresPerPod
+                        ? Math.round(
+                            (selectedPod.cpuMillicores /
+                              selectedComp.cpuLimitMillicoresPerPod) *
+                              100,
+                          )
+                        : 0}
+                      %
+                    </b>
+                  </div>
+                  <div className={styles.kv}>
+                    <span>Memory</span>
+                    <b>{selectedPod.memoryMiB} MiB</b>
+                  </div>
+                  <div className={styles.kv}>
+                    <span>Restarts</span>
+                    <b className={selectedPod.restarts ? styles.warnText : ""}>
+                      {selectedPod.restarts}
+                    </b>
+                  </div>
+
+                  <p className={styles.panelLabel}>This replica</p>
+                  <Spark
+                    label="CPU"
+                    unit="m"
+                    series={(
+                      history[`${selectedSvc}:${selectedPod.name}`] ?? []
+                    ).map((h) => h.cpu)}
+                  />
+                  <Spark
+                    label="Memory"
+                    unit="Mi"
+                    series={(
+                      history[`${selectedSvc}:${selectedPod.name}`] ?? []
+                    ).map((h) => h.mem)}
+                  />
+
+                  {selectedComp.pods.length > 1 && (
+                    <>
+                      <p className={styles.panelLabel}>
+                        Other replicas ({selectedComp.pods.length})
+                      </p>
+                      <div className={styles.siblings}>
+                        {selectedComp.pods.map((p) => (
+                          <button
+                            key={p.name}
+                            className={
+                              p.name === selectedPod.name
+                                ? styles.siblingOn
+                                : ""
+                            }
+                            onClick={() =>
+                              setSelected(`${selectedSvc}:${p.name}`)
+                            }
+                          >
+                            <span>…{p.name}</span>
+                            <span>{p.cpuMillicores}m</span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  <button
+                    className={styles.ghost}
+                    onClick={() => setSelected(selectedSvc)}
+                  >
+                    <Layers size={12} /> View the whole service
+                  </button>
+
+                  {selectedSvc === "checkout" && trace?.spans.length ? (
+                    <>
+                      <p className={styles.panelLabel}>Latest trace</p>
+                      <div className={styles.trace}>
+                        {trace.spans.map((sp) => (
+                          <div key={sp.spanId} className={styles.span}>
+                            <span>{sp.name}</span>
+                            <div className={styles.spanBar}>
+                              <i
+                                className={
+                                  sp.status === "error" ? styles.spanErr : ""
+                                }
+                                style={{
+                                  width: `${Math.max(2, Math.min(100, (sp.durationMs / Math.max(1, trace.durationMs)) * 100))}%`,
+                                }}
+                              />
+                            </div>
+                            <b>{Math.round(sp.durationMs)}ms</b>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                </>
+              ) : selectedComp && selectedComp.desired > 0 ? (
                 <>
                   <div className={styles.kv}>
                     <span>Replicas</span>
@@ -884,44 +1029,11 @@ export default function ClusterWorkbench() {
                     <b>{selectedComp.cpuMillicores}m</b>
                   </div>
                   <div className={styles.kv}>
-                    <span>Per replica</span>
-                    <b>
-                      {selectedComp.pods.length
-                        ? Math.round(
-                            selectedComp.cpuMillicores /
-                              selectedComp.pods.length,
-                          )
-                        : 0}
-                      m / {selectedComp.cpuLimitMillicoresPerPod}m
-                    </b>
-                  </div>
-                  <div className={styles.kv}>
-                    <span>Saturation</span>
-                    <b>
-                      {selectedComp.cpuLimitMillicoresPerPod &&
-                      selectedComp.pods.length
-                        ? Math.round(
-                            (selectedComp.cpuMillicores /
-                              (selectedComp.cpuLimitMillicoresPerPod *
-                                selectedComp.pods.length)) *
-                              100,
-                          )
-                        : 0}
-                      %
-                    </b>
-                  </div>
-                  <div className={styles.kv}>
                     <span>Memory</span>
                     <b>{selectedComp.memoryMiB} MiB</b>
                   </div>
-                  <div className={styles.kv}>
-                    <span>Restarts</span>
-                    <b>
-                      {selectedComp.pods.reduce((a, p) => a + p.restarts, 0)}
-                    </b>
-                  </div>
 
-                  <p className={styles.panelLabel}>Trend</p>
+                  <p className={styles.panelLabel}>Service total</p>
                   <Spark
                     label="CPU"
                     unit="m"
@@ -929,54 +1041,19 @@ export default function ClusterWorkbench() {
                       (h) => h.cpu,
                     )}
                   />
-                  <Spark
-                    label="Memory"
-                    unit="Mi"
-                    series={(history[selectedComp.name] ?? []).map(
-                      (h) => h.mem,
-                    )}
-                  />
 
-                  <p className={styles.panelLabel}>Pods</p>
-                  <div className={styles.podList}>
+                  <p className={styles.panelLabel}>Replicas — pick one</p>
+                  <div className={styles.siblings}>
                     {selectedComp.pods.map((p) => (
-                      <div key={p.name} className={styles.podItem}>
-                        <span className={styles.podId}>…{p.name}</span>
+                      <button
+                        key={p.name}
+                        onClick={() => setSelected(`${selectedSvc}:${p.name}`)}
+                      >
+                        <span>…{p.name}</span>
                         <span>{p.cpuMillicores}m</span>
-                        <span>{p.memoryMiB}Mi</span>
-                        <span
-                          className={p.ready ? styles.okText : styles.warnText}
-                        >
-                          {p.ready ? p.phase : "starting"}
-                          {p.restarts > 0 ? ` ×${p.restarts}` : ""}
-                        </span>
-                      </div>
+                      </button>
                     ))}
                   </div>
-
-                  {selected === "checkout" && trace?.spans.length ? (
-                    <>
-                      <p className={styles.panelLabel}>Latest trace</p>
-                      <div className={styles.trace}>
-                        {trace.spans.map((s) => (
-                          <div key={s.spanId} className={styles.span}>
-                            <span>{s.name}</span>
-                            <div className={styles.spanBar}>
-                              <i
-                                className={
-                                  s.status === "error" ? styles.spanErr : ""
-                                }
-                                style={{
-                                  width: `${Math.max(2, Math.min(100, (s.durationMs / Math.max(1, trace.durationMs)) * 100))}%`,
-                                }}
-                              />
-                            </div>
-                            <b>{Math.round(s.durationMs)}ms</b>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  ) : null}
                 </>
               ) : (
                 <p className={styles.blank}>

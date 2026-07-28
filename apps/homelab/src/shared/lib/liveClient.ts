@@ -233,12 +233,14 @@ export async function teardownLiveRun(runId: string): Promise<void> {
   await asJson(res);
 }
 
+// Returns null while no trace has been captured yet (traffic off, or the workload still starting).
 export async function getLiveTrace(runId: string): Promise<LiveTrace | null> {
   const res = await fetch(`/api/live/runs/${runId}/trace`, {
     cache: "no-store",
   });
-  if (res.status === 404) return null;
-  return asJson(res);
+  if (!res.ok) return null;
+  const body = await res.json().catch(() => null);
+  return body && Array.isArray(body.spans) ? (body as LiveTrace) : null;
 }
 
 export async function getLiveReport(runId: string): Promise<LiveReport | null> {

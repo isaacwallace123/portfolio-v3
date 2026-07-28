@@ -1261,3 +1261,43 @@
     max-width: none;
   }
 }
+
+/* ── per-replica inspector ───────────────────────────────────────────────── */
+.podTag {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-dim);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
+.siblings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.siblings button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-mid);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  transition: border-color var(--dur-fast);
+}
+.siblings button:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.siblingOn {
+  border-color: var(--accent) !important;
+  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+  color: var(--ink) !important;
+}
