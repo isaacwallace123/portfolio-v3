@@ -28,7 +28,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm install --no-fund
-      - run: npm audit --audit-level=high
+      # Blocking gate: what actually ships. The container images contain only production
+      # dependencies, so this is the set that can affect a deployed service.
+      - run: npm audit --omit=dev --audit-level=high
+      # Visibility: dev/build tooling (eslint, prettier, types) never reaches a runtime image, so a
+      # transitive advisory there must not block a deploy of unaffected artifacts — but it is still
+      # reported here so it can be picked up on the next toolchain bump.
+      - name: dev-dependency advisories (informational)
+        continue-on-error: true
+        run: npm audit --audit-level=high
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "9.0.x"
