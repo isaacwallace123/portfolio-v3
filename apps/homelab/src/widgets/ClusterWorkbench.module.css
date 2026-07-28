@@ -1602,3 +1602,97 @@
 .cardBlocked .phaseText {
   color: var(--amber);
 }
+
+/* ── expiry: the last-minute extension offer ─────────────────────────────── */
+.modalScrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: color-mix(in srgb, #000 48%, transparent);
+  backdrop-filter: blur(3px);
+  animation: fadeIn var(--dur-med) var(--ease) both;
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.modal {
+  width: min(420px, 100%);
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg, 14px);
+  background: var(--surface, var(--base));
+  box-shadow: 0 24px 60px -20px rgb(0 0 0 / 0.5);
+  animation: modalIn var(--dur-med) var(--ease) both;
+}
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.modalIcon {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--line));
+  color: var(--amber);
+}
+.modal h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.modal p {
+  margin: 0 0 16px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-dim);
+}
+.modalActions {
+  display: flex;
+  gap: 8px;
+}
+.modalActions button {
+  flex: 1;
+  justify-content: center;
+}
+.extended {
+  margin-left: 6px;
+  font-style: normal;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+}
+.expiredNote {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--line));
+  border-radius: var(--radius-sm);
+  color: var(--ink-dim);
+}
+.expiredNote svg {
+  flex-shrink: 0;
+  color: var(--amber);
+}

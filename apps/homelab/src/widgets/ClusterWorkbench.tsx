@@ -45,6 +45,7 @@ import {
   getLiveTrace,
   liveDecision,
   practiceAction,
+  renewRun,
   startDrill,
   teardownLiveRun,
   type ClusterEvent,
@@ -369,6 +370,8 @@ export default function ClusterWorkbench() {
   const [levels, setLevels] = useState<Set<Level>>(new Set());
   const [phases, setPhases] = useState<Set<Phase>>(new Set());
   const [query, setQuery] = useState("");
+  const [renewalDismissed, setRenewalDismissed] = useState(false);
+  const [expired, setExpired] = useState(false);
 
   // Ticks once a second so the countdown and elapsed clock move smoothly between polls.
   const [now, setNow] = useState(() => Date.now());
@@ -376,6 +379,10 @@ export default function ClusterWorkbench() {
   // Every mutation bumps this. A refresh captures it before fetching and drops its run payload if a
   // mutation happened meanwhile — otherwise an in-flight poll lands after an action and reverts it.
   const mutationSeq = useRef(0);
+  // The cluster this page is currently attached to. A poll started before a teardown would otherwise
+  // land afterwards and put the torn-down cluster straight back on screen — which is exactly what
+  // "it comes back three seconds later" was. Cleared the moment the cluster is given up.
+  const attached = useRef<string | null>(null);
 
   // ── edges measured from the real node boxes, so the graph is correct at any width ──
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -441,43 +448,78 @@ export default function ClusterWorkbench() {
   }, []);
   useEffect(() => stopPolling, [stopPolling]);
 
+  // Let go of the current cluster and return to the launch screen. One place, so teardown, expiry
+  // and "the API says it is being deleted" cannot each get it subtly different.
+  const release = useCallback(() => {
+    attached.current = null;
+    setRenewalDismissed(false);
+    stopPolling();
+    setRun(null);
+    setComponents([]);
+    setEvents([]);
+    setTrace(null);
+    setHistory({});
+    setSelected(null);
+    setStatus((s) => (s ? { ...s, myRunId: null } : s));
+  }, [stopPolling]);
+
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
 
-  const refresh = useCallback(async (runId: string) => {
-    const seq = mutationSeq.current;
-    const [view, comps, evts, tr] = await Promise.all([
-      getLiveRun(runId),
-      fetchComponents(runId).catch(() => [] as RunComponent[]),
-      fetchRunEvents(runId).catch(() => [] as ClusterEvent[]),
-      getLiveTrace(runId).catch(() => null),
-    ]);
-    // Measured data is always safe to apply; desired state is not if it raced a mutation.
-    if (seq === mutationSeq.current) setRun(view);
-    setComponents(comps);
-    setEvents(evts);
-    setTrace(tr);
-    // Track a trend for the service as a whole AND for each pod, so the inspector can graph whichever
-    // one is selected.
-    setHistory((prev) => {
-      const next = { ...prev };
-      const push = (key: string, cpu: number, mem: number) => {
-        next[key] = [...(next[key] ?? []), { cpu, mem }].slice(-HISTORY);
-      };
-      for (const c of comps) {
-        push(c.name, c.cpuMillicores, c.memoryMiB);
-        for (const p of c.pods)
-          push(`${c.name}:${p.name}`, p.cpuMillicores, p.memoryMiB);
+  const refresh = useCallback(
+    async (runId: string) => {
+      const seq = mutationSeq.current;
+      const [view, comps, evts, tr] = await Promise.all([
+        getLiveRun(runId),
+        fetchComponents(runId).catch(() => [] as RunComponent[]),
+        fetchRunEvents(runId).catch(() => [] as ClusterEvent[]),
+        getLiveTrace(runId).catch(() => null),
+      ]);
+      // The page moved on while this was in flight — drop the whole payload.
+      if (attached.current !== runId) return;
+      // A cluster being deleted is gone as far as the page is concerned: the API still answers for it
+      // until Crossplane finishes collecting the namespace, and adopting that answer is what used to
+      // resurrect a torn-down cluster.
+      if (view.deleting) {
+        release();
+        return;
       }
-      return next;
-    });
-  }, []);
+      // Out of time. The platform reaper deletes the LabRun on the same deadline, so the page lets
+      // go here rather than leaving a dead cluster on screen with its timer frozen at zero.
+      if (view.remainingTtlMs <= 0) {
+        release();
+        setExpired(true);
+        return;
+      }
+      // Measured data is always safe to apply; desired state is not if it raced a mutation.
+      if (seq === mutationSeq.current) setRun(view);
+      setComponents(comps);
+      setEvents(evts);
+      setTrace(tr);
+      // Track a trend for the service as a whole AND for each pod, so the inspector can graph whichever
+      // one is selected.
+      setHistory((prev) => {
+        const next = { ...prev };
+        const push = (key: string, cpu: number, mem: number) => {
+          next[key] = [...(next[key] ?? []), { cpu, mem }].slice(-HISTORY);
+        };
+        for (const c of comps) {
+          push(c.name, c.cpuMillicores, c.memoryMiB);
+          for (const p of c.pods)
+            push(`${c.name}:${p.name}`, p.cpuMillicores, p.memoryMiB);
+        }
+        return next;
+      });
+    },
+    [release],
+  );
 
   const startPolling = useCallback(
     (runId: string) => {
       stopPolling();
+      attached.current = runId;
       poll.current = window.setInterval(() => {
         refresh(runId).catch(() => stopPolling());
       }, POLL_MS);
@@ -493,6 +535,7 @@ export default function ClusterWorkbench() {
       .then(async (s) => {
         if (!alive) return;
         if (s.myRunId) {
+          attached.current = s.myRunId;
           await refresh(s.myRunId).catch(() => undefined);
           if (!alive) return;
           startPolling(s.myRunId);
@@ -546,6 +589,7 @@ export default function ClusterWorkbench() {
     try {
       const created = await createLiveRun(SANDBOX);
       setRun(created);
+      setExpired(false);
       startPolling(created.runId);
     } catch (e) {
       setError(
@@ -556,18 +600,20 @@ export default function ClusterWorkbench() {
     }
   }, [startPolling]);
 
+  const renew = useCallback(async () => {
+    if (!run) return;
+    await act("renew", () => renewRun(run.runId));
+    setRenewalDismissed(true);
+  }, [act, run]);
+
   const teardown = useCallback(async () => {
     if (!run) return;
     setBusy("teardown");
+    // Detach first: the cluster is given up the moment the request goes out, so nothing that is
+    // already in flight can put it back.
+    release();
     try {
       await teardownLiveRun(run.runId);
-      stopPolling();
-      setRun(null);
-      setComponents([]);
-      setEvents([]);
-      setTrace(null);
-      setHistory({});
-      setSelected(null);
       fetchPlatformStatus()
         .then(setPlatform)
         .catch(() => undefined);
@@ -576,7 +622,7 @@ export default function ClusterWorkbench() {
     } finally {
       setBusy(null);
     }
-  }, [run, stopPolling]);
+  }, [run, release]);
 
   const byName = (n: string) => components.find((c) => c.name === n);
 
@@ -669,9 +715,17 @@ export default function ClusterWorkbench() {
               <Lock size={15} /> Private to your account — one cluster at a time
             </li>
             <li>
-              <Timer size={15} /> Self-destructs after 15 minutes
+              <Timer size={15} /> Self-destructs after 15 minutes, extendable
+              once
             </li>
           </ul>
+
+          {expired && (
+            <p className={styles.expiredNote}>
+              <Timer size={14} /> Your last cluster reached its time limit and
+              was destroyed. Provision another to pick up where you left off.
+            </p>
+          )}
 
           {status.signedIn ? (
             <button
@@ -736,10 +790,53 @@ export default function ClusterWorkbench() {
   const shown = ordered.filter((e) => matches(e, { levels, phases, query }));
   const createdMs = run.createdAt ? Date.parse(run.createdAt) : now;
   const remainingMs = Math.max(0, run.ttlMs - (now - createdMs));
+  // The last minute is the only point at which extending is offered: early enough to act on, late
+  // enough that it is a real decision rather than a reflex. Dismissing it is allowed; the cluster
+  // still ends on time. Once the extension is spent the prompt does not come back, so a cluster's
+  // lifetime is capped at two windows and expiry is guaranteed.
+  const expiring = remainingMs <= 60_000 && remainingMs > 0;
+  const offerRenewal = expiring && run.renewable && !renewalDismissed;
 
   return (
     <div className={styles.shell}>
       {run.drillSolved && <Celebration />}
+
+      {offerRenewal && (
+        <div className={styles.modalScrim} role="dialog" aria-modal="true">
+          <div className={styles.modal}>
+            <span className={styles.modalIcon}>
+              <Timer size={18} />
+            </span>
+            <h3>This cluster closes in {clock(remainingMs)}</h3>
+            <p>
+              Everything running on it — the workload, the drill you are in, the
+              activity so far — goes with it. You can add another 15 minutes,
+              once. After that it closes for good.
+            </p>
+            <div className={styles.modalActions}>
+              <button
+                className={styles.primary}
+                onClick={renew}
+                disabled={busy !== null}
+              >
+                {busy === "renew" ? (
+                  <Loader2 size={13} className={styles.spin} />
+                ) : (
+                  <Timer size={13} />
+                )}
+                Add 15 minutes
+              </button>
+              <button
+                className={styles.ghost}
+                onClick={() => setRenewalDismissed(true)}
+                disabled={busy !== null}
+              >
+                Let it close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className={styles.body}>
         <div className={styles.canvas} ref={canvasRef}>
@@ -759,6 +856,7 @@ export default function ClusterWorkbench() {
               title="Time until this cluster is automatically destroyed"
             >
               <Timer size={13} /> {clock(remainingMs)}
+              {!run.renewable && <em className={styles.extended}>extended</em>}
             </span>
             <button
               className={`${styles.hudCard} ${styles.danger}`}

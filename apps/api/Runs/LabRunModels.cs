@@ -140,6 +140,8 @@ public sealed record RunView(
     string Status,
     string? Namespace,
     int TtlSeconds,
+    // False once the single permitted extension has been used, so the page can stop offering it.
+    bool Renewable,
     DateTime? CreatedAt,
     int ApiReplicas,
     bool CacheEnabled,
@@ -248,6 +250,7 @@ public sealed record RunView(
             status,
             r.Status?.Namespace,
             r.Spec.TtlSeconds,
+            r.Metadata.Annotations?.ContainsKey(RunBroker.RenewedAnnotation) != true,
             createdAt,
             r.Spec.ApiReplicas ?? 3,
             (r.Spec.CacheReplicas ?? 0) > 0,

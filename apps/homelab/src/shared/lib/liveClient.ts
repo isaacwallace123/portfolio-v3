@@ -211,6 +211,12 @@ export async function endDrill(runId: string): Promise<LiveRunView> {
   return asJson(res);
 }
 
+/** Buy one more window before the cluster expires. Allowed once; a second attempt is a 409. */
+export async function renewRun(runId: string): Promise<LiveRunView> {
+  const res = await fetch(`/api/live/runs/${runId}/renew`, { method: "POST" });
+  return asJson(res);
+}
+
 export interface ClusterEvent {
   id: string;
   at: string;

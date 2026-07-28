@@ -120,6 +120,16 @@ public static class RunEndpoints
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite);
 
+        // Buy one more window before the cluster expires. Allowed once per cluster.
+        app.MapPost("/v1/runs/{runId}/renew", async (
+            string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
+        {
+            var result = await broker.RenewRunAsync(runId, Owner(ctx), ct);
+            return result.Run is not null
+                ? Results.Ok(result.Run)
+                : Results.Json(new { error = result.Error }, statusCode: result.Status);
+        }).RequireScope(ApiScopes.RunsWrite);
+
         // Start a drill ON a running cluster (objective + clock + decisions over the live workload).
         app.MapPost("/v1/runs/{runId}/drill", async (
             string runId, DrillRequest req, HttpContext ctx, RunBroker broker, CancellationToken ct) =>

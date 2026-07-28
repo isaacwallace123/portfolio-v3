@@ -710,6 +710,38 @@ public sealed class RunBroker
         return double.Parse(q, CultureInfo.InvariantCulture) / (1024.0 * 1024.0); // bytes
     }
 
+    // One extension, on request, before the cluster expires.
+    //
+    // A cluster is deliberately short-lived, but having it vanish mid-drill is worse than the cost of
+    // keeping it. The owner may buy one more window and only one: after that the run is guaranteed to
+    // end, so a forgotten tab cannot hold a slot indefinitely. The cap is enforced here rather than in
+    // the page, since the page is not something the platform gets to trust.
+    public const int RenewalSeconds = 900;
+    public const string RenewedAnnotation = "homeops.isaacwallace.dev/renewed-at";
+
+    public async Task<BrokerResult> RenewRunAsync(string runId, string owner, CancellationToken ct)
+    {
+        var resource = await GetOwnedResourceAsync(runId, owner, ct);
+        if (resource is null)
+            return BrokerResult.Fail(404, "No such cluster.");
+        if (resource.Metadata.Annotations?.ContainsKey(RenewedAnnotation) == true)
+            return BrokerResult.Fail(409, "This cluster has already been extended once.");
+
+        var ttl = resource.Spec.TtlSeconds > 0 ? resource.Spec.TtlSeconds : 900;
+        var patchBody = new
+        {
+            metadata = new
+            {
+                annotations = new Dictionary<string, string>
+                {
+                    [RenewedAnnotation] = DateTime.UtcNow.ToString("O"),
+                },
+            },
+            spec = new { ttlSeconds = ttl + RenewalSeconds },
+        };
+        return await PatchRunAsync(runId, patchBody, "renew cluster", ct);
+    }
+
     // Owner-free teardown used by the TTL reaper (the platform, not a user, is acting).
     public async Task<bool> DeleteExpiredAsync(string runId, CancellationToken ct)
     {

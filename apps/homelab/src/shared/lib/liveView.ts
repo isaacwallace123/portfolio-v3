@@ -53,6 +53,7 @@ export interface RealRun {
   drillWrongChosen?: number;
   drillOptions?: DrillOption[];
   ttlSeconds: number;
+  renewable: boolean;
   createdAt?: string;
   telemetry?: {
     podCount: number;
@@ -68,6 +69,10 @@ export interface RealRun {
 // RunView plus the real cluster facts the arena surfaces (namespace, measured usage).
 export interface LiveRunView extends RunView {
   live: true;
+  /** False once the single permitted extension has been used. */
+  renewable: boolean;
+  /** The LabRun is being collected. The API still answers for it, but it is gone. */
+  deleting: boolean;
   namespace: string | null;
   podCount: number | null;
   cpuMillicores: number | null;
@@ -155,6 +160,8 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     elapsedMs: drillElapsedMs,
     durationMs: drillDurationMs,
     ttlMs,
+    renewable: real.renewable ?? false,
+    deleting: real.status === "deleting",
     remainingTtlMs: Math.max(0, ttlMs - (Date.now() - createdMs)),
     telemetry,
     // The arena renders REAL Kubernetes Events from /api/live/runs/{id}/events instead of a
