@@ -45,7 +45,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: auth-service
-          image: ghcr.io/isaacwallace123/portfolio-auth-service:184b91c
+          image: ghcr.io/isaacwallace123/portfolio-auth-service:b82f8bc
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
