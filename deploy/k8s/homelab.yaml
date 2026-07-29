@@ -24,7 +24,7 @@ spec:
         node-role.kubernetes.io/apps: "true"
       containers:
         - name: web
-          image: ghcr.io/isaacwallace123/portfolio-homelab:20be563
+          image: ghcr.io/isaacwallace123/portfolio-homelab:08fdb09
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
