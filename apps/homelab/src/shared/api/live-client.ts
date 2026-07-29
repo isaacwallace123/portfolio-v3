@@ -127,6 +127,9 @@ export interface RunPod {
   memoryMiB: number;
   /** What the pod is doing while it is not ready ("ContainerCreating", "Scheduling"), else "". */
   detail: string;
+  /** The worker pool this replica actually landed on ("apps" | "infra"), or "" while scheduling.
+   *  Measured placement, not requested placement — a half-migrated fleet shows both. */
+  pool: string;
 }
 
 /** One tier of the request path, with per-pod detail. */

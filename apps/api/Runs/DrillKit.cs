@@ -243,15 +243,64 @@ public static class DrillKit
     /// The checks are the rules a drill has to obey that a compiler cannot express: a stage needs an
     /// objective and a way to reach it, its options have to be distinguishable, and any trap it lays
     /// has to be one the operator can climb back out of.</summary>
+    /// <summary>What the checkout tier can actually serve with the cache off, at its maximum of six
+    /// replicas.
+    ///
+    /// Measured on the live platform 2026-07-29: six uncached replicas offered 1000 rps served 724
+    /// of it at 965ms p95 — about 120 rps per replica, because every request pays the full
+    /// per-request CPU cost. A stage that asks for more than this without making the cache reachable
+    /// is asking for throughput the tier cannot produce, and no sequence of correct moves finishes
+    /// it. Re-measure if WORK_ITERATIONS or the replica CPU limit changes.</summary>
+    public const int UncachedCeilingRps = 700;
+
+    /// <summary>Demand a single uncached fleet can carry while still holding a tight latency target.
+    /// Well under the ceiling, because p95 runs away long before throughput flattens.</summary>
+    public const int UncachedLowLatencyRps = 450;
+
     public static IReadOnlyList<string> Problems(IEnumerable<ScenarioDefinition> drills)
     {
         var problems = new List<string>();
 
         foreach (var drill in drills)
         {
+            // Cache state carries across a cascade, so whether a stage can reach it depends on every
+            // stage before it as well as its own options.
+            var cacheReachable = false;
+
             for (var i = 0; i < drill.Stages.Count; i++)
             {
                 var stage = drill.Stages[i];
+
+                // A stage's own setup overrides whatever the last one left behind.
+                if (stage.Setup.TryGetValue("cacheReplicas", out var seeded) && seeded is int seed)
+                    cacheReachable = seed > 0;
+                // Only a CORRECT move counts as a way to reach the cache. If the sole route to the
+                // objective is an option the drill itself calls a mistake, the drill contradicts
+                // itself — and in a ranked run, taking it ends the attempt.
+                if (stage.Decisions.Any(d =>
+                        d.IsCorrect &&
+                        d.SpecPatch.TryGetValue("cacheReplicas", out var v) && v is int n && n > 0))
+                    cacheReachable = true;
+
+                var demand = stage.Goals
+                    .Where(g => g.Metric == "throughput")
+                    .Select(g => (int)g.Threshold)
+                    .DefaultIfEmpty(0)
+                    .Max();
+                var tightest = stage.Goals
+                    .Where(g => g.Metric == "p95")
+                    .Select(g => g.Threshold)
+                    .DefaultIfEmpty(double.MaxValue)
+                    .Min();
+
+                if (!cacheReachable && demand > UncachedCeilingRps)
+                    problems.Add(
+                        $"{drill.Id}/{stage.Id}: needs {demand}/s served with no way to reach the " +
+                        $"cache, and six uncached replicas top out near {UncachedCeilingRps}/s.");
+                else if (!cacheReachable && demand > UncachedLowLatencyRps && tightest <= 250)
+                    problems.Add(
+                        $"{drill.Id}/{stage.Id}: wants {demand}/s under {tightest:0}ms with no way " +
+                        $"to reach the cache; uncached, p95 runs away above ~{UncachedLowLatencyRps}/s.");
                 var where = $"{drill.Id}/{stage.Id}";
                 var ids = stage.Decisions.Select(d => d.Id).ToArray();
                 var offered = ids.ToHashSet(StringComparer.Ordinal);

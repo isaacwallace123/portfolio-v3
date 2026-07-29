@@ -9,7 +9,13 @@ namespace IsaacWallace.Api.Runs;
 // every capacity goal is written against.
 public static class LoadModel
 {
-    public const int RequestsPerSecondPerGenerator = 500;
+    // 400 rather than 500 because of what the workload measurably does. Six uncached replicas serve
+    // about 720 rps, so at 500 per generator two generators already asked for more than the tier can
+    // physically produce — every drill that ran two generators without offering the cache was
+    // unfinishable. At 400 the ladder matches the platform: one generator is comfortable on a few
+    // replicas, two needs most of the fleet, three needs the cache, and four needs the cache and a
+    // wider gateway. Keep in step with `rate:` in the homelab repo's composition.
+    public const int RequestsPerSecondPerGenerator = 400;
 
     /// <summary>Requests per second arriving at the gateway with this many generators running.</summary>
     public static int Offered(int generators) => Math.Max(0, generators) * RequestsPerSecondPerGenerator;
@@ -164,8 +170,8 @@ public static class ScenarioDefinitions
                 "Restore the stable release while still serving the offered load.",
                 Stage("regression", "Undo the regression",
                     "Get back to the stable release with errors under 1% and p95 under 250 ms.",
-                    [.. Healthy(traffic: 2), Release("candidate")],
-                    [ServeAll(2), OnRelease("stable"), Errors(1), P95(250)],
+                    [.. Healthy(traffic: 1), Release("candidate")],
+                    [ServeAll(1), OnRelease("stable"), Errors(1), P95(250)],
                     [Rollback, ScaleOut.Wrong(
                         "Wrong. This is a code regression, not a capacity problem — every new replica "
                         + "runs the same faulty path, so the error rate stays and you have simply spent "
@@ -197,8 +203,8 @@ public static class ScenarioDefinitions
                 "Move checkout to the infra pool without exhausting the request error budget.",
                 Stage("evacuate", "Move the fleet",
                     "Land checkout on the infra pool with errors under 1% and p95 under 250 ms.",
-                    [.. Healthy(traffic: 2), Checkout(1)],
-                    [ServeAll(2), OnPool("infra"), Errors(1), P95(250)],
+                    [.. Healthy(traffic: 1), Checkout(1)],
+                    [ServeAll(1), OnPool("infra"), Errors(1), P95(250)],
                     [ScaleOut.Right(
                         "Correct, and the right order. Spare replicas mean the drain can take pods away "
                         + "without the remaining fleet falling below the arriving load."),
@@ -252,8 +258,8 @@ public static class ScenarioDefinitions
                 "Get back to the stable release while serving the offered load.",
                 Stage("under-load", "Roll it back under traffic",
                     "Stable release, serving the offered load, p95 under 400 ms, errors under 1%.",
-                    [.. Healthy(traffic: 3), Release("candidate")],
-                    [ServeAll(3), OnRelease("stable"), P95(400), Errors(1)],
+                    [.. Healthy(traffic: 2), Release("candidate")],
+                    [ServeAll(2), OnRelease("stable"), P95(400), Errors(1)],
                     [Rollback.Right(
                         "Correct. A regression that only shows under load is still a regression — the "
                         + "extra per-request cost is invisible until there is a queue to amplify it."),
@@ -295,8 +301,8 @@ public static class ScenarioDefinitions
                 "Return checkout to the apps pool without dropping the traffic it is carrying.",
                 Stage("return", "Bring it home",
                     "Checkout on the apps pool, serving the offered load, p95 under 250 ms, errors under 1%.",
-                    [.. Healthy(traffic: 2), Checkout(1), Pool("infra")],
-                    [ServeAll(2), OnPool("apps"), P95(250), Errors(1)],
+                    [.. Healthy(traffic: 1), Checkout(1), Pool("infra")],
+                    [ServeAll(1), OnPool("apps"), P95(250), Errors(1)],
                     [ScaleOut.Right(
                         "Correct. A migration is a rolling replacement: the fleet has to be big enough "
                         + "that losing pods to the drain still leaves enough to serve the load."),
@@ -514,13 +520,13 @@ public static class ScenarioDefinitions
                 "Recover the data, get off the bad build, and survive the restart it triggers.",
                 Stage("degraded", "Restore the catalogue",
                     "Catalogue recovered, serving the offered load, errors under 1%.",
-                    [.. Healthy(traffic: 2), Catalogue("degraded")],
-                    [ServeAll(2), DataIs("recovered"), Errors(1)],
+                    [.. Healthy(traffic: 1), Catalogue("degraded")],
+                    [ServeAll(1), DataIs("recovered"), Errors(1)],
                     [Restore, ScaleOut.Wrong("Wrong. Capacity does not repair data."), CacheOverData]),
                 Stage("pinned", "Get off the build that wrote them",
                     "Back to the stable release, still serving the offered load.",
                     [Release("candidate")],
-                    [ServeAll(2), OnRelease("stable"), P95(250), Errors(1)],
+                    [ServeAll(1), OnRelease("stable"), P95(250), Errors(1)],
                     [Rollback.Right(
                         "Correct. A recovery is not finished while the thing that caused it is still "
                         + "serving traffic."),
@@ -555,8 +561,8 @@ public static class ScenarioDefinitions
                 "Complete a migration and keep it complete while the consequences arrive.",
                 Stage("evacuate", "Move the fleet",
                     "Checkout on the infra pool, serving the offered load, p95 under 250 ms, errors under 1%.",
-                    [.. Healthy(traffic: 2), Checkout(1)],
-                    [ServeAll(2), OnPool("infra"), P95(250), Errors(1)],
+                    [.. Healthy(traffic: 1), Checkout(1)],
+                    [ServeAll(1), OnPool("infra"), P95(250), Errors(1)],
                     [ScaleOut.Right("Correct. Headroom first, migration second."),
                      Evacuate.After(10), Shrink,
                      GatewayOut.Wrong(

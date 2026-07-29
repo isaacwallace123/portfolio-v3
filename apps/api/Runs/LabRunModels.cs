@@ -105,7 +105,11 @@ public sealed record RunPod(
     // "ImagePullBackOff", "Starting"), or empty once it is serving. Pod.Status.Phase alone says
     // "Pending" for both "waiting for a node" and "pulling the image", which is exactly the
     // difference a person watching a scale-up wants to see.
-    string Detail);
+    string Detail,
+    // The worker pool this replica actually landed on ("apps" | "infra"), or empty while it is
+    // still being scheduled. Placement as measured, not as requested — during an evacuation a
+    // half-moved fleet really does show pods on both.
+    string Pool);
 
 // One tier of the request path (a Deployment), with per-pod detail for the flowchart.
 public sealed record RunComponent(

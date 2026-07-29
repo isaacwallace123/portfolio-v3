@@ -404,7 +404,8 @@ public sealed class RunBroker
                         restarts,
                         u.Cpu,
                         u.Mem,
-                        detail);
+                        detail,
+                        PoolOf(p.Spec?.NodeName));
                 }).ToArray();
 
                 components.Add(new RunComponent(
@@ -424,6 +425,19 @@ public sealed class RunBroker
         }
 
         return components;
+    }
+
+    // Which worker pool a pod actually landed on, in the same two-word vocabulary the drills already
+    // use publicly for spec.targetPool. Deliberately NOT the node name: the pool is the thing an
+    // exercise is about, and the identity of the machine underneath it is nobody's business. This is
+    // measured placement rather than desired placement, which is the whole point during a migration
+    // — a fleet half-moved genuinely shows half its pods on each pool.
+    private static string PoolOf(string? nodeName)
+    {
+        if (string.IsNullOrEmpty(nodeName)) return "";
+        if (nodeName.Contains("infra", StringComparison.OrdinalIgnoreCase)) return "infra";
+        if (nodeName.Contains("apps", StringComparison.OrdinalIgnoreCase)) return "apps";
+        return "";
     }
 
     private static int ParseCpuLimit(k8s.Models.V1Deployment d)

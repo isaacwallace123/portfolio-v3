@@ -66,6 +66,17 @@ function PodCard({
           <b>{meta.label}</b>
           <small>{solo ? meta.role : `…${pod.name}`}</small>
         </span>
+        {/* Which worker pool this replica actually landed on. Measured, not requested — during an
+            evacuation the fleet genuinely shows pods on both pools until the last one moves, which
+            is the thing the migration drills are about and was previously invisible. */}
+        {pod.pool && (
+          <span
+            className={`${styles.poolChip} ${pod.pool === "infra" ? styles.poolInfra : ""}`}
+            title={`Scheduled on the ${pod.pool} worker pool`}
+          >
+            {pod.pool}
+          </span>
+        )}
         {pod.ready ? (
           <span className={styles.readyDot} />
         ) : (
