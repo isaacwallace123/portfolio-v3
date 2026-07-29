@@ -1,18 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
-import { summarize, PODIUM_PLACES } from "../model/board";
+import { PODIUM_PLACES } from "../model/board";
 import { useLeaderboard } from "../model/useLeaderboard";
 import { BoardSkeleton } from "./BoardSkeleton";
 import { BoardTable } from "./BoardTable";
 import { Podium } from "./Podium";
 import { SectionHead } from "./SectionHead";
-import { StatStrip } from "./StatStrip";
 import styles from "../leaderboard.module.css";
 
 export function Leaderboard() {
   const { board, error, loading } = useLeaderboard();
-  const summary = useMemo(() => (board ? summarize(board) : null), [board]);
 
   return (
     <main className={styles.page}>
@@ -32,7 +29,6 @@ export function Leaderboard() {
         </p>
       </div>
 
-      {summary && <StatStrip summary={summary} />}
       {error && <p className={styles.error}>{error}</p>}
 
       <p className={styles.status} role="status">

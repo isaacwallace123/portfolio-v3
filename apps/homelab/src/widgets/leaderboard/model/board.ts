@@ -1,10 +1,6 @@
-import type {
-  LeaderboardEntry,
-  LeaderboardView,
-} from "@/shared/api/live-client";
-import { clock } from "@/shared/lib/format";
+import type { LeaderboardEntry } from "@/shared/api/live-client";
 
-/** How many places the podium stands, and therefore how deep the summary reads. */
+/** How many places the podium stands, and therefore how deep the board reads before its table. */
 export const PODIUM_PLACES = [1, 2, 3] as const;
 export type Place = (typeof PODIUM_PLACES)[number];
 
@@ -26,25 +22,6 @@ export function toPodium(entries: LeaderboardEntry[]): PodiumSlot[] {
     place,
     entry: entries[place - 1] ?? null,
   }));
-}
-
-export interface BoardSummary {
-  /** How many operators hold a place at all. */
-  operators: string;
-  /** Cascades with a record set, over cascades that exist. */
-  claimed: string;
-  /** The single fastest ranked run anyone has recorded. */
-  fastest: string;
-}
-
-export function summarize(board: LeaderboardView): BoardSummary {
-  const claimed = board.byDrill.filter((d) => d.entries.length > 0).length;
-  const times = board.overall.map((e) => e.bestMs).filter(Boolean);
-  return {
-    operators: String(board.overall.length),
-    claimed: `${claimed}/${board.byDrill.length}`,
-    fastest: times.length ? clock(Math.min(...times)) : "--:--",
-  };
 }
 
 /** The time a row is ranked on: an average across cascades overall, a single record per drill. */

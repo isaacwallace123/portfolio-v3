@@ -21,7 +21,7 @@
 }
 
 .heading {
-  margin-bottom: 30px;
+  margin-bottom: 46px;
 }
 .heading h1 {
   max-width: 920px;
@@ -49,50 +49,6 @@
   background: var(--mint);
   box-shadow: 0 0 0 0 color-mix(in srgb, var(--mint) 55%, transparent);
   animation: ping 2.4s ease-out infinite;
-}
-
-/* Summary strip — three numbers that frame the board before it is read. */
-.stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 14px;
-  margin-bottom: 46px;
-}
-.stat {
-  padding: 15px 18px 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
-  background: var(--surface);
-  animation: rise 640ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
-  animation-delay: calc(var(--i, 0) * 70ms);
-  transition:
-    transform var(--dur-base) cubic-bezier(0.16, 1, 0.3, 1),
-    border-color var(--dur-base);
-}
-.stat:hover {
-  transform: translateY(-3px);
-  border-color: color-mix(in srgb, var(--mint) 40%, var(--line));
-}
-.statIcon {
-  display: inline-flex;
-  color: var(--mint);
-}
-.stat strong {
-  display: block;
-  margin: 8px 0 4px;
-  color: var(--ink);
-  font-size: 27px;
-  font-weight: 540;
-  letter-spacing: -0.035em;
-  font-variant-numeric: tabular-nums;
-}
-.stat small {
-  color: var(--ink-dim);
-  font:
-    700 9px/1 ui-monospace,
-    monospace;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
 }
 
 .sectionHead {
