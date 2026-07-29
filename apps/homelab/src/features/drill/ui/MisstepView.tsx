@@ -3,7 +3,7 @@
 import { ArrowRight, Gauge, Loader2, ShieldX, TrendingDown } from "lucide-react";
 import { endDrill, type DrillOption, type LiveRunView } from "@/shared/api/live-client";
 import { consequencesOf, type DecisionRecord } from "../model/impact";
-import { clock } from "../lib/format";
+import { clock } from "@/shared/lib/format";
 import styles from "../drill.module.css";
 
 type Act = (key: string, fn: () => Promise<LiveRunView | void>) => void;

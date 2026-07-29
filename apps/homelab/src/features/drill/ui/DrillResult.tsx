@@ -6,7 +6,7 @@ import {
   type DrillCatalogEntry,
   type LiveRunView,
 } from "@/shared/api/live-client";
-import { clock } from "../lib/format";
+import { clock } from "@/shared/lib/format";
 import styles from "../drill.module.css";
 
 type Act = (key: string, fn: () => Promise<LiveRunView | void>) => void;

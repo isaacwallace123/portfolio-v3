@@ -1,0 +1,636 @@
+/* The ranked board owns its own styling.
+ *
+ * These rules used to sit at the bottom of the app's 2900-line globals.css under a `board-` prefix,
+ * where the only thing keeping them from colliding with the rest of the site was that prefix. They
+ * are scoped to the slice now and share one set of primitives, like the drill surface and the
+ * workbench do.
+ *
+ * Medal accents come out of the palette so both themes stay honest: amber gold, dimmed-ink silver,
+ * cyber-orange bronze. Everything else is brand green. */
+
+.page {
+  --gold: var(--amber);
+  --silver: var(--ink-dim);
+  --bronze: var(--lab-cyber);
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 70px 28px 90px;
+}
+
+.heading {
+  margin-bottom: 30px;
+}
+.heading h1 {
+  max-width: 920px;
+  margin: 20px 0 24px;
+  color: var(--ink);
+  font-size: clamp(46px, 5vw, 74px);
+  font-weight: 520;
+  line-height: 0.94;
+  letter-spacing: -0.075em;
+}
+.heading h1 em {
+  color: var(--acid);
+  font-style: normal;
+}
+.lede {
+  max-width: 760px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.75;
+}
+.liveDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--mint);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--mint) 55%, transparent);
+  animation: ping 2.4s ease-out infinite;
+}
+
+/* Summary strip — three numbers that frame the board before it is read. */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin-bottom: 46px;
+}
+.stat {
+  padding: 15px 18px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  animation: rise 640ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 70ms);
+  transition:
+    transform var(--dur-base) cubic-bezier(0.16, 1, 0.3, 1),
+    border-color var(--dur-base);
+}
+.stat:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--mint) 40%, var(--line));
+}
+.statIcon {
+  display: inline-flex;
+  color: var(--mint);
+}
+.stat strong {
+  display: block;
+  margin: 8px 0 4px;
+  color: var(--ink);
+  font-size: 27px;
+  font-weight: 540;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+}
+.stat small {
+  color: var(--ink-dim);
+  font:
+    700 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin: 0 0 16px;
+}
+.card + .sectionHead {
+  margin-top: 34px;
+}
+.sectionHead h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 560;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+}
+.sectionHead p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.sectionHead::after {
+  content: "";
+  flex: 1;
+  min-width: 30px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--line-2), transparent);
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: draw 640ms cubic-bezier(0.16, 1, 0.3, 1) 120ms forwards;
+}
+
+/* Podium — the top three, with places nobody holds left standing as open slots. */
+.podium {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-items: end;
+  gap: 18px;
+  margin: 0 0 48px;
+  padding: 0;
+  list-style: none;
+}
+.slot {
+  --place: var(--silver);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 20px 20px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--place) 9%, transparent),
+      transparent 62%
+    ),
+    var(--surface);
+  animation: rise 700ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 90ms);
+  transition:
+    transform var(--dur-slow) cubic-bezier(0.16, 1, 0.3, 1),
+    border-color var(--dur-base),
+    box-shadow var(--dur-slow);
+}
+.slot::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, var(--place), transparent);
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: draw 760ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation-delay: calc(var(--i, 0) * 90ms + 160ms);
+}
+.slot:hover {
+  transform: translateY(-4px);
+  border-color: color-mix(in srgb, var(--place) 42%, var(--line));
+  box-shadow: var(--shadow-2);
+}
+.slot[data-place="1"] {
+  --place: var(--gold);
+  padding: 28px 22px 22px;
+}
+.slot[data-place="3"] {
+  --place: var(--bronze);
+}
+/* A slow sheen across the champion card only — one moving thing, not three. */
+.slot[data-place="1"]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -45%;
+  width: 38%;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    color-mix(in srgb, var(--gold) 14%, transparent),
+    transparent
+  );
+  animation: sheen 6s ease-in-out 1.4s infinite;
+}
+.place {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--place);
+  font:
+    700 9.5px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.name {
+  display: flex;
+  align-items: center;
+  margin-top: 14px;
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 560;
+  letter-spacing: -0.02em;
+}
+.time {
+  margin-top: 10px;
+  color: var(--ink);
+  font:
+    500 34px/1 ui-monospace,
+    monospace;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.slot[data-place="1"] .time {
+  color: var(--gold);
+  font-size: 42px;
+  text-shadow: 0 0 26px color-mix(in srgb, var(--gold) 26%, transparent);
+}
+.caption {
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.meta {
+  display: flex;
+  gap: 26px;
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+.meta dt {
+  color: var(--ink-dim);
+  font:
+    700 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.meta dd {
+  margin: 6px 0 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.slot.open {
+  border-style: dashed;
+  background: transparent;
+}
+.slot.open .place,
+.slot.open .name {
+  color: var(--ink-dim);
+}
+.slot.open .time {
+  color: var(--ink-dim);
+  opacity: 0.5;
+  text-shadow: none;
+}
+.slot.you {
+  border-color: color-mix(in srgb, var(--acid) 45%, var(--line));
+}
+
+/* Per-drill boards sit side by side: short tables read better as a wall than as a column. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 22px;
+}
+.card {
+  margin-bottom: 22px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  animation: rise 640ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 70ms);
+  transition:
+    transform var(--dur-slow) cubic-bezier(0.16, 1, 0.3, 1),
+    border-color var(--dur-base),
+    box-shadow var(--dur-slow);
+}
+.grid .card {
+  margin-bottom: 0;
+}
+.grid .card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--mint) 38%, var(--line));
+  box-shadow: var(--shadow-2);
+}
+.card.open {
+  background: transparent;
+  border-style: dashed;
+}
+.head {
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.card.open .head {
+  padding-bottom: 0;
+  border-bottom-color: transparent;
+}
+.head h2 {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 560;
+  letter-spacing: -0.02em;
+}
+.head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th {
+  padding: 10px 20px;
+  color: var(--ink-dim);
+  text-align: left;
+  font:
+    700 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line);
+}
+.table td {
+  padding: 11px 20px;
+  color: var(--ink);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
+.table tr:last-child td {
+  border-bottom: 0;
+}
+.table tbody tr {
+  animation: rise 560ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 55ms + 140ms);
+  transition: background var(--dur-fast) linear;
+}
+.table tbody tr:hover {
+  background: color-mix(in srgb, var(--mint) 7%, transparent);
+}
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.num.clean {
+  color: var(--mint);
+}
+.rank {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.operator {
+  white-space: nowrap;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 36px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+  color: var(--muted);
+  font:
+    700 11px/1 ui-monospace,
+    monospace;
+  font-variant-numeric: tabular-nums;
+}
+.badge[data-rank="1"] {
+  border-color: color-mix(in srgb, var(--gold) 45%, var(--line));
+  background: color-mix(in srgb, var(--gold) 13%, transparent);
+  color: var(--gold);
+}
+.badge[data-rank="2"] {
+  border-color: color-mix(in srgb, var(--silver) 45%, var(--line));
+  color: var(--silver);
+}
+.badge[data-rank="3"] {
+  border-color: color-mix(in srgb, var(--bronze) 45%, var(--line));
+  background: color-mix(in srgb, var(--bronze) 11%, transparent);
+  color: var(--bronze);
+}
+
+/* A share-of-the-record bar under each time. */
+.timeCell {
+  position: relative;
+}
+.bar {
+  position: absolute;
+  right: 20px;
+  bottom: 6px;
+  width: 66px;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line-2) 70%, transparent);
+}
+.bar::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: var(--w, 100%);
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--mint), var(--acid));
+  transform: scaleX(0);
+  transform-origin: right;
+  animation: draw 700ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation-delay: calc(var(--i, 0) * 55ms + 320ms);
+}
+
+.youRow {
+  background: color-mix(in srgb, var(--acid) 9%, transparent);
+}
+.youRow td {
+  color: var(--ink);
+  font-weight: 560;
+}
+.tag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--acid) 45%, var(--line));
+  border-radius: 999px;
+  color: var(--acid);
+  font-style: normal;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Unclaimed record: an invitation, not an apology. */
+.unclaimed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 20px;
+}
+.unclaimedMark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px dashed color-mix(in srgb, var(--line-2) 90%, transparent);
+  border-radius: 999px;
+  color: var(--ink-dim);
+  animation: breathe 3.8s ease-in-out infinite;
+  transition:
+    color var(--dur-base),
+    border-color var(--dur-base);
+}
+.card:hover .unclaimedMark {
+  border-color: color-mix(in srgb, var(--acid) 45%, var(--line));
+  color: var(--acid);
+}
+.unclaimed strong {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 560;
+}
+.unclaimed p {
+  max-width: 34ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.status {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.status:empty {
+  display: none;
+}
+.error {
+  margin: 0 0 22px;
+  padding: 14px 18px;
+  border: 1px solid color-mix(in srgb, var(--red) 40%, var(--line));
+  border-radius: 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ghost {
+  position: relative;
+  overflow: hidden;
+  min-height: 176px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+}
+.ghost[data-place="1"] {
+  min-height: 214px;
+}
+.ghost::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 22%,
+    color-mix(in srgb, var(--ink) 7%, transparent) 50%,
+    transparent 78%
+  );
+  transform: translateX(-100%);
+  animation: shimmer 1.6s linear infinite;
+  animation-delay: calc(var(--i, 0) * 140ms);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+@keyframes draw {
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes sheen {
+  0% {
+    transform: translateX(0);
+  }
+  55%,
+  100% {
+    transform: translateX(430%);
+  }
+}
+@keyframes breathe {
+  50% {
+    transform: scale(1.07);
+    opacity: 0.72;
+  }
+}
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes ping {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--mint) 55%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
+/* Champion centre-stage only where three cards fit side by side. */
+@media (min-width: 861px) {
+  .slot[data-place="1"] {
+    order: 2;
+  }
+  .slot[data-place="2"] {
+    order: 1;
+  }
+  .slot[data-place="3"] {
+    order: 3;
+  }
+}
+@media (max-width: 860px) {
+  .podium {
+    grid-template-columns: 1fr;
+  }
+  .slot[data-place="1"] {
+    padding: 22px 20px 20px;
+  }
+}
+@media (max-width: 680px) {
+  .page {
+    padding-inline: 16px;
+  }
+  .sectionHead {
+    flex-wrap: wrap;
+  }
+  .sectionHead p {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .table th,
+  .table td {
+    padding-inline: 14px;
+  }
+  .bar {
+    display: none;
+  }
+}
+
+/* Both motion switches leave the board fully readable: every animation here is a decoration on
+   content that is already in its resting position. The global kill-switch collapses durations; the
+   looping ambients have to be stopped outright. */
+@media (prefers-reduced-motion: reduce) {
+  .liveDot,
+  .slot[data-place="1"]::after,
+  .unclaimedMark,
+  .ghost::after {
+    animation: none;
+  }
+}
+:global(html[data-reduce-motion]) .liveDot,
+:global(html[data-reduce-motion]) .slot[data-place="1"]::after,
+:global(html[data-reduce-motion]) .unclaimedMark,
+:global(html[data-reduce-motion]) .ghost::after {
+  animation: none;
+}

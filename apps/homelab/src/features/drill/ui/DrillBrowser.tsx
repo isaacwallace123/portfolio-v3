@@ -2,15 +2,10 @@
 
 import { ChevronRight, Layers, Loader2, Trophy, Zap } from "lucide-react";
 import { startDrill, type DrillCatalogEntry, type LiveRunView } from "@/shared/api/live-client";
-import { clock } from "@/features/drill/lib/format";
+import { clock, clockOrDash as time } from "@/shared/lib/format";
 import styles from "../drill.module.css";
 
 type Act = (key: string, fn: () => Promise<LiveRunView | void>) => void;
-
-/** A recorded time, or an em dash when nobody has set one yet. */
-function time(ms: number | null | undefined) {
-  return ms && ms > 0 ? clock(ms) : "—";
-}
 
 function DrillRow({
   drill,

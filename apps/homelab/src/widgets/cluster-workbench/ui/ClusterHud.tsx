@@ -6,7 +6,7 @@ import type {
   LiveTrace,
   RunComponent,
 } from "@/shared/api/live-client";
-import { clock } from "../lib/format";
+import { clock } from "@/shared/lib/format";
 import { SERVICES, type ServiceId } from "../model/topology";
 import styles from "../workbench.module.css";
 

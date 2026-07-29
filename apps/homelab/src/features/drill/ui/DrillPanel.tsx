@@ -11,7 +11,7 @@ import { MisstepView } from "./MisstepView";
 import { ObjectiveList } from "./ObjectiveList";
 import { StageBrief } from "./StageBrief";
 import { StageTrack } from "./StageTrack";
-import { clock } from "../lib/format";
+import { clock } from "@/shared/lib/format";
 import styles from "../drill.module.css";
 
 type Act = (key: string, fn: () => Promise<LiveRunView | void>) => void;
