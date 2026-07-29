@@ -1,4 +1,4 @@
-import { guard, jsonNoStore } from "@/shared/api/guard";
+import { guardPublic, jsonNoStore } from "@/shared/api/guard";
 import {
   toLeaderboardView,
   type RawLeaderboard,
@@ -7,21 +7,23 @@ import { liveFetch } from "@/shared/api/live-server";
 
 // GET /api/live/leaderboard — ranked standings across the multi-stage drills.
 //
-// Signed in like every other live route, so the board can mark which row is yours. It shows the
-// display names operators solved under, and nothing else about them.
+// Public, unlike the rest of /api/live/*: a leaderboard nobody can read until they have an account
+// is not a leaderboard. A session is optional and only decides whether a row comes back marked as
+// yours — the API already treats an absent owner key as "no row is yours". Either way the board
+// shows the display names operators solved under, and nothing else about them.
 export const dynamic = "force-dynamic";
 
 /** Deep enough that the board is a standing rather than a podium, shallow enough to stay one page. */
 const BOARD_LIMIT = 25;
 
 export async function GET(req: Request) {
-  const g = await guard(req);
+  const g = await guardPublic(req);
   if (!g.ok) return g.response;
 
   const res = await liveFetch(
     `/v1/leaderboard?limit=${BOARD_LIMIT}`,
     undefined,
-    g.caller.owner,
+    g.caller?.owner,
   );
   const payload = await res.json().catch(() => ({}));
 

@@ -19,6 +19,7 @@ import { liveEnabled } from "@/shared/api/live-server";
 const LIMITS = {
   provision: { max: 5, windowMs: 60 * 60_000 }, // 5 clusters per hour
   action: { max: 120, windowMs: 60_000 }, // 120 control actions per minute
+  read: { max: 60, windowMs: 60_000 }, // 60 public reads per minute
 } as const;
 
 type Bucket = { count: number; resetAt: number };
@@ -46,6 +47,11 @@ function rateLimit(key: string, kind: keyof typeof LIMITS): boolean {
 
 export type GuardResult =
   { ok: true; caller: CallerIdentity } | { ok: false; response: NextResponse };
+
+/** Same, for a read anyone may make — the caller is who they are if they happen to be signed in. */
+export type PublicGuardResult =
+  | { ok: true; caller: CallerIdentity | null }
+  | { ok: false; response: NextResponse };
 
 const NO_STORE = { "Cache-Control": "no-store", "X-Robots-Tag": "noindex" };
 
@@ -83,6 +89,37 @@ export async function guard(
           ? "You have provisioned too many clusters recently. Try again later."
           : "Too many actions. Slow down for a moment.",
       ),
+    };
+
+  return { ok: true, caller };
+}
+
+/** Rate-limit key for a caller with no session: the edge-supplied client address, falling back to
+ *  one shared bucket. This layer is throttling rather than a boundary, so a coarse key is fine. */
+function anonymousKey(req: Request): string {
+  const ip =
+    req.headers.get("cf-connecting-ip") ??
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return `anon:${ip || "unknown"}`;
+}
+
+/**
+ * Guard for public reads. The ranked board is something you look at, not something you do — it is
+ * published to anyone, and a session only decides whether a row can be marked as yours. Signing in
+ * is required to *touch* a cluster, which is what guard() above is for.
+ */
+export async function guardPublic(req: Request): Promise<PublicGuardResult> {
+  if (!liveEnabled())
+    return {
+      ok: false,
+      response: deny(503, "Live control is not configured."),
+    };
+
+  const caller = await getCaller(req);
+  if (!rateLimit(caller?.owner ?? anonymousKey(req), "read"))
+    return {
+      ok: false,
+      response: deny(429, "Too many requests. Try again in a moment."),
     };
 
   return { ok: true, caller };
