@@ -8,6 +8,7 @@ import {
   Gauge,
   Loader2,
   PartyPopper,
+  ShieldCheck,
   Square,
 } from "lucide-react";
 import {
@@ -90,12 +91,18 @@ function DrillSolved({
   busy: string | null;
   act: Act;
 }) {
+  // The incident really was resolved, so the drill really is over — an incident cannot be
+  // un-resolved by how you got there. But getting there by applying an action that does not work is
+  // not the same result, and celebrating it identically teaches that it is. A clean resolution is
+  // congratulated; one carrying missteps is acknowledged, and says what they cost.
+  const clean = run.drillWrongChosen === 0;
+
   return (
-    <div className={styles.solved}>
+    <div className={`${styles.solved} ${clean ? "" : styles.solvedMessy}`}>
       <span className={styles.solvedIcon}>
-        <PartyPopper size={22} />
+        {clean ? <PartyPopper size={22} /> : <ShieldCheck size={22} />}
       </span>
-      <b>Drill complete</b>
+      <b>{clean ? "Drill complete" : "Resolved, the hard way"}</b>
       <p className={styles.solvedName}>{title}</p>
       <div className={styles.scoreRow}>
         <div>
@@ -115,6 +122,15 @@ function DrillSolved({
           <b>{clock(run.elapsedMs)}</b>
         </div>
       </div>
+      <p className={styles.solvedSub}>
+        {clean
+          ? "Straight to the actions that worked, with nothing wasted."
+          : `You reached the objective, but ${
+              run.drillWrongChosen === 1
+                ? "one action along the way did not help"
+                : `${run.drillWrongChosen} actions along the way did not help`
+            } — and each was really applied to this cluster, so its effects are still there.`}
+      </p>
       <p className={styles.solvedSub}>
         The cluster is still yours — run another drill on it, or keep
         experimenting with the controls.

@@ -145,7 +145,8 @@ export default function ClusterWorkbench() {
 
   return (
     <div className={styles.shell}>
-      {run.drillSolved && <Celebration />}
+      {/* Confetti is for a clean resolution. Firing it after a misstep congratulates the misstep. */}
+      {run.drillSolved && run.drillWrongChosen === 0 && <Celebration />}
 
       {offerRenewal && (
         <RenewalModal

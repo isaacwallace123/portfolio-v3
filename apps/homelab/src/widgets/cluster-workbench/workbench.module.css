@@ -1782,3 +1782,12 @@
   margin-top: 2px;
   color: var(--mint);
 }
+
+/* Resolved, but not cleanly. Same shape as a clean result, deliberately not the same colour. */
+.solvedMessy {
+  border-color: color-mix(in srgb, var(--amber) 40%, var(--line));
+  background: color-mix(in srgb, var(--amber) 7%, transparent);
+}
+.solvedMessy .solvedIcon svg {
+  color: var(--amber);
+}
