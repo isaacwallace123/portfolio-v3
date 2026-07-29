@@ -1,0 +1,834 @@
+/* The live topology owns its own styling.
+ *
+ * These rules used to be spread across two overlapping blocks in the app's globals.css — one
+ * defining `.topology-page`, `.topology-heading` and `.topology-toolbar` shared with the overview
+ * hero, and a second, later block redefining the same selectors. Whichever won depended on source
+ * order, which is not a design decision. Scoped to the slice, like the workbench and the board.
+ *
+ * Layer colours are declared once, here, and everything else reads them through data-layer: the
+ * node spine, the connector, the legend swatch, and the inspector accent all stay in step because
+ * there is only one place to change. Both palettes are defined; the light one is not a filter over
+ * the dark one, because a mid-tone that reads as "healthy" on ink reads as washed out on paper. */
+
+.page {
+  --flow-compute: #6ea8ff;
+  --flow-network: #3fdad0;
+  --flow-platform: var(--mint);
+  --flow-data: #c98cff;
+  --flow-observe: var(--amber);
+  --flow-apps: var(--acid);
+  --flow-idle: var(--line-2);
+  --flow-node-bg: rgba(10, 28, 23, 0.94);
+  --flow-grid: rgba(177, 255, 203, 0.05);
+
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 70px 28px 80px;
+}
+
+:global(:root[data-theme="light"]) .page {
+  --flow-compute: #2f5fd0;
+  --flow-network: #067c78;
+  --flow-data: #7a3fc4;
+  --flow-node-bg: rgba(255, 255, 255, 0.96);
+  --flow-grid: rgba(12, 80, 54, 0.06);
+}
+
+/* ── heading ──────────────────────────────────────────────────────────────── */
+
+.heading {
+  margin-bottom: 34px;
+}
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-dim);
+  font:
+    700 10px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.heading h1 {
+  max-width: 920px;
+  margin: 18px 0 22px;
+  color: var(--ink);
+  font-size: clamp(44px, 5vw, 72px);
+  font-weight: 520;
+  line-height: 0.94;
+  letter-spacing: -0.075em;
+}
+.heading h1 em {
+  color: var(--acid);
+  font-style: normal;
+}
+.lede {
+  max-width: 760px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+/* ── shell ────────────────────────────────────────────────────────────────── */
+
+.workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 20px;
+  align-items: start;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+/* ── toolbar ──────────────────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  min-height: 54px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-dim);
+  font:
+    700 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.12em;
+}
+.liveTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.liveDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--ink-dim);
+}
+.liveDot[data-live] {
+  background: var(--mint);
+  box-shadow: 0 0 10px var(--mint);
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 170px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-dim);
+  transition: border-color var(--dur-base) ease;
+}
+.search:focus-within {
+  border-color: var(--line-2);
+}
+.search input {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font:
+    600 11px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.02em;
+  outline: none;
+}
+.search input::placeholder {
+  color: var(--ink-dim);
+}
+.search input::-webkit-search-cancel-button {
+  display: none;
+}
+.search button {
+  display: grid;
+  place-items: center;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.search button:hover {
+  color: var(--ink);
+}
+
+.layerPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-left: auto;
+}
+.layerPills button {
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-dim);
+  font: inherit;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    background var(--dur-fast) ease;
+}
+.layerPills button:hover {
+  color: var(--ink);
+  border-color: var(--line-2);
+}
+.layerPills button[data-active] {
+  border-color: transparent;
+  background: var(--ink);
+  color: var(--base);
+}
+.layerPills button[data-active][data-layer="compute"] {
+  background: var(--flow-compute);
+  color: #04121f;
+}
+.layerPills button[data-active][data-layer="network"] {
+  background: var(--flow-network);
+  color: #021917;
+}
+.layerPills button[data-active][data-layer="platform"] {
+  background: var(--flow-platform);
+  color: var(--on-accent);
+}
+.layerPills button[data-active][data-layer="data"] {
+  background: var(--flow-data);
+  color: #180628;
+}
+.layerPills button[data-active][data-layer="observe"] {
+  background: var(--flow-observe);
+  color: #1e1403;
+}
+.layerPills button[data-active][data-layer="apps"] {
+  background: var(--flow-apps);
+  color: var(--on-accent);
+}
+
+.count {
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+
+/* ── canvas ───────────────────────────────────────────────────────────────── */
+
+.canvas {
+  position: relative;
+}
+.frame {
+  height: clamp(440px, 56vh, 660px);
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  /* A faint grid gives the pan something to move against — without it, dragging an unanchored
+     diagram feels like nothing is happening until a box crosses the edge. */
+  background-image:
+    linear-gradient(var(--flow-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--flow-grid) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+.frame[data-panning] {
+  cursor: grabbing;
+}
+.svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.zoom {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--line);
+}
+.zoom button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  background: var(--surface);
+  color: var(--ink-dim);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) ease,
+    background var(--dur-fast) ease;
+}
+.zoom button:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.hint {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  color: var(--ink-dim);
+  font:
+    600 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+/* ── connectors ───────────────────────────────────────────────────────────── */
+
+.edges {
+  pointer-events: none;
+}
+.edge {
+  pointer-events: stroke;
+  --wire: var(--flow-idle);
+}
+.edge[data-layer="compute"] {
+  --wire: var(--flow-compute);
+}
+.edge[data-layer="network"] {
+  --wire: var(--flow-network);
+}
+.edge[data-layer="platform"] {
+  --wire: var(--flow-platform);
+}
+.edge[data-layer="data"] {
+  --wire: var(--flow-data);
+}
+.edge[data-layer="observe"] {
+  --wire: var(--flow-observe);
+}
+.edge[data-layer="apps"] {
+  --wire: var(--flow-apps);
+}
+
+.edgeLine {
+  fill: none;
+  stroke: var(--flow-idle);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition:
+    stroke var(--dur-base) ease,
+    stroke-width var(--dur-base) ease,
+    opacity var(--dur-base) ease;
+}
+.edgeArrow {
+  fill: var(--flow-idle);
+  transition:
+    fill var(--dur-base) ease,
+    opacity var(--dur-base) ease;
+}
+/* "hosts" is a physical relationship, not a request path — dashed so it reads differently. */
+.edge[data-hosts] .edgeLine {
+  stroke-dasharray: 5 5;
+}
+.edge[data-lit] .edgeLine {
+  stroke: var(--wire);
+  stroke-width: 2.2;
+}
+.edge[data-lit] .edgeArrow {
+  fill: var(--wire);
+}
+.edge[data-dim] {
+  opacity: 0.18;
+}
+
+/* ── nodes ────────────────────────────────────────────────────────────────── */
+
+.node {
+  cursor: pointer;
+  --accent-layer: var(--flow-idle);
+  transition: opacity var(--dur-base) ease;
+}
+.node[data-layer="compute"] {
+  --accent-layer: var(--flow-compute);
+}
+.node[data-layer="network"] {
+  --accent-layer: var(--flow-network);
+}
+.node[data-layer="platform"] {
+  --accent-layer: var(--flow-platform);
+}
+.node[data-layer="data"] {
+  --accent-layer: var(--flow-data);
+}
+.node[data-layer="observe"] {
+  --accent-layer: var(--flow-observe);
+}
+.node[data-layer="apps"] {
+  --accent-layer: var(--flow-apps);
+}
+.node[data-dim] {
+  opacity: 0.32;
+}
+.node:focus {
+  outline: none;
+}
+
+.nodeBox {
+  fill: var(--flow-node-bg);
+  stroke: var(--line-2);
+  stroke-width: 1.1;
+  transition:
+    stroke var(--dur-base) ease,
+    stroke-width var(--dur-base) ease;
+}
+.node:hover .nodeBox,
+.node:focus-visible .nodeBox {
+  stroke: var(--accent-layer);
+  stroke-width: 1.8;
+}
+.node[data-selected] .nodeBox {
+  stroke: var(--accent-layer);
+  stroke-width: 2.2;
+}
+
+.nodeSpine {
+  fill: var(--accent-layer);
+  opacity: 0.85;
+}
+
+.nodeStatus {
+  fill: var(--mint);
+}
+.nodeStatus[data-status="degraded"] {
+  fill: var(--amber);
+}
+.nodeStatus[data-status="unavailable"] {
+  fill: var(--red);
+}
+
+.nodeLabel {
+  fill: var(--ink);
+  font:
+    700 12px/1 ui-monospace,
+    monospace;
+  letter-spacing: -0.01em;
+}
+.nodeMeta {
+  fill: var(--ink-dim);
+  font:
+    600 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.06em;
+}
+.nodeCount {
+  fill: var(--ink-mid);
+  font-weight: 700;
+}
+.nodeCount[data-short] {
+  fill: var(--amber);
+}
+
+/* ── legend ───────────────────────────────────────────────────────────────── */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-dim);
+  font:
+    600 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.legend [data-layer="compute"] {
+  color: var(--flow-compute);
+}
+.legend [data-layer="network"] {
+  color: var(--flow-network);
+}
+.legend [data-layer="platform"] {
+  color: var(--flow-platform);
+}
+.legend [data-layer="data"] {
+  color: var(--flow-data);
+}
+.legend [data-layer="observe"] {
+  color: var(--flow-observe);
+}
+.legend [data-layer="apps"] {
+  color: var(--flow-apps);
+}
+.legendHosts {
+  margin-left: auto;
+}
+.legendHosts i {
+  width: 22px;
+  border-top: 1.4px dashed var(--ink-dim);
+}
+
+/* ── loading ──────────────────────────────────────────────────────────────── */
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: clamp(440px, 56vh, 660px);
+  color: var(--ink-dim);
+  font:
+    600 12px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.08em;
+}
+.spin {
+  animation: spin 1.1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── inspector ────────────────────────────────────────────────────────────── */
+
+.inspector {
+  position: sticky;
+  top: 88px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.inspectorHead {
+  --accent-layer: var(--mint);
+}
+.inspectorHead[data-layer="compute"] {
+  --accent-layer: var(--flow-compute);
+}
+.inspectorHead[data-layer="network"] {
+  --accent-layer: var(--flow-network);
+}
+.inspectorHead[data-layer="platform"] {
+  --accent-layer: var(--flow-platform);
+}
+.inspectorHead[data-layer="data"] {
+  --accent-layer: var(--flow-data);
+}
+.inspectorHead[data-layer="observe"] {
+  --accent-layer: var(--flow-observe);
+}
+.inspectorHead[data-layer="apps"] {
+  --accent-layer: var(--flow-apps);
+}
+.inspectorTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.statusTag,
+.layerTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font:
+    700 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.statusTag {
+  color: var(--mint);
+}
+.statusTag i {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.statusTag[data-status="degraded"] {
+  color: var(--amber);
+}
+.statusTag[data-status="unavailable"] {
+  color: var(--red);
+}
+.layerTag {
+  color: var(--accent-layer);
+}
+.inspectorHead h2 {
+  color: var(--ink);
+  font-size: 26px;
+  font-weight: 560;
+  line-height: 1.1;
+  letter-spacing: -0.045em;
+}
+.inspectorHead p {
+  margin-top: 4px;
+  color: var(--ink-dim);
+  font:
+    600 10px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.description {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--line);
+}
+.metrics > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 2px 9px;
+  padding: 12px;
+  background: var(--surface);
+  color: var(--ink-dim);
+}
+.metrics svg {
+  grid-row: span 2;
+  color: var(--ink-dim);
+}
+.metrics dt {
+  font:
+    600 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.metrics dd {
+  color: var(--ink);
+  font:
+    700 16px/1 ui-monospace,
+    monospace;
+  letter-spacing: -0.03em;
+}
+.metrics dd[data-short] {
+  color: var(--amber);
+}
+
+.relations strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 9px;
+  color: var(--ink-dim);
+  font:
+    700 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.relations > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.relations button {
+  --accent-layer: var(--ink-dim);
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-mid);
+  font:
+    600 10px/1 ui-monospace,
+    monospace;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease;
+}
+.relations button:hover {
+  color: var(--accent-layer);
+  border-color: var(--accent-layer);
+}
+.relations button[data-layer="compute"] {
+  --accent-layer: var(--flow-compute);
+}
+.relations button[data-layer="network"] {
+  --accent-layer: var(--flow-network);
+}
+.relations button[data-layer="platform"] {
+  --accent-layer: var(--flow-platform);
+}
+.relations button[data-layer="data"] {
+  --accent-layer: var(--flow-data);
+}
+.relations button[data-layer="observe"] {
+  --accent-layer: var(--flow-observe);
+}
+.relations button[data-layer="apps"] {
+  --accent-layer: var(--flow-apps);
+}
+
+.observed {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-dim);
+  font:
+    600 10px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.06em;
+}
+
+.componentList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 280px;
+  padding-top: 16px;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+}
+.componentList strong {
+  position: sticky;
+  top: 0;
+  padding-bottom: 8px;
+  background: var(--surface);
+  color: var(--ink-dim);
+  font:
+    700 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.componentList button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: var(--radius-md);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) ease;
+}
+.componentList button:hover {
+  background: var(--surface-2);
+}
+.componentList button[data-selected] {
+  background: var(--surface-2);
+}
+.componentList span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.componentList b {
+  color: var(--ink);
+  font:
+    650 11px/1.2 ui-monospace,
+    monospace;
+}
+.componentList small {
+  color: var(--ink-dim);
+  font:
+    600 9px/1.2 ui-monospace,
+    monospace;
+  letter-spacing: 0.06em;
+}
+.listDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--mint);
+}
+.listDot[data-status="degraded"] {
+  background: var(--amber);
+}
+.listDot[data-status="unavailable"] {
+  background: var(--red);
+}
+
+.source {
+  margin-top: 18px;
+  color: var(--ink-dim);
+  font:
+    600 10px/1.6 ui-monospace,
+    monospace;
+  letter-spacing: 0.04em;
+}
+
+/* ── responsive ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 1100px) {
+  .workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inspector {
+    position: static;
+  }
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: 48px 16px 64px;
+  }
+  .toolbar {
+    gap: 9px;
+  }
+  .layerPills {
+    margin-left: 0;
+  }
+  .frame,
+  .loading {
+    height: 62vh;
+  }
+  .hint {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+  .edgeLine,
+  .edgeArrow,
+  .nodeBox,
+  .node {
+    transition: none;
+  }
+}
