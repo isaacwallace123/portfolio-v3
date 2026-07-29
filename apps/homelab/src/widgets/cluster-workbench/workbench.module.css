@@ -306,268 +306,16 @@
   line-height: 1.55;
   color: var(--ink-dim);
 }
-.drills {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-.drillItem {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 10px;
-  text-align: left;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-.drillItem:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
-}
-.drillItem:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.drillNo {
-  font-size: 10.5px;
-  color: var(--accent);
-}
-.drillItem b {
-  display: block;
-  font-size: 12.5px;
-  color: var(--ink);
-}
-.drillItem small {
-  display: block;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--ink-dim);
-}
-.drillItem svg {
-  color: var(--ink-dim);
-}
+
 /* What the drill has cost people: stages, its par time, everyone's average, and your own best. */
-.drillMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 9px;
-  margin-top: 5px;
-}
-.drillMeta em {
-  font-style: normal;
-  font-size: 10.5px;
-  color: var(--ink-dim);
-  font-variant-numeric: tabular-nums;
-}
-.drillMine {
-  color: var(--mint) !important;
-}
-.drillGroup {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin: 14px 0 2px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-mid);
-}
-.drillGroup span {
-  font-size: 11px;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-  line-height: 1.5;
-  color: var(--ink-dim);
-}
 
 /* Ranked is the headline action, so it is the one thing in the picker that is not a list row. */
-.rankedCard {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 11px;
-  width: 100%;
-  text-align: left;
-  padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: inherit;
-  cursor: pointer;
-}
-.rankedCard:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-}
-.rankedCard:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.rankedCard b {
-  display: block;
-  font-size: 13px;
-  color: var(--ink);
-}
-.rankedCard small {
-  display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--ink-dim);
-}
-.rankedIcon svg {
-  color: var(--accent);
-}
-.rankedTag {
-  margin-left: 7px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  vertical-align: middle;
-}
 
 /* One pip per stage: the shape of a cascade, and where in it you are. */
-.stageTrack {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.stageTrack i {
-  width: 16px;
-  height: 3px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--line) 80%, transparent);
-}
-.stageDone {
-  background: var(--mint) !important;
-}
-.stageNow {
-  background: var(--accent) !important;
-}
-.stageTrack span {
-  margin-left: 4px;
-  font-size: 10.5px;
-  color: var(--ink-dim);
-  font-variant-numeric: tabular-nums;
-}
-.stageName {
-  margin: 0 0 4px !important;
-  font-size: 12px !important;
-  font-weight: 600;
-  color: var(--ink) !important;
-}
 
 /* The handover note between stages: what the last fix caused. Amber because it is a new incident,
    not an error in the page. */
-.handoff {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 0;
-  padding: 10px;
-  border-radius: var(--radius-md);
-  border: 1px solid color-mix(in srgb, var(--amber) 38%, var(--line));
-  background: color-mix(in srgb, var(--amber) 9%, transparent);
-  font-size: 11.5px;
-  line-height: 1.55;
-  color: var(--ink-mid);
-}
-.handoff svg {
-  flex: none;
-  margin-top: 2px;
-  color: var(--amber);
-}
 
-.objective {
-  padding: 11px;
-  border-radius: var(--radius-md);
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-}
-.objective b {
-  display: block;
-  font-size: 13.5px;
-  color: var(--ink);
-  margin-bottom: 3px;
-}
-.objective p {
-  margin: 0 0 6px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--ink-mid);
-}
-.objective span {
-  font-size: 11px;
-  color: var(--ink-dim);
-  font-variant-numeric: tabular-nums;
-}
-.progress {
-  height: 3px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--line) 80%, transparent);
-  overflow: hidden;
-}
-.progress i {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  transition: width var(--dur-slow) linear;
-}
-.decisions {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-.decision {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  text-align: left;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-.decision:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-.decision:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.decision svg {
-  color: var(--accent);
-  margin-top: 1px;
-  flex: none;
-}
-.decision b {
-  display: block;
-  font-size: 12px;
-  color: var(--ink);
-}
-.decision small {
-  display: block;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--ink-dim);
-}
-.decisionDone {
-  border-color: color-mix(in srgb, var(--mint) 45%, var(--line));
-}
 .report {
   padding: 10px;
   border: 1px solid var(--line);
@@ -880,49 +628,6 @@
 }
 
 /* ── drill quiz ──────────────────────────────────────────────────────────── */
-.qHint {
-  margin: 0;
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--ink-dim);
-}
-.qWrap {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.qRight {
-  border-color: color-mix(in srgb, var(--mint) 55%, var(--line)) !important;
-  background: color-mix(in srgb, var(--mint) 8%, transparent);
-}
-.qRight svg {
-  color: var(--mint) !important;
-}
-.qWrong {
-  border-color: color-mix(in srgb, var(--red) 50%, var(--line)) !important;
-  background: color-mix(in srgb, var(--red) 8%, transparent);
-}
-.qWrong svg {
-  color: var(--red) !important;
-}
-.qWhy {
-  margin: 0 0 2px;
-  padding: 8px 10px;
-  font-size: 11px;
-  line-height: 1.5;
-  border-radius: var(--radius-sm);
-  border-left: 2px solid;
-}
-.qWhyOk {
-  color: var(--ink-mid);
-  border-color: var(--mint);
-  background: color-mix(in srgb, var(--mint) 7%, transparent);
-}
-.qWhyBad {
-  color: var(--ink-mid);
-  border-color: var(--red);
-  background: color-mix(in srgb, var(--red) 7%, transparent);
-}
 
 /* pending control while the broker reconciles */
 .segBusy {
@@ -1051,78 +756,13 @@
 }
 
 /* ── solved drill ────────────────────────────────────────────────────────── */
-.solved {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  text-align: center;
-  padding: 18px 12px;
-  border: 1px solid color-mix(in srgb, var(--mint) 40%, var(--line));
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--mint) 8%, transparent);
-}
+
 /* Scoped to the celebration mark. When this matched every icon in the card it also painted the
    button's icon mint on a mint background — invisible, but still occupying its width and gap, which
    read as the label being badly padded. */
-.solvedIcon svg {
-  color: var(--mint);
-}
-.solved b {
-  font-size: 16px;
-  color: var(--ink);
-}
-.solved p {
-  margin: 0;
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: var(--ink-mid);
-}
-.solvedSub {
-  color: var(--ink-dim) !important;
-  font-size: 11.5px !important;
-}
+
 /* What the time is worth: the drill's par, everyone's average, and your own best. A number with
    nothing to compare it against is not a result. */
-.compareRow {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 6px 14px;
-  font-size: 11px;
-  color: var(--ink-dim);
-  font-variant-numeric: tabular-nums;
-}
-.compareRow span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.compareRow svg {
-  color: currentColor;
-}
-.primarySm {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  margin-top: 4px;
-  padding: 9px 16px;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.primarySm svg {
-  color: currentColor;
-}
-.primarySm:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 
 /* ── confetti ────────────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
@@ -1244,49 +884,6 @@
 }
 
 /* ── completed drill panel ───────────────────────────────────────────────── */
-.solvedIcon {
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--mint) 16%, transparent);
-  color: var(--mint);
-}
-.solvedName {
-  margin: -4px 0 2px !important;
-  font-size: 12.5px !important;
-  color: var(--ink-dim) !important;
-}
-.scoreRow {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
-  width: 100%;
-  margin: 6px 0 2px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  background: var(--line);
-}
-.scoreRow > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 9px 6px;
-  background: var(--panel);
-}
-.scoreRow span {
-  font-size: 9.5px;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--ink-dim);
-}
-.scoreRow b {
-  font-size: 15px;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-}
 
 /* ── a column of services, and one card per pod ──────────────────────────── */
 .column {
@@ -1876,76 +1473,28 @@
 }
 
 /* ── drill objective: the conditions that actually end it ────────────────── */
-.goals {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 2px 0 4px;
-}
-.goal {
-  display: grid;
-  grid-template-columns: 14px 1fr auto auto;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  font-size: 11.5px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  color: var(--ink-dim);
-  transition:
-    border-color var(--dur-med) var(--ease),
-    color var(--dur-med) var(--ease);
-}
-.goal svg {
-  opacity: 0.55;
-}
-.goal b {
-  font-weight: 600;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-}
-.goal em {
-  font-style: normal;
-  font-size: 10.5px;
-  opacity: 0.7;
-  font-variant-numeric: tabular-nums;
-}
-.goalMet {
-  border-color: color-mix(in srgb, var(--mint) 45%, var(--line));
-  color: var(--mint);
-}
-.goalMet svg {
-  opacity: 1;
-}
-.goalMet b {
-  color: var(--mint);
-}
 
 /* Every condition is green but the drill has not resolved yet — say why, rather than looking stuck. */
-.holding {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 0;
-  padding: 9px 11px;
-  font-size: 11.5px;
-  line-height: 1.5;
-  border: 1px solid color-mix(in srgb, var(--mint) 35%, var(--line));
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--mint) 7%, transparent);
-  color: var(--ink-mid);
-}
-.holding svg {
-  flex: none;
-  margin-top: 2px;
-  color: var(--mint);
-}
 
 /* Resolved, but not cleanly. Same shape as a clean result, deliberately not the same colour. */
-.solvedMessy {
-  border-color: color-mix(in srgb, var(--amber) 40%, var(--line));
-  background: color-mix(in srgb, var(--amber) 7%, transparent);
+
+/* A tier a drill decision has just moved. The panel explains what happened; this is where it
+   happened — a wrong call is applied to a real workload, and the card that took it says so. */
+.cardImpact {
+  border-color: color-mix(in srgb, var(--red) 60%, var(--line)) !important;
+  animation: cardImpactPulse 1.4s ease-out 3;
 }
-.solvedMessy .solvedIcon svg {
-  color: var(--amber);
+@keyframes cardImpactPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 0%, transparent);
+  }
+  40% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--red) 22%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cardImpact {
+    animation: none;
+  }
 }

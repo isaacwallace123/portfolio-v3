@@ -145,6 +145,8 @@ public sealed class RunBroker
             return BrokerResult.Fail(409, "No drill is running on this cluster.");
         if (view.DrillSolved)
             return BrokerResult.Fail(409, "This drill is already resolved.");
+        if (view.DrillFailed)
+            return BrokerResult.Fail(409, "This ranked attempt is over.");
         if (!ScenarioDefinitions.All.TryGetValue(view.DrillId, out var scenario))
             return BrokerResult.Fail(404, "The scenario definition is not available.");
 
@@ -168,15 +170,24 @@ public sealed class RunBroker
                 409,
                 $"Decision '{decisionId}' unlocks after {decision.AvailableAfterSeconds} seconds of live traffic.");
 
+        // A ranked attempt is one shot. The move is still APPLIED — the cluster really takes the
+        // damage, and being able to watch what a wrong call does to a live workload is the entire
+        // teaching value — but the attempt stops counting from here. Practice drills are unaffected:
+        // that is where you are meant to be wrong.
+        var annotations = new Dictionary<string, string>
+        {
+            [annotationKey] = DateTime.UtcNow.ToString("O"),
+        };
+        var ranked = resource.Metadata.Annotations?.GetValueOrDefault(DrillModeAnnotation) == "ranked";
+        if (ranked && !decision.IsCorrect)
+        {
+            annotations[DrillFailedAnnotation] = DateTime.UtcNow.ToString("O");
+            annotations[DrillFailedMoveAnnotation] = decision.Id;
+        }
+
         var patchBody = new
         {
-            metadata = new
-            {
-                annotations = new Dictionary<string, string>
-                {
-                    [annotationKey] = DateTime.UtcNow.ToString("O"),
-                },
-            },
+            metadata = new { annotations },
             spec = decision.SpecPatch,
         };
         var patch = new k8s.Models.V1Patch(patchBody, k8s.Models.V1Patch.PatchType.MergePatch);
@@ -236,6 +247,8 @@ public sealed class RunBroker
             [DrillStageStartedAnnotation] = now,
             [DrillModeAnnotation] = ranked ? "ranked" : "practice",
             [DrillSolvedAnnotation] = null, // null removes the annotation in a merge patch
+            [DrillFailedAnnotation] = null,
+            [DrillFailedMoveAnnotation] = null,
             [DrillGoalsMetSinceAnnotation] = null,
             [DrillRecordedAnnotation] = null,
         };
@@ -269,6 +282,8 @@ public sealed class RunBroker
         var annotations = new Dictionary<string, string?>
         {
             [DrillSolvedAnnotation] = null,
+            [DrillFailedAnnotation] = null,
+            [DrillFailedMoveAnnotation] = null,
             [DrillGoalsMetSinceAnnotation] = null,
             [DrillStageAnnotation] = null,
             [DrillStageStartedAnnotation] = null,
@@ -794,6 +809,10 @@ public sealed class RunBroker
     public const string DrillModeAnnotation = "homeops.isaacwallace.dev/drill-mode";
     public const string DrillRecordedAnnotation = "homeops.isaacwallace.dev/drill-recorded";
     public const string DecisionAnnotationPrefix = "homeops.isaacwallace.dev/decision-";
+    // A ranked attempt is one shot: the first wrong move ends it. Recorded on the cluster rather
+    // than inferred, so a reload lands on the same verdict and a second api replica agrees with it.
+    public const string DrillFailedAnnotation = "homeops.isaacwallace.dev/drill-failed-at";
+    public const string DrillFailedMoveAnnotation = "homeops.isaacwallace.dev/drill-failed-move";
 
     /// <summary>How long the objective must hold continuously before a stage counts as resolved.</summary>
     public static readonly TimeSpan GoalHold = TimeSpan.FromSeconds(15);
@@ -823,7 +842,11 @@ public sealed class RunBroker
 
         var goals = ScenarioDefinitions.Evaluate(stage, telemetry, resource.Spec);
         var annotations = resource.Metadata.Annotations;
-        if (annotations?.ContainsKey(DrillSolvedAnnotation) == true)
+        // Nothing further is judged once the attempt is decided, either way. A failed ranked run
+        // keeps measuring and drawing — the point is to watch what the wrong move did — but it can
+        // no longer advance a stage or record a time.
+        if (annotations?.ContainsKey(DrillSolvedAnnotation) == true ||
+            annotations?.ContainsKey(DrillFailedAnnotation) == true)
             return new DrillEvaluation(goals, resource);
 
         var heldSince = annotations?.GetValueOrDefault(DrillGoalsMetSinceAnnotation);

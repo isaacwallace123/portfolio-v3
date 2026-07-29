@@ -19,6 +19,9 @@ interface GraphProps {
   intendedPods: (svc: ServiceId) => number;
   /** Why a replica cannot be created, if the cluster has refused it outright. */
   blockedReason: (svc: ServiceId) => string | null;
+  /** Tiers a drill decision has just moved. Marked so the damage is visible where it happened,
+   *  rather than only described in a panel the operator may not be looking at. */
+  impactTiers?: string[];
 }
 
 /** A replica that exists, with its own measured CPU against its own limit. */
@@ -28,6 +31,7 @@ function PodCard({
   limit,
   selected,
   solo,
+  impacted,
   onSelect,
   register,
 }: {
@@ -37,6 +41,7 @@ function PodCard({
   selected: boolean;
   /** The only replica of its tier — name it by role rather than by pod suffix. */
   solo: boolean;
+  impacted: boolean;
   onSelect: () => void;
   register: (el: HTMLElement | null) => void;
 }) {
@@ -49,7 +54,7 @@ function PodCard({
       ref={register}
       className={`${styles.card} ${!pod.ready ? styles.cardStarting : ""} ${
         selected ? styles.cardActive : ""
-      } ${pct > 85 ? styles.cardHot : ""}`}
+      } ${pct > 85 ? styles.cardHot : ""} ${impacted ? styles.cardImpact : ""}`}
       onClick={onSelect}
       title={`${svc}-${pod.name} · ${pod.phase}`}
     >
@@ -183,6 +188,7 @@ export function ClusterGraph({
   cardRefs,
   intendedPods,
   blockedReason,
+  impactTiers = [],
 }: GraphProps) {
   const byName = (n: string) => components.find((c) => c.name === n);
 
@@ -205,6 +211,7 @@ export function ClusterGraph({
               const c = byName(svc);
               const pods = c?.pods ?? [];
               const ghosts = Math.max(0, intendedPods(svc) - pods.length);
+              const hit = impactTiers.includes(svc);
 
               if (pods.length === 0 && ghosts === 0) {
                 return (
@@ -231,6 +238,7 @@ export function ClusterGraph({
                       limit={c?.cpuLimitMillicoresPerPod ?? 0}
                       selected={selected === key}
                       solo={pods.length === 1}
+                      impacted={hit}
                       onSelect={() => onSelect(selected === key ? null : key)}
                       register={(el) => {
                         cardRefs.current[key] = el;

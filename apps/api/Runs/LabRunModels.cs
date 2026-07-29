@@ -197,6 +197,10 @@ public sealed record RunView(
     // happens, so a later dip in a measured signal cannot un-solve it. The counts let the UI show
     // quiz progress ("1 of 2") without revealing WHICH options are the correct ones.
     bool DrillSolved,
+    // A ranked attempt that hit a wrong move. The cluster keeps the damage so it can be inspected,
+    // but nothing further is judged and no time is recorded.
+    bool DrillFailed,
+    string DrillFailedMove,
     int DrillCorrectChosen,
     int DrillCorrectTotal,
     // The same counts across every stage of the drill so far, for the summary at the end.
@@ -267,12 +271,20 @@ public sealed record RunView(
             : null;
         var solved = solvedAt is not null;
 
+        var failedAt = drillId.Length > 0
+            ? ParseTime(annotations?.GetValueOrDefault(RunBroker.DrillFailedAnnotation))
+            : null;
+        var failed = failedAt is not null;
+        var failedMove = failed
+            ? annotations?.GetValueOrDefault(RunBroker.DrillFailedMoveAnnotation) ?? ""
+            : "";
+
         // The whole-drill clock STOPS at the solve. Everything after that instant is time spent
         // reading the result, and counting it would make a recorded time depend on how long the tab
         // stayed open.
         var elapsedMs = drillStart is null
             ? 0
-            : (long)Math.Max(0, ((solvedAt ?? DateTime.UtcNow) - drillStart.Value).TotalMilliseconds);
+            : (long)Math.Max(0, ((solvedAt ?? failedAt ?? DateTime.UtcNow) - drillStart.Value).TotalMilliseconds);
 
         // Options unlock on the CURRENT stage's clock, so stage three does not open with everything
         // already available just because the drill has been running a while.
@@ -280,7 +292,7 @@ public sealed record RunView(
             ?? drillStart;
         var stageElapsed = stageStart is null
             ? 0
-            : Math.Max(0, ((solvedAt ?? DateTime.UtcNow) - stageStart.Value).TotalSeconds);
+            : Math.Max(0, ((solvedAt ?? failedAt ?? DateTime.UtcNow) - stageStart.Value).TotalSeconds);
 
         var accepted = ReadAcceptedDecisions(r, definition, stageStart ?? drillStart ?? createdAt);
         // Decisions are recorded per stage, so the same id can appear in more than one stage of a
@@ -389,6 +401,8 @@ public sealed record RunView(
             // a slower result, not a failed one.
             solved,
             solved,
+            failed,
+            failedMove,
             correctChosen,
             correctTotal,
             correctChosenAll,

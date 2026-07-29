@@ -62,6 +62,8 @@ export interface RealRun {
   drillParSeconds?: number;
   drillComplete?: boolean;
   drillSolved?: boolean;
+  drillFailed?: boolean;
+  drillFailedMove?: string;
   drillCorrectChosen?: number;
   drillCorrectTotal?: number;
   drillCorrectChosenAll?: number;
@@ -128,6 +130,10 @@ export interface LiveRunView extends RunView {
   drillParSeconds: number;
   drillComplete: boolean;
   drillSolved: boolean;
+  /** A ranked attempt ended by a wrong move: the damage stays, nothing further is judged. */
+  drillFailed: boolean;
+  /** The option id that ended it, so the panel can show which one and why. */
+  drillFailedMove: string;
   drillCorrectChosen: number;
   drillCorrectTotal: number;
   /** The same counts across every stage so far — what the end-of-drill summary is about. */
@@ -240,6 +246,8 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     drillParSeconds: real.drillParSeconds ?? 0,
     drillComplete: real.drillComplete ?? false,
     drillSolved: real.drillSolved ?? false,
+    drillFailed: real.drillFailed ?? false,
+    drillFailedMove: real.drillFailedMove ?? "",
     drillCorrectChosen: real.drillCorrectChosen ?? 0,
     drillCorrectTotal: real.drillCorrectTotal ?? 0,
     drillCorrectChosenAll: real.drillCorrectChosenAll ?? 0,

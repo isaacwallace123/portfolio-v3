@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { Gauge, Layers, Loader2, SlidersHorizontal } from "lucide-react";
+import { liveDecision } from "@/shared/api/live-client";
+import { DrillPanel, useDrillState } from "@/features/drill";
 import { SCALABLE, type ServiceId } from "./model/topology";
 import { useClusterEdges } from "./model/useClusterEdges";
 import { useClusterRun } from "./model/useClusterRun";
@@ -10,7 +12,6 @@ import { Celebration } from "./ui/Celebration";
 import { ClusterGraph } from "./ui/ClusterGraph";
 import { ClusterHud } from "./ui/ClusterHud";
 import { ControlsPanel } from "./ui/ControlsPanel";
-import { DrillsPanel } from "./ui/DrillsPanel";
 import { InspectorPanel } from "./ui/InspectorPanel";
 import { LaunchScreen } from "./ui/LaunchScreen";
 import { RenewalModal } from "./ui/RenewalModal";
@@ -60,6 +61,11 @@ export default function ClusterWorkbench() {
     null,
   );
 
+  // The drill's own state machine. Lifted to here rather than owned by the panel because the
+  // cluster graph needs the impact of a decision too — showing damage only in a side panel is what
+  // made a wrong answer easy to click past.
+  const drill = useDrillState(run, act, liveDecision);
+
   // Re-measured whenever the set of cards changes, which is what moves the edges.
   const { canvasRef, cardRefs, paths } = useClusterEdges([
     components,
@@ -98,6 +104,8 @@ export default function ClusterWorkbench() {
 
   const byName = (n: string) => components.find((c) => c.name === n);
   const provisioning = run.status === "provisioning";
+  // Controls and Activity shrink to icons while a drill is live, so the drill gets the column.
+  const drillRunning = run.drillId.length > 0;
   const flowing = run.loadEnabled && run.telemetry.requestsPerSec > 0;
 
   // What the operator has asked for. Known the instant a control is used, whereas the Deployment's
@@ -194,6 +202,7 @@ export default function ClusterWorkbench() {
             cardRefs={cardRefs}
             intendedPods={intendedPods}
             blockedReason={blockedReason}
+            impactTiers={drill.impact.filter((i) => i.degrading).map((i) => i.tier)}
           />
         </div>
 
@@ -208,24 +217,30 @@ export default function ClusterWorkbench() {
             />
           ) : (
             <div className={styles.panel}>
+              {/* While a drill is running it owns this column. A drill is the primary activity, not
+                  one of three equal tabs — sharing billing with a slider panel is part of why the
+                  objective, the handoff and the misstep report all fought for the same space. */}
               <div className={styles.tabs}>
                 {TABS.map(({ id, icon: Icon, label }) => (
                   <button
                     key={id}
                     className={tab === id ? styles.tabOn : ""}
                     onClick={() => setTab(id)}
+                    title={label}
                   >
-                    <Icon size={13} /> {label}
+                    <Icon size={13} />
+                    {drillRunning && id !== "drills" ? "" : label}
                   </button>
                 ))}
               </div>
 
               {tab === "drills" && (
-                <DrillsPanel
+                <DrillPanel
                   run={run}
                   busy={busy}
                   provisioning={provisioning}
                   act={act}
+                  state={drill}
                 />
               )}
               {tab === "controls" && (
