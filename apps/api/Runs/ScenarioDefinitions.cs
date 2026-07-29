@@ -768,12 +768,17 @@ Shrink.Wrong(
         {
             var (current, met) = g.Metric switch
             {
-                // A zero p95 while traffic is flowing is a missing sample, not a fast service —
-                // Envoy's windowed scrape reports it during a rollout, when the old pods have gone
-                // and the new ones have not served anything yet. Treating it as excellent is how a
-                // saturated cluster briefly looked healthy enough to finish a drill.
-                "p95" => ($"{t.P95LatencyMs} ms",
-                    t.P95LatencyMs > 0 && t.P95LatencyMs < g.Threshold),
+                // Whether the p95 is trustworthy is a question about the SAMPLE, not about the
+                // number: a windowed scrape reports nothing mid-rollout, when the old pods have
+                // gone and the new ones have not served anything yet, and treating that as
+                // excellent is how a saturated cluster briefly looked healthy enough to finish a
+                // drill. Requiring p95 > 0 was the wrong way to ask it — a cache hit skips the
+                // request's CPU work entirely, so a well-cached run really does sit under Envoy's
+                // smallest bucket, and the check rejected the single best move in the catalog.
+                // Served traffic is the honest test: if requests are completing, the latency they
+                // completed in is real, however small.
+                "p95" => (FormatMs(t.P95LatencyMs),
+                    t.RequestsPerSec > 0 && t.P95LatencyMs < g.Threshold),
                 "errors" => ($"{t.ErrorRatePct:0.00}%", t.ErrorRatePct < g.Threshold),
                 "throughput" => ($"{t.RequestsPerSec}/s", t.RequestsPerSec > g.Threshold),
                 "replicas" => ($"{spec.ApiReplicas ?? 1}", (spec.ApiReplicas ?? 1) <= g.Threshold),
@@ -789,4 +794,9 @@ Shrink.Wrong(
             };
             return new DrillGoalState(g.Label, g.TargetText, current, met);
         }).ToArray();
+
+    /// <summary>Sub-millisecond latencies keep their decimal place; everything else is whole
+    /// milliseconds. "0.4 ms" is a result, "0 ms" looks like a broken gauge.</summary>
+    private static string FormatMs(double ms) =>
+        ms < 10 ? $"{ms:0.#} ms" : $"{ms:0} ms";
 }

@@ -156,7 +156,14 @@ export function ClusterHud({
           className={`${styles.stat} ${t.p95LatencyMs > t.latencyTargetMs ? styles.statBad : ""}`}
         >
           <span>p95</span>
-          <b>{t.p95LatencyMs}ms</b>
+          {/* Sub-millisecond keeps its decimal: a well-cached run really is this fast, and "0ms"
+              reads as a dead gauge rather than as the best result on the board. */}
+          <b>
+            {t.p95LatencyMs < 10
+              ? Math.round(t.p95LatencyMs * 10) / 10
+              : Math.round(t.p95LatencyMs)}
+            ms
+          </b>
         </div>
         <div
           className={`${styles.stat} ${t.errorRatePct > 1 ? styles.statBad : ""}`}

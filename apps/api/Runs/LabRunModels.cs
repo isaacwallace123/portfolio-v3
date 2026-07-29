@@ -86,9 +86,11 @@ public sealed record RunTelemetry(
     int PostgresCpuPct,
     int ApiReplicas,
     bool CacheEnabled,
-    // Real request metrics scraped from the run's Envoy gateways.
+    // Real request metrics scraped from the run's Envoy gateways. p95 carries a decimal place
+    // because a cached request is genuinely sub-millisecond and whole milliseconds cannot tell
+    // "0.4ms" from "we did not get a sample".
     int RequestsPerSec,
-    int P95LatencyMs,
+    double P95LatencyMs,
     double ErrorRatePct);
 
 // One pod of a cluster component, with its measured resource usage.

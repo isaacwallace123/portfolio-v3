@@ -54,7 +54,12 @@ public sealed partial class EnvoyScraper(ILogger<EnvoyScraper> log)
 
         return new EnvoyMetrics(
             RequestsPerSec: (int)Math.Round(dCompleted / dt),
-            P95LatencyMs: (int)Math.Round(p95),
+            // Kept to a decimal place rather than whole milliseconds. Envoy's smallest latency
+            // bucket is 0.5ms, and a cache hit skips the request's CPU work entirely, so a
+            // well-cached run genuinely sits inside that first bucket — rounded to an int it
+            // reported "0 ms", which reads as a broken scrape rather than as the best possible
+            // result. It is the difference between "no sample" and "faster than we can bucket".
+            P95LatencyMs: Math.Round(p95, 1),
             ErrorRatePct: Math.Round(errPct, 2));
     }
 
@@ -167,4 +172,4 @@ public sealed partial class EnvoyScraper(ILogger<EnvoyScraper> log)
     private sealed record Sample(long Completed, long FiveXx, IReadOnlyList<(double Le, long Count)> Buckets);
 }
 
-public sealed record EnvoyMetrics(int RequestsPerSec, int P95LatencyMs, double ErrorRatePct);
+public sealed record EnvoyMetrics(int RequestsPerSec, double P95LatencyMs, double ErrorRatePct);
