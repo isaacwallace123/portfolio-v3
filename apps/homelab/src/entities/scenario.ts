@@ -409,16 +409,6 @@ export function getHomelabScenario(id: string): LabScenario {
   );
 }
 
-export const upcomingDrills = homelabScenarios.map((scenario) => ({
-  id: scenario.id,
-  title: scenario.title,
-  tag:
-    scenario.id === "checkout-traffic-spike"
-      ? "Kubernetes · scaling"
-      : scenario.id === "checkout-bad-release"
-        ? "GitOps · traces"
-        : scenario.id === "catalogue-data-recovery"
-          ? "Storage · Postgres"
-          : "Kubernetes · scheduling",
-  description: scenario.summary,
-}));
+// The drill catalog the site renders comes from the API (/api/live/drills), which is the only place
+// that knows the full list and what the field has scored on it. The scenarios above are the fixture
+// set for the standalone demo engine behind /api/v1/*, and are deliberately not that catalog.

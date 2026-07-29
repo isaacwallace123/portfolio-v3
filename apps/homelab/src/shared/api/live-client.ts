@@ -193,16 +193,75 @@ export async function practiceAction(
   return asJson(res);
 }
 
+/** One drill in the catalog, with what the field has actually done on it. */
+export interface DrillCatalogEntry {
+  id: string;
+  title: string;
+  eyebrow: string;
+  summary: string;
+  difficulty: string;
+  objective: string;
+  /** practice (one incident) | ranked (a cascade, timed for the board). */
+  mode: "practice" | "ranked";
+  parSeconds: number;
+  stageCount: number;
+  stages: { id: string; title: string }[];
+  /** Over every recorded attempt by everyone — which is what makes an average mean something. */
+  attempts: number;
+  operators: number;
+  averageMs: number;
+  bestMs: number;
+  yourAttempts: number;
+  yourBestMs: number | null;
+  yourAverageMs: number | null;
+}
+
+export interface DrillCatalog {
+  /** Requests a second one k6 generator offers. The load dial is demand, not capacity. */
+  offeredPerGenerator: number;
+  drills: DrillCatalogEntry[];
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  displayName: string;
+  isYou: boolean;
+  drillsSolved: number;
+  bestMs: number;
+  averageMs: number;
+  missteps: number;
+  achievedUtc: string;
+}
+
+export interface LeaderboardView {
+  overall: LeaderboardEntry[];
+  byDrill: { drillId: string; title: string; entries: LeaderboardEntry[] }[];
+}
+
+export async function fetchDrills(): Promise<DrillCatalog> {
+  const res = await fetch("/api/live/drills", { cache: "no-store" });
+  return asJson(res);
+}
+
+export async function fetchLeaderboard(): Promise<LeaderboardView> {
+  const res = await fetch("/api/live/leaderboard", { cache: "no-store" });
+  return asJson(res);
+}
+
 // A drill runs ON the provisioned cluster: it sets an objective and clock and unlocks decisions
 // against the same live workload, rather than provisioning a second environment.
+//
+// Ranked mode sends no drill id: the broker draws one from the multi-stage pool, so the time it
+// records is about the operator rather than about which drill they chose to be timed on.
 export async function startDrill(
   runId: string,
   drillId: string,
+  mode: "practice" | "ranked" = "practice",
 ): Promise<LiveRunView> {
   const res = await fetch(`/api/live/runs/${runId}/drill`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ drillId }),
+    body: JSON.stringify({ drillId, mode }),
   });
   return asJson(res);
 }

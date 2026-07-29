@@ -29,18 +29,21 @@ export async function POST(
   const g = await guard(req, { runId });
   if (!g.ok) return g.response;
 
-  let body: { drillId?: string } = {};
+  let body: { drillId?: string; mode?: string } = {};
   try {
     body = await req.json();
   } catch {
     return jsonNoStore({ error: "Expected JSON body." }, 400);
   }
 
+  // Only the two modes the broker knows. Ranked with no drill id means "draw one for me".
+  const mode = body.mode === "ranked" ? "ranked" : "practice";
+
   const res = await liveFetch(
     `/v1/runs/${runId}/drill`,
     {
       method: "POST",
-      body: JSON.stringify({ drillId: String(body.drillId ?? "") }),
+      body: JSON.stringify({ drillId: String(body.drillId ?? ""), mode }),
     },
     g.caller.owner,
   );

@@ -15,8 +15,18 @@ import {
   ShieldCheck,
   Waypoints,
 } from "lucide-react";
-import { upcomingDrills } from "@/entities/scenario";
-import { fetchOverview, type PlatformOverview } from "@/shared/api/live-client";
+import {
+  fetchDrills,
+  fetchOverview,
+  type DrillCatalogEntry,
+  type PlatformOverview,
+} from "@/shared/api/live-client";
+
+/** mm:ss from milliseconds — the same shape the arena shows a drill time in. */
+function drillClock(ms: number) {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+}
 
 function Metric({
   icon,
@@ -41,7 +51,20 @@ function Metric({
 
 export default function HomeOverview() {
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
+  const [catalog, setCatalog] = useState<DrillCatalogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  // The catalog needs a session, so a signed-out visitor simply sees no cards rather than an error:
+  // the section above them already explains what the drills are.
+  useEffect(() => {
+    let alive = true;
+    fetchDrills()
+      .then((c) => alive && setCatalog(c.drills))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -258,20 +281,24 @@ export default function HomeOverview() {
             failure, captures real evidence, and tears itself down.
           </p>
         </div>
+        {/* From the API, not a second copy in the bundle: the catalog carries solve counts and
+            average times that only the server knows, and a hardcoded list here would quietly go
+            stale every time a drill is added. */}
         <div className="scenario-preview-grid">
-          {upcomingDrills
-            .filter((item) => item.id !== "practice-cluster")
-            .map((item, index) => (
-              <a href={`/drills?scenario=${item.id}`} key={item.id}>
-                <span>0{index + 1}</span>
-                <small>{item.tag}</small>
-                <h3>{item.title}</h3>
-                <p>{item.description}</p>
-                <i>
-                  Run drill <ArrowRight size={14} />
-                </i>
-              </a>
-            ))}
+          {catalog.map((item, index) => (
+            <a href="/practice" key={item.id}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <small>{item.eyebrow}</small>
+              <h3>{item.title}</h3>
+              <p>{item.summary}</p>
+              <i>
+                {item.attempts > 0
+                  ? `${item.attempts} solve${item.attempts === 1 ? "" : "s"} · avg ${drillClock(item.averageMs)}`
+                  : "Unsolved"}{" "}
+                <ArrowRight size={14} />
+              </i>
+            </a>
+          ))}
         </div>
       </section>
     </main>

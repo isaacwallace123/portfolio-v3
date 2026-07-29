@@ -1,4 +1,5 @@
 using IsaacWallace.Api.Auth;
+using IsaacWallace.Api.Data;
 
 namespace IsaacWallace.Api.Runs;
 
@@ -10,8 +11,18 @@ public static class RunEndpoints
     // server-side caller.
     private const string OwnerHeader = "X-Owner-Key";
 
+    // The name to put on the board, resolved from the same server-side session as the owner key. It
+    // is display only: nothing is ever authorised by it.
+    private const string OwnerNameHeader = "X-Owner-Name";
+
     private static string Owner(HttpContext ctx) =>
         ctx.Request.Headers[OwnerHeader].ToString().Trim();
+
+    private static string OwnerName(HttpContext ctx)
+    {
+        var name = ctx.Request.Headers[OwnerNameHeader].ToString().Trim();
+        return name.Length is > 0 and <= 128 ? name : "operator";
+    }
 
     public static void MapRunEndpoints(this WebApplication app)
     {
@@ -27,9 +38,11 @@ public static class RunEndpoints
                     s.Summary,
                     s.Difficulty,
                     s.ResourceClass,
-                    s.DurationSeconds,
                     s.Objective,
-                    decisions = s.Decisions.Select(d => new
+                    // Named for the wire contract integrators already consume; it is a par time
+                    // rather than a deadline now, since drills no longer expire.
+                    DurationSeconds = s.ParSeconds,
+                    decisions = s.Stages.SelectMany(stage => stage.Decisions).Select(d => new
                     {
                         d.Id,
                         d.Label,
@@ -39,6 +52,59 @@ public static class RunEndpoints
                 }),
             }))
             .RequireApiKey();
+
+        // The drill catalog, with what the field has actually done on each one.
+        //
+        // Averages come from every recorded attempt by everybody, which is the only way an average
+        // solve time means anything — and the caller's own numbers ride alongside so a drill page can
+        // say "you: 1:48, everyone: 2:31" without a second round trip.
+        app.MapGet("/v1/drills", async (
+            HttpContext ctx, DrillResultStore results, CancellationToken ct) =>
+        {
+            var stats = (await results.StatsAsync(Owner(ctx), ct))
+                .ToDictionary(s => s.DrillId, StringComparer.Ordinal);
+
+            return Results.Ok(new
+            {
+                offeredPerGenerator = LoadModel.RequestsPerSecondPerGenerator,
+                drills = ScenarioDefinitions.Drills.Select(d =>
+                {
+                    stats.TryGetValue(d.Id, out var s);
+                    return new
+                    {
+                        d.Id,
+                        d.Title,
+                        d.Eyebrow,
+                        d.Summary,
+                        d.Difficulty,
+                        d.Objective,
+                        d.Mode,
+                        d.ParSeconds,
+                        StageCount = d.Stages.Count,
+                        Stages = d.Stages.Select(stage => new { stage.Id, stage.Title }),
+                        Attempts = s?.Attempts ?? 0,
+                        Operators = s?.Operators ?? 0,
+                        AverageMs = s?.AverageMs ?? 0,
+                        BestMs = s?.BestMs ?? 0,
+                        YourAttempts = s?.YourAttempts ?? 0,
+                        YourBestMs = s?.YourBestMs,
+                        YourAverageMs = s?.YourAverageMs,
+                    };
+                }),
+            });
+        }).RequireScope(ApiScopes.RunsRead);
+
+        // Best homelab operator. Ranked drills only — see DrillResultStore for why breadth outranks
+        // a single fast cascade.
+        app.MapGet("/v1/leaderboard", async (
+            HttpContext ctx, DrillResultStore results, int? limit, CancellationToken ct) =>
+        {
+            var titles = ScenarioDefinitions.RankedDrills
+                .ToDictionary(d => d.Id, d => d.Title, StringComparer.Ordinal);
+            var board = await results.LeaderboardAsync(
+                Owner(ctx), titles, Math.Clamp(limit ?? 20, 1, 100), ct);
+            return Results.Ok(board);
+        }).RequireScope(ApiScopes.RunsRead);
 
         app.MapGet("/v1/platform", async (RunBroker broker, CancellationToken ct) =>
             Results.Ok(await broker.GetPlatformStatusAsync(ct)))
@@ -103,14 +169,15 @@ public static class RunEndpoints
 
             // Judging the drill needs the run and its telemetry together, which is exactly what a
             // snapshot has. Doing it here also means completion is recorded from the same numbers
-            // the page is about to render.
-            var goals = telemetry is null
-                ? []
-                : await broker.EvaluateDrillAsync(resource, telemetry, ct);
+            // the page is about to render — and that a stage advance or a solve is reflected in
+            // THIS frame, since the evaluation hands back the run it just updated.
+            var judged = telemetry is null
+                ? new DrillEvaluation([], resource)
+                : await broker.EvaluateDrillAsync(resource, telemetry, OwnerName(ctx), ct);
 
             return Results.Ok(new
             {
-                run = RunView.From(resource) with { DrillGoals = goals },
+                run = RunView.From(judged.Resource) with { DrillGoals = judged.Goals },
                 telemetry,
                 components = await componentsTask ?? [],
                 events = await eventsTask ?? [],
@@ -171,10 +238,12 @@ public static class RunEndpoints
         }).RequireScope(ApiScopes.RunsWrite);
 
         // Start a drill ON a running cluster (objective + clock + decisions over the live workload).
+        // With mode "ranked" and no drill id the broker draws one from the multi-stage pool.
         app.MapPost("/v1/runs/{runId}/drill", async (
             string runId, DrillRequest req, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
-            var result = await broker.StartDrillAsync(runId, req.DrillId ?? "", Owner(ctx), ct);
+            var result = await broker.StartDrillAsync(
+                runId, req.DrillId ?? "", req.Mode ?? "practice", Owner(ctx), ct);
             return result.Run is not null
                 ? Results.Ok(result.Run)
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
@@ -217,5 +286,5 @@ public static class RunEndpoints
 
 record CreateRunRequest(string? ScenarioId);
 record DecisionRequest(string? DecisionId);
-record DrillRequest(string? DrillId);
+record DrillRequest(string? DrillId, string? Mode);
 record PracticeActionRequest(string? ActionId);

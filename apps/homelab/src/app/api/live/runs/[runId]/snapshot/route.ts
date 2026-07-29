@@ -18,10 +18,14 @@ export async function GET(
   const g = await guard(req, { runId });
   if (!g.ok) return g.response;
 
+  // The snapshot is where the API judges the drill, so it is also where a solve gets recorded — and
+  // a recorded result needs a name to put on the board. That name comes from the verified session
+  // here, never from the browser.
   const res = await liveFetch(
     `/v1/runs/${runId}/snapshot`,
     undefined,
     g.caller.owner,
+    g.caller.displayName,
   );
   if (!res.ok) {
     return jsonNoStore(await res.json().catch(() => ({})), res.status);

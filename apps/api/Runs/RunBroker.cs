@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json.Serialization;
+using IsaacWallace.Api.Data;
 using k8s;
 using k8s.Autorest;
 using Microsoft.Extensions.Options;
@@ -18,6 +19,7 @@ public sealed class RunBroker
     private readonly EnvoyScraper _envoy;
     private readonly TraceScraper _traces;
     private readonly PlatformInventory _inventory;
+    private readonly DrillResultStore _results;
     private readonly ILogger<RunBroker> _log;
 
     public RunBroker(
@@ -26,6 +28,7 @@ public sealed class RunBroker
         EnvoyScraper envoy,
         TraceScraper traces,
         PlatformInventory inventory,
+        DrillResultStore results,
         ILogger<RunBroker> log)
     {
         _k8s = k8s;
@@ -33,6 +36,7 @@ public sealed class RunBroker
         _envoy = envoy;
         _traces = traces;
         _inventory = inventory;
+        _results = results;
         _log = log;
     }
 
@@ -67,6 +71,7 @@ public sealed class RunBroker
             return BrokerResult.Fail(429, "No cluster slots are free. Try again shortly.");
 
         var runId = $"run-hl-{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(5))}";
+        var setup = scenario.Setup;
         var body = new LabRunResource
         {
             Metadata = new LabRunMetadata { Name = runId },
@@ -77,12 +82,14 @@ public sealed class RunBroker
                 Owner = owner,
                 ResourceClass = "standard",
                 TtlSeconds = _options.DefaultTtlSeconds,
-                ApiReplicas = scenario.InitialApiReplicas,
-                CacheReplicas = scenario.InitialCacheReplicas,
-                ReleaseTrack = scenario.InitialReleaseTrack,
-                DataState = scenario.InitialDataState,
-                TargetPool = scenario.InitialTargetPool,
-                LoadReplicas = scenarioId == "practice-cluster" ? 0 : 1,
+                ApiReplicas = SetupInt(setup, "apiReplicas", 1),
+                CanaryReplicas = SetupInt(setup, "canaryReplicas", 0),
+                CacheReplicas = SetupInt(setup, "cacheReplicas", 0),
+                ReleaseTrack = SetupString(setup, "releaseTrack", "stable"),
+                DataState = SetupString(setup, "dataState", "healthy"),
+                TargetPool = SetupString(setup, "targetPool", "apps"),
+                LoadReplicas = SetupInt(setup, "loadReplicas", 0),
+                GatewayReplicas = SetupInt(setup, "gatewayReplicas", 1),
                 RestartToken = "baseline",
             },
         };
@@ -131,23 +138,32 @@ public sealed class RunBroker
         if (resource is null)
             return BrokerResult.Fail(404, "No such run.");
 
-        // Decisions belong to the drill currently running on this cluster, and unlock on the drill's
-        // own clock — RunView is the single source of truth for both.
+        // Decisions belong to the stage currently running on this cluster, and unlock on that
+        // stage's own clock — RunView is the single source of truth for both.
         var view = RunView.From(resource);
         if (view.DrillId.Length == 0)
             return BrokerResult.Fail(409, "No drill is running on this cluster.");
+        if (view.DrillSolved)
+            return BrokerResult.Fail(409, "This drill is already resolved.");
         if (!ScenarioDefinitions.All.TryGetValue(view.DrillId, out var scenario))
             return BrokerResult.Fail(404, "The scenario definition is not available.");
-        var decision = scenario.Decisions.FirstOrDefault(d => d.Id == decisionId);
-        if (decision is null)
-            return BrokerResult.Fail(404, $"Decision '{decisionId}' is not available for this run.");
 
-        const string annotationPrefix = "homeops.isaacwallace.dev/decision-";
-        if (resource.Metadata.Annotations?.ContainsKey($"{annotationPrefix}{decisionId}") == true)
+        var stageIndex = Math.Max(0, view.DrillStage - 1);
+        if (stageIndex >= scenario.Stages.Count)
+            return BrokerResult.Fail(409, "This drill has no stage in progress.");
+        var stage = scenario.Stages[stageIndex];
+
+        var decision = stage.Decisions.FirstOrDefault(d => d.Id == decisionId);
+        if (decision is null)
+            return BrokerResult.Fail(404, $"Decision '{decisionId}' is not available at this stage.");
+
+        // Scoped to the stage, so a cascade that offers "roll back" twice records two separate
+        // answers instead of the second stage opening with the first one already filled in.
+        var annotationKey = $"{DecisionAnnotationPrefix}{stageIndex}-{decisionId}";
+        if (resource.Metadata.Annotations?.ContainsKey(annotationKey) == true)
             return BrokerResult.Accepted(view);
 
-        var elapsed = view.DrillElapsedSeconds;
-        if (elapsed < decision.AvailableAfterSeconds)
+        if (view.DrillStageElapsedSeconds < decision.AvailableAfterSeconds)
             return BrokerResult.Fail(
                 409,
                 $"Decision '{decisionId}' unlocks after {decision.AvailableAfterSeconds} seconds of live traffic.");
@@ -158,7 +174,7 @@ public sealed class RunBroker
             {
                 annotations = new Dictionary<string, string>
                 {
-                    [$"{annotationPrefix}{decisionId}"] = DateTime.UtcNow.ToString("O"),
+                    [annotationKey] = DateTime.UtcNow.ToString("O"),
                 },
             },
             spec = decision.SpecPatch,
@@ -181,47 +197,65 @@ public sealed class RunBroker
     // Start a drill ON an already-running cluster: set the objective/clock and reset the workload to
     // the drill's starting conditions. The namespace and its workload are untouched, so the drill
     // begins against live traffic instead of waiting out another provisioning cycle.
-    public async Task<BrokerResult> StartDrillAsync(string runId, string drillId, string owner, CancellationToken ct)
+    //
+    // In ranked mode the drill is drawn rather than chosen, from the multi-stage pool only. Picking
+    // your own drill and having the time count would rank familiarity; drawing one ranks operators.
+    public async Task<BrokerResult> StartDrillAsync(
+        string runId, string drillId, string mode, string owner, CancellationToken ct)
     {
         var resource = await GetOwnedResourceAsync(runId, owner, ct);
         if (resource is null)
             return BrokerResult.Fail(404, "No such run.");
+
+        var ranked = string.Equals(mode, "ranked", StringComparison.OrdinalIgnoreCase);
+        if (ranked && drillId.Length == 0)
+        {
+            var pool = ScenarioDefinitions.RankedDrills
+                // Never redraw the drill this cluster just ran: the point of a draw is that you do
+                // not know what is coming, and back-to-back repeats are the one outcome that
+                // reliably ruins that.
+                .Where(d => d.Id != (resource.Spec.DrillId ?? ""))
+                .ToArray();
+            if (pool.Length == 0) return BrokerResult.Fail(409, "No ranked drills are available.");
+            drillId = pool[RandomNumberGenerator.GetInt32(pool.Length)].Id;
+        }
+
         if (!ScenarioDefinitions.IsDrill(drillId) ||
             !ScenarioDefinitions.All.TryGetValue(drillId, out var drill))
             return BrokerResult.Fail(404, $"Unknown drill '{drillId}'.");
+        if (ranked && !drill.IsRanked)
+            return BrokerResult.Fail(409, "Only multi-stage drills can be run ranked.");
 
         // Clear the previous drill's state so its decisions unlock again and, crucially, so its
         // completion does not carry over — a recorded solve is a fact about one drill, not the run.
+        var now = DateTime.UtcNow.ToString("O");
         var annotations = new Dictionary<string, string?>
         {
-            ["homeops.isaacwallace.dev/drill-started"] = DateTime.UtcNow.ToString("O"),
+            ["homeops.isaacwallace.dev/drill-started"] = now,
+            [DrillStageAnnotation] = "0",
+            [DrillStageStartedAnnotation] = now,
+            [DrillModeAnnotation] = ranked ? "ranked" : "practice",
             [DrillSolvedAnnotation] = null, // null removes the annotation in a merge patch
             [DrillGoalsMetSinceAnnotation] = null,
+            [DrillRecordedAnnotation] = null,
         };
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
-            if (key.StartsWith("homeops.isaacwallace.dev/decision-", StringComparison.Ordinal))
+            if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal))
                 annotations[key] = null; // null removes the annotation in a merge patch
 
-        var patchBody = new
+        // The first stage's Setup is the opening fault. A drill always needs live traffic to measure
+        // against, so a stage that forgets to ask for load still gets some.
+        var setup = new Dictionary<string, object>(drill.Stages[0].Setup, StringComparer.Ordinal);
+        if (!setup.ContainsKey("loadReplicas")) setup["loadReplicas"] = 1;
+        var spec = new Dictionary<string, object>(setup, StringComparer.Ordinal)
         {
-            metadata = new { annotations },
-            spec = new
-            {
-                drillId,
-                drillStartedAt = DateTime.UtcNow.ToString("O"),
-                apiReplicas = drill.InitialApiReplicas,
-                cacheReplicas = drill.InitialCacheReplicas,
-                releaseTrack = drill.InitialReleaseTrack,
-                dataState = drill.InitialDataState,
-                targetPool = drill.InitialTargetPool,
-                loadReplicas = 1, // a drill always needs live traffic to measure against
-            },
+            ["drillId"] = drillId,
+            ["drillStartedAt"] = now,
         };
-        var started = await PatchRunAsync(runId, patchBody, $"start drill {drillId}", ct);
-        await WriteThroughReplicasAsync(runId, Patch(
-            ("apiReplicas", drill.InitialApiReplicas),
-            ("cacheReplicas", drill.InitialCacheReplicas),
-            ("loadReplicas", 1)), ct);
+
+        var started = await PatchRunAsync(
+            runId, new { metadata = new { annotations }, spec }, $"start drill {drillId}", ct);
+        await WriteThroughReplicasAsync(runId, setup, ct);
         return started;
     }
 
@@ -236,17 +270,21 @@ public sealed class RunBroker
         {
             [DrillSolvedAnnotation] = null,
             [DrillGoalsMetSinceAnnotation] = null,
+            [DrillStageAnnotation] = null,
+            [DrillStageStartedAnnotation] = null,
+            [DrillModeAnnotation] = null,
+            [DrillRecordedAnnotation] = null,
         };
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
-            if (key.StartsWith("homeops.isaacwallace.dev/decision-", StringComparison.Ordinal))
+            if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal))
                 annotations[key] = null;
 
         var patchBody = new
         {
             metadata = new { annotations },
-            // Returns the cluster to open-sandbox baseline. These three replica counts are repeated
-            // in the write-through below and must stay identical to it, or Crossplane's next
-            // reconcile would undo the fast path.
+            // Returns the cluster to open-sandbox baseline. These replica counts are repeated in the
+            // write-through below and must stay identical to it, or Crossplane's next reconcile
+            // would undo the fast path.
             spec = new
             {
                 drillId = "",
@@ -254,13 +292,16 @@ public sealed class RunBroker
                 releaseTrack = "stable",
                 dataState = "healthy",
                 apiReplicas = 1,
+                canaryReplicas = 0,
                 cacheReplicas = 0,
                 loadReplicas = 0,
+                gatewayReplicas = 1,
             },
         };
         var ended = await PatchRunAsync(runId, patchBody, "end drill", ct);
         await WriteThroughReplicasAsync(runId, Patch(
-            ("apiReplicas", 1), ("cacheReplicas", 0), ("loadReplicas", 0)), ct);
+            ("apiReplicas", 1), ("canaryReplicas", 0), ("cacheReplicas", 0),
+            ("loadReplicas", 0), ("gatewayReplicas", 1)), ct);
         return ended;
     }
 
@@ -491,6 +532,10 @@ public sealed class RunBroker
                 ? Patch(("apiReplicas", replicas))
             : TryRangedAction(actionId, "load-", 0, 4, out var load)
                 ? Patch(("loadReplicas", load))
+            : TryRangedAction(actionId, "gateway-", 1, 3, out var gateways)
+                ? Patch(("gatewayReplicas", gateways))
+            : TryRangedAction(actionId, "canary-", 0, 3, out var canaries)
+                ? Patch(("canaryReplicas", canaries))
             : actionId switch
         {
             "cache-on" => Patch(("cacheReplicas", 1)),
@@ -504,8 +549,9 @@ public sealed class RunBroker
             "traffic-off" => Patch(("loadReplicas", 0)),
             "restart" => Patch(("restartToken", Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)))),
             "reset" => Patch(
-                ("apiReplicas", 1), ("cacheReplicas", 0), ("releaseTrack", "stable"),
-                ("dataState", "healthy"), ("targetPool", "apps"), ("loadReplicas", 0),
+                ("apiReplicas", 1), ("canaryReplicas", 0), ("cacheReplicas", 0),
+                ("releaseTrack", "stable"), ("dataState", "healthy"), ("targetPool", "apps"),
+                ("loadReplicas", 0), ("gatewayReplicas", 1),
                 ("restartToken", Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)))),
             _ => new Dictionary<string, object>(),
         };
@@ -544,8 +590,10 @@ public sealed class RunBroker
     private static readonly (string SpecField, string ObjectSuffix)[] ReplicaTiers =
     [
         ("apiReplicas", "checkout"),
+        ("canaryReplicas", "checkout-canary"),
         ("cacheReplicas", "redis"),
         ("loadReplicas", "k6"),
+        ("gatewayReplicas", "envoy"),
     ];
 
     // Make a replica change visible now rather than a minute from now.
@@ -613,7 +661,7 @@ public sealed class RunBroker
         if (!ScenarioDefinitions.All.TryGetValue(run.ScenarioId, out var scenario)) return null;
 
         var elapsed = (DateTime.UtcNow - run.CreatedAt.Value).TotalSeconds - 16;
-        if (elapsed < scenario.DurationSeconds) return RunReport.NotReady(runId, run.ScenarioId);
+        if (elapsed < scenario.ParSeconds) return RunReport.NotReady(runId, run.ScenarioId);
 
         var telemetry = await GetTelemetryAsync(runId, owner, ct);
         var passedState = run.ScenarioId switch
@@ -666,6 +714,23 @@ public sealed class RunBroker
         if (run is null) return null;
         var ns = run.Namespace ?? runId;
 
+        // Every gateway replica, by pod IP. The gateway is a scalable tier and each replica only
+        // counts the requests it served, so the run's throughput is the sum across them — via the
+        // Service it would be whichever single pod kube-proxy happened to pick.
+        var gatewayIps = new List<string>();
+        try
+        {
+            var envoyPods = await _k8s.CoreV1.ListNamespacedPodAsync(
+                ns, labelSelector: "app=envoy", cancellationToken: ct);
+            gatewayIps.AddRange(envoyPods.Items
+                .Where(p => p.Status?.PodIP is { Length: > 0 })
+                .Select(p => p.Status.PodIP));
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogDebug(ex, "Could not list gateways for {RunId}; falling back to the service.", runId);
+        }
+
         int pods = 0;
         double cpuMillis = 0, memMiB = 0, postgresCpuMillis = 0;
         try
@@ -690,8 +755,8 @@ public sealed class RunBroker
             // Metrics not available yet for this namespace — report zero usage.
         }
 
-        // Real request metrics from the run's Envoy gateway (null while the workload is starting).
-        var envoy = await _envoy.ScrapeAsync(runId, ns, ct);
+        // Real request metrics from the run's Envoy gateways (null while the workload is starting).
+        var envoy = await _envoy.ScrapeAsync(runId, ns, gatewayIps, ct);
 
         return new RunTelemetry(
             pods, (int)Math.Round(cpuMillis), (int)Math.Round(memMiB),
@@ -724,33 +789,42 @@ public sealed class RunBroker
 
     public const string DrillSolvedAnnotation = "homeops.isaacwallace.dev/drill-solved-at";
     public const string DrillGoalsMetSinceAnnotation = "homeops.isaacwallace.dev/drill-goals-met-since";
+    public const string DrillStageAnnotation = "homeops.isaacwallace.dev/drill-stage";
+    public const string DrillStageStartedAnnotation = "homeops.isaacwallace.dev/drill-stage-started";
+    public const string DrillModeAnnotation = "homeops.isaacwallace.dev/drill-mode";
+    public const string DrillRecordedAnnotation = "homeops.isaacwallace.dev/drill-recorded";
+    public const string DecisionAnnotationPrefix = "homeops.isaacwallace.dev/decision-";
 
-    /// <summary>How long the objective must hold continuously before a drill counts as resolved.</summary>
+    /// <summary>How long the objective must hold continuously before a stage counts as resolved.</summary>
     public static readonly TimeSpan GoalHold = TimeSpan.FromSeconds(15);
 
-    // Judge the active drill against what the cluster is measurably doing, and record the first
-    // moment it is genuinely resolved.
+    // Judge the active stage against what the cluster is measurably doing, then either open the next
+    // stage of the cascade or record the drill as solved.
     //
     // Completion used to mean "every correct option has been clicked", which announced success
     // before the workload had recovered. It now means the objective itself holds — and holds, which
     // is the important word: measured signals are noisy, and a single sampling window can read well
     // in the middle of a rollout while the service is still saturated. So the clock starts when
-    // every condition is first met and the drill is only resolved if they are all still met
+    // every condition is first met and the stage is only resolved if they are all still met
     // GoalHold later; one bad reading in between resets it. Once recorded, a later dip cannot
     // retract a result the operator has already earned.
-    public async Task<IReadOnlyList<DrillGoalState>> EvaluateDrillAsync(
-        LabRunResource resource, RunTelemetry telemetry, CancellationToken ct)
+    public async Task<DrillEvaluation> EvaluateDrillAsync(
+        LabRunResource resource, RunTelemetry telemetry, string displayName, CancellationToken ct)
     {
         var view = RunView.From(resource);
         if (view.DrillId.Length == 0 ||
             !ScenarioDefinitions.All.TryGetValue(view.DrillId, out var drill) ||
-            drill.Goals.Count == 0)
-            return [];
+            drill.Stages.Count == 0)
+            return new DrillEvaluation([], resource);
 
-        var goals = ScenarioDefinitions.Evaluate(drill, telemetry, resource.Spec);
+        var stageIndex = Math.Clamp(view.DrillStage - 1, 0, drill.Stages.Count - 1);
+        var stage = drill.Stages[stageIndex];
+        if (stage.Goals.Count == 0) return new DrillEvaluation([], resource);
+
+        var goals = ScenarioDefinitions.Evaluate(stage, telemetry, resource.Spec);
         var annotations = resource.Metadata.Annotations;
         if (annotations?.ContainsKey(DrillSolvedAnnotation) == true)
-            return goals;
+            return new DrillEvaluation(goals, resource);
 
         var heldSince = annotations?.GetValueOrDefault(DrillGoalsMetSinceAnnotation);
         var now = DateTime.UtcNow;
@@ -759,42 +833,162 @@ public sealed class RunBroker
         {
             // Lost it. Whatever streak was building does not count.
             if (!string.IsNullOrEmpty(heldSince))
-                await SetAnnotationsAsync(
-                    view.RunId, new() { [DrillGoalsMetSinceAnnotation] = null }, ct);
-            return goals;
+                resource = await SetAnnotationsAsync(
+                    view.RunId, new() { [DrillGoalsMetSinceAnnotation] = null }, ct) ?? resource;
+            return new DrillEvaluation(goals, resource);
         }
 
         if (string.IsNullOrEmpty(heldSince))
         {
-            await SetAnnotationsAsync(
+            resource = await SetAnnotationsAsync(
                 view.RunId,
                 new() { [DrillGoalsMetSinceAnnotation] = now.ToString("O") },
-                ct);
-            return goals;
+                ct) ?? resource;
+            return new DrillEvaluation(goals, resource);
         }
 
-        if (DateTime.TryParse(
+        if (!DateTime.TryParse(
                 heldSince, null,
                 DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
-                out var since) &&
-            now - since >= GoalHold)
+                out var since) ||
+            now - since < GoalHold)
+            return new DrillEvaluation(goals, resource);
+
+        // The stage is genuinely resolved. The moment that counts is when the objective was FIRST
+        // met, not when the hold finished confirming it — the hold is evidence that the recovery was
+        // real, and charging the operator fifteen seconds for the platform's own caution would make
+        // every recorded time fifteen seconds slower than the work took.
+        //
+        // The updated resource is handed back so the caller renders the transition in the SAME frame
+        // it happened. Returning the pre-patch one would show a stage whose every condition is met
+        // and which has not moved on — for a solve, that is the finished drill still reading as
+        // unfinished for another poll.
+        if (stageIndex + 1 < drill.Stages.Count)
         {
-            await SetAnnotationsAsync(
-                view.RunId,
-                new()
-                {
-                    [DrillSolvedAnnotation] = now.ToString("O"),
-                    [DrillGoalsMetSinceAnnotation] = null,
-                },
-                ct);
+            resource = await AdvanceStageAsync(view, drill, stageIndex + 1, since, ct) ?? resource;
+            // The next stage has its own objective, and nothing has been measured against it yet.
+            var next = drill.Stages[Math.Min(stageIndex + 1, drill.Stages.Count - 1)];
+            goals = ScenarioDefinitions.Evaluate(next, telemetry, resource.Spec);
+        }
+        else
+        {
+            resource = await ResolveDrillAsync(resource, view, drill, since, displayName, ct)
+                ?? resource;
         }
 
-        return goals;
+        return new DrillEvaluation(goals, resource);
     }
 
+    // Open the next stage: record where the cascade has got to, and apply the consequence. This is
+    // what makes a multi-stage drill worth doing — the incident the operator is about to see is one
+    // their own fix caused, applied to the same live workload they just repaired.
+    private async Task<LabRunResource?> AdvanceStageAsync(
+        RunView view, ScenarioDefinition drill, int nextIndex, DateTime solvedAt, CancellationToken ct)
+    {
+        var next = drill.Stages[nextIndex];
+        var setup = new Dictionary<string, object>(next.Setup, StringComparer.Ordinal);
+        // A stage can ask for a rollout as part of its problem; the token has to be new every time
+        // or the Deployment sees no change and nothing restarts.
+        if (setup.TryGetValue("restartToken", out var token) &&
+            token as string == ScenarioDefinitions.FreshRestartToken)
+            setup["restartToken"] = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6));
+
+        var annotations = new Dictionary<string, string?>
+        {
+            [DrillStageAnnotation] = nextIndex.ToString(CultureInfo.InvariantCulture),
+            [DrillStageStartedAnnotation] = solvedAt.ToString("O"),
+            [$"homeops.isaacwallace.dev/drill-stage-{nextIndex - 1}-solved"] = solvedAt.ToString("O"),
+            // The next stage has its own objective, so the streak that resolved the last one is not
+            // evidence about this one.
+            [DrillGoalsMetSinceAnnotation] = null,
+        };
+
+        try
+        {
+            var patch = new k8s.Models.V1Patch(
+                new { metadata = new { annotations }, spec = setup },
+                k8s.Models.V1Patch.PatchType.MergePatch);
+            var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+                patch, LabRun.Group, LabRun.Version, LabRun.Plural, view.RunId, cancellationToken: ct);
+            await WriteThroughReplicasAsync(view.RunId, setup, ct);
+            return Parse(updated);
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogError(ex, "Could not advance {RunId} to stage {Stage}.", view.RunId, nextIndex);
+            return null;
+        }
+    }
+
+    // The last stage is done, so the drill is done. Stamp the solve time on the cluster and write the
+    // result — every solve, practice and ranked, because an average solve time is only meaningful if
+    // it is an average over everyone's attempts rather than over the ones someone chose to count.
+    private async Task<LabRunResource?> ResolveDrillAsync(
+        LabRunResource resource,
+        RunView view,
+        ScenarioDefinition drill,
+        DateTime solvedAt,
+        string displayName,
+        CancellationToken ct)
+    {
+        var updated = await SetAnnotationsAsync(
+            view.RunId,
+            new()
+            {
+                [DrillSolvedAnnotation] = solvedAt.ToString("O"),
+                [DrillGoalsMetSinceAnnotation] = null,
+                [DrillRecordedAnnotation] = "1",
+            },
+            ct);
+
+        var startedAt = ParseAnnotationTime(resource.Spec.DrillStartedAt)
+            ?? resource.Metadata.CreationTimestamp
+            ?? solvedAt;
+        var elapsedMs = (long)Math.Max(0, (solvedAt - startedAt).TotalMilliseconds);
+        var mode = resource.Metadata.Annotations?.GetValueOrDefault(DrillModeAnnotation) == "ranked"
+            ? "ranked"
+            : "practice";
+
+        await _results.RecordAsync(new DrillResult
+        {
+            RunId = view.RunId,
+            DrillId = drill.Id,
+            Mode = mode,
+            OwnerKey = view.Owner,
+            DisplayName = string.IsNullOrWhiteSpace(displayName) ? "operator" : displayName.Trim(),
+            StageCount = drill.Stages.Count,
+            ElapsedMs = elapsedMs,
+            Missteps = view.DrillWrongChosen,
+            CorrectChosen = view.DrillCorrectChosenAll,
+            CorrectTotal = view.DrillCorrectTotalAll,
+            StartedUtc = startedAt,
+            CompletedUtc = solvedAt,
+        }, ct);
+
+        return updated;
+    }
+
+    private static DateTime? ParseAnnotationTime(string? value) =>
+        !string.IsNullOrEmpty(value) &&
+        DateTime.TryParse(
+            value, null,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+            out var parsed)
+            ? parsed
+            : null;
+
+    private static int SetupInt(
+        IReadOnlyDictionary<string, object> setup, string key, int fallback) =>
+        setup.TryGetValue(key, out var value) && value is int number ? number : fallback;
+
+    private static string SetupString(
+        IReadOnlyDictionary<string, object> setup, string key, string fallback) =>
+        setup.TryGetValue(key, out var value) && value is string text ? text : fallback;
+
     // Best effort by design: the next poll evaluates again, so failing to record progress now costs
-    // nothing but a little time.
-    private async Task SetAnnotationsAsync(
+    // nothing but a little time. Returns the updated resource so a caller can render the change in
+    // the same frame, or null if the patch did not land.
+    private async Task<LabRunResource?> SetAnnotationsAsync(
         string runId, Dictionary<string, string?> annotations, CancellationToken ct)
     {
         var patch = new k8s.Models.V1Patch(
@@ -802,12 +996,14 @@ public sealed class RunBroker
             k8s.Models.V1Patch.PatchType.MergePatch);
         try
         {
-            await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+            var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
                 patch, LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
+            return Parse(updated);
         }
         catch (HttpOperationException ex)
         {
             _log.LogDebug(ex, "Could not update drill annotations on {RunId}.", runId);
+            return null;
         }
     }
 
@@ -919,6 +1115,12 @@ public sealed class RunBroker
         [JsonPropertyName("memory")] public string Memory { get; set; } = "0";
     }
 }
+
+/// <summary>A judged drill frame: the current stage's goals, and the run they were judged against —
+/// which is the POST-transition run when the evaluation advanced a stage or resolved the drill.</summary>
+public sealed record DrillEvaluation(
+    IReadOnlyList<DrillGoalState> Goals,
+    LabRunResource Resource);
 
 public sealed record PlatformStatus(
     string Cluster,

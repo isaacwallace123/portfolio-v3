@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Serialization;
 
 namespace IsaacWallace.Api.Runs;
@@ -41,13 +43,19 @@ public sealed class LabRunSpec
     [JsonPropertyName("resourceClass")] public string ResourceClass { get; set; } = "standard";
     [JsonPropertyName("ttlSeconds")] public int TtlSeconds { get; set; } = 900;
 
-    // Decision-driven fields. Nullable so create omits them and the XRD defaults (3 / 0) apply.
+    // Decision-driven fields. Nullable so create omits them and the XRD defaults apply.
     [JsonPropertyName("apiReplicas")] public int? ApiReplicas { get; set; }
+    // Replicas running the CANDIDATE build beside the stable ones. They share the gateway's backend
+    // pool, so the new build's share of traffic is its share of the replicas.
+    [JsonPropertyName("canaryReplicas")] public int? CanaryReplicas { get; set; }
     [JsonPropertyName("cacheReplicas")] public int? CacheReplicas { get; set; }
     [JsonPropertyName("releaseTrack")] public string? ReleaseTrack { get; set; }
     [JsonPropertyName("dataState")] public string? DataState { get; set; }
     [JsonPropertyName("targetPool")] public string? TargetPool { get; set; }
     [JsonPropertyName("loadReplicas")] public int? LoadReplicas { get; set; }
+    // The Envoy gateway is a scalable tier: past roughly 2000 rps it, rather than the checkout tier
+    // behind it, is where requests queue.
+    [JsonPropertyName("gatewayReplicas")] public int? GatewayReplicas { get; set; }
     [JsonPropertyName("restartToken")] public string? RestartToken { get; set; }
 
     // A drill layers an objective, clock, and decision set over an already-running cluster.
@@ -78,7 +86,7 @@ public sealed record RunTelemetry(
     int PostgresCpuPct,
     int ApiReplicas,
     bool CacheEnabled,
-    // Real request metrics scraped from the run's Envoy gateway.
+    // Real request metrics scraped from the run's Envoy gateways.
     int RequestsPerSec,
     int P95LatencyMs,
     double ErrorRatePct);
@@ -107,7 +115,7 @@ public sealed record RunComponent(
     int CpuLimitMillicoresPerPod,
     IReadOnlyList<RunPod> Pods);
 
-// One option in the active drill's quiz. Correctness and its explanation are only revealed once the
+// One option in the active stage's quiz. Correctness and its explanation are only revealed once the
 // option has been chosen, so the answer is not sitting in the page before you decide.
 public sealed record DrillOption(
     string Id,
@@ -144,12 +152,18 @@ public sealed record RunView(
     bool Renewable,
     DateTime? CreatedAt,
     int ApiReplicas,
+    /// <summary>Replicas serving the candidate build alongside the stable fleet. Zero is no canary.</summary>
+    int CanaryReplicas,
     bool CacheEnabled,
     string ReleaseTrack,
     string DataState,
     string TargetPool,
     bool LoadEnabled,
     int LoadGenerators,
+    int GatewayReplicas,
+    // What the generators are asking the stack for, so the page can show demand next to what is
+    // actually being served. Offered load is fixed per generator by the open-loop k6 script.
+    int OfferedRequestsPerSec,
     string RestartToken,
     IReadOnlyList<AcceptedDecision> AcceptedDecisions,
     IReadOnlyList<string> AvailableDecisions,
@@ -157,19 +171,40 @@ public sealed record RunView(
     string DrillId,
     string DrillTitle,
     string DrillObjective,
-    int DrillElapsedSeconds,
-    int DrillDurationSeconds,
+    // practice (single incident) | ranked (a cascade, and the only kind that is timed for the board)
+    string DrillMode,
+    // Where in the cascade this run is. Single-stage drills are stage 1 of 1.
+    int DrillStage,
+    int DrillStageCount,
+    string DrillStageTitle,
+    string DrillStageObjective,
+    // The handover note for the CURRENT stage: what the last fix caused. Empty on the first stage.
+    string DrillStageHandoff,
+    // Whole-drill elapsed, in milliseconds, and frozen at the moment the drill was solved. A solved
+    // drill's clock must stop, or the number on screen is the age of the result rather than the
+    // result — and for a ranked time it has to be the result.
+    long DrillElapsedMs,
+    // Seconds since the CURRENT stage began. Decision unlocks are gated on this, not on the whole
+    // drill, so every stage gets its own baseline before its options open.
+    int DrillStageElapsedSeconds,
+    // A reference time for the drill, not a deadline. Drills do not expire.
+    int DrillParSeconds,
     bool DrillComplete,
-    // A drill is solved when the WORKLOAD reaches the target state, not when a set of buttons has
-    // been pressed — see DrillGoals. The broker records the moment that first happens, so a later
-    // dip in a measured signal cannot un-solve it. The counts let the UI show quiz progress
-    // ("1 of 2") without revealing WHICH options are the correct ones.
+    // A drill is solved when the WORKLOAD reaches the target state of its LAST stage, not when a set
+    // of buttons has been pressed — see DrillGoals. The broker records the moment that first
+    // happens, so a later dip in a measured signal cannot un-solve it. The counts let the UI show
+    // quiz progress ("1 of 2") without revealing WHICH options are the correct ones.
     bool DrillSolved,
     int DrillCorrectChosen,
     int DrillCorrectTotal,
+    // The same counts across every stage of the drill so far, for the summary at the end.
+    int DrillCorrectChosenAll,
+    int DrillCorrectTotalAll,
+    // Missteps accumulate across the whole cascade: a wrong move in stage one was still really
+    // applied to this cluster, and stage three is running on what it left behind.
     int DrillWrongChosen,
     IReadOnlyList<DrillOption> DrillOptions,
-    // Live progress against the drill's objective. Empty unless telemetry was available.
+    // Live progress against the current stage's objective. Empty unless telemetry was available.
     IReadOnlyList<DrillGoalState> DrillGoals,
     // How long the objective has held so far, and how long it must, so the page can explain the
     // wait instead of looking stuck once every condition is green.
@@ -189,6 +224,7 @@ public sealed record RunView(
             status = "provisioning";
 
         var createdAt = r.Metadata.CreationTimestamp;
+        var annotations = r.Metadata.Annotations;
 
         // The active drill is spec.drillId when a drill was started on a running cluster. Runs created
         // directly against a drill scenario (the original one-run-per-drill flow) still work: their
@@ -198,14 +234,7 @@ public sealed record RunView(
         DateTime? drillStart = null;
         if (drillId.Length > 0)
         {
-            drillStart = DateTime.TryParse(
-                r.Spec.DrillStartedAt,
-                null,
-                System.Globalization.DateTimeStyles.AdjustToUniversal |
-                System.Globalization.DateTimeStyles.AssumeUniversal,
-                out var parsed)
-                ? parsed
-                : createdAt;
+            drillStart = ParseTime(r.Spec.DrillStartedAt) ?? createdAt;
         }
         else if (ScenarioDefinitions.IsDrill(r.Spec.ScenarioId))
         {
@@ -217,55 +246,107 @@ public sealed record RunView(
         var definition = drillId.Length > 0
             ? ScenarioDefinitions.All.GetValueOrDefault(drillId)
             : null;
-        var elapsedSeconds = drillStart is null
-            ? 0
-            : Math.Max(0, (DateTime.UtcNow - drillStart.Value).TotalSeconds);
 
-        var accepted = ReadAcceptedDecisions(r, drillStart ?? createdAt);
-        var acceptedIds = accepted.Select(d => d.Id).ToHashSet(StringComparer.Ordinal);
-        var available = definition?.Decisions
-            .Where(d => elapsedSeconds >= d.AvailableAfterSeconds && !acceptedIds.Contains(d.Id))
+        // Which stage of the cascade is live. Clamped rather than trusted: an annotation left behind
+        // by a longer drill must not index past a shorter one's stage list.
+        var stageIndex = 0;
+        if (definition is not null && definition.Stages.Count > 0)
+        {
+            var raw = annotations?.GetValueOrDefault(RunBroker.DrillStageAnnotation);
+            if (int.TryParse(raw, out var parsedStage))
+                stageIndex = Math.Clamp(parsedStage, 0, definition.Stages.Count - 1);
+        }
+        var stage = definition is { Stages.Count: > 0 } ? definition.Stages[stageIndex] : null;
+
+        // Solved is a recorded fact, not a recomputation: the broker writes this annotation the first
+        // time the LAST stage's objective is actually met.
+        var solvedAt = drillId.Length > 0
+            ? ParseTime(annotations?.GetValueOrDefault(RunBroker.DrillSolvedAnnotation))
+            : null;
+        var solved = solvedAt is not null;
+
+        // The whole-drill clock STOPS at the solve. Everything after that instant is time spent
+        // reading the result, and counting it would make a recorded time depend on how long the tab
+        // stayed open.
+        var elapsedMs = drillStart is null
+            ? 0
+            : (long)Math.Max(0, ((solvedAt ?? DateTime.UtcNow) - drillStart.Value).TotalMilliseconds);
+
+        // Options unlock on the CURRENT stage's clock, so stage three does not open with everything
+        // already available just because the drill has been running a while.
+        var stageStart = ParseTime(annotations?.GetValueOrDefault(RunBroker.DrillStageStartedAnnotation))
+            ?? drillStart;
+        var stageElapsed = stageStart is null
+            ? 0
+            : Math.Max(0, ((solvedAt ?? DateTime.UtcNow) - stageStart.Value).TotalSeconds);
+
+        var accepted = ReadAcceptedDecisions(r, definition, stageStart ?? drillStart ?? createdAt);
+        // Decisions are recorded per stage, so the same id can appear in more than one stage of a
+        // cascade without one stage's answer pre-filling another's.
+        var chosenHere = accepted
+            .Where(d => d.Stage == stageIndex)
+            .Select(d => d.Id)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var available = stage?.Decisions
+            .Where(d => stageElapsed >= d.AvailableAfterSeconds && !chosenHere.Contains(d.Id))
             .Select(d => d.Id)
             .ToArray() ?? [];
 
-        var duration = definition?.DurationSeconds ?? 0;
-        var drillComplete = definition is not null && elapsedSeconds >= duration;
+        var correctTotal = stage?.Decisions.Count(d => d.IsCorrect) ?? 0;
+        var correctChosen = stage?.Decisions.Count(d => d.IsCorrect && chosenHere.Contains(d.Id)) ?? 0;
 
-        var correctTotal = definition?.Decisions.Count(d => d.IsCorrect) ?? 0;
-        var correctChosen = definition?.Decisions.Count(d => d.IsCorrect && acceptedIds.Contains(d.Id)) ?? 0;
-        var wrongChosen = definition?.Decisions.Count(d => !d.IsCorrect && acceptedIds.Contains(d.Id)) ?? 0;
+        // Across the whole cascade: what the summary at the end is about.
+        var correctTotalAll = 0;
+        var correctChosenAll = 0;
+        var wrongChosen = 0;
+        if (definition is not null)
+        {
+            for (var i = 0; i <= stageIndex && i < definition.Stages.Count; i++)
+            {
+                var stageChosen = accepted
+                    .Where(d => d.Stage == i)
+                    .Select(d => d.Id)
+                    .ToHashSet(StringComparer.Ordinal);
+                foreach (var d in definition.Stages[i].Decisions)
+                {
+                    if (d.IsCorrect) correctTotalAll++;
+                    if (!stageChosen.Contains(d.Id)) continue;
+                    if (d.IsCorrect) correctChosenAll++;
+                    else wrongChosen++;
+                }
+            }
+        }
+
         // How long every condition has held continuously, per the broker's running record.
         var heldSeconds = 0;
-        var heldSince = r.Metadata.Annotations?
-            .GetValueOrDefault(RunBroker.DrillGoalsMetSinceAnnotation);
-        if (!string.IsNullOrEmpty(heldSince) &&
-            DateTime.TryParse(
-                heldSince, null,
-                System.Globalization.DateTimeStyles.AdjustToUniversal |
-                System.Globalization.DateTimeStyles.AssumeUniversal,
-                out var heldFrom))
-            heldSeconds = Math.Max(0, (int)(DateTime.UtcNow - heldFrom).TotalSeconds);
+        var heldFrom = ParseTime(annotations?.GetValueOrDefault(RunBroker.DrillGoalsMetSinceAnnotation));
+        if (heldFrom is not null)
+            heldSeconds = Math.Max(0, (int)(DateTime.UtcNow - heldFrom.Value).TotalSeconds);
 
-        // Solved is a recorded fact, not a recomputation: the broker writes this annotation the first
-        // time the objective is actually met.
-        var solved =
-            drillId.Length > 0 &&
-            r.Metadata.Annotations?.ContainsKey(RunBroker.DrillSolvedAnnotation) == true;
-
-        var options = definition?.Decisions.Select(d =>
+        var options = stage?.Decisions.Select(d =>
         {
-            var chosen = acceptedIds.Contains(d.Id);
+            var chosen = chosenHere.Contains(d.Id);
             return new DrillOption(
                 d.Id,
                 d.Label,
                 d.Description,
-                elapsedSeconds >= d.AvailableAfterSeconds,
-                Math.Max(0, (int)Math.Ceiling(d.AvailableAfterSeconds - elapsedSeconds)),
+                stageElapsed >= d.AvailableAfterSeconds,
+                Math.Max(0, (int)Math.Ceiling(d.AvailableAfterSeconds - stageElapsed)),
                 chosen,
                 // Withheld until the option is chosen, so the quiz cannot be read off the wire.
                 chosen ? d.IsCorrect : null,
                 chosen ? d.Explanation : "");
-        }).ToArray() ?? [];
+        })
+        // Presented in an order that is stable for this run and different between runs. Fixed order
+        // rewarded remembering that the answer was third; re-randomising every poll would move a
+        // button out from under the cursor. Seeded on the run, the drill, and the stage, so it is the
+        // same list on every replica and every reload of the same attempt.
+        .OrderBy(o => ShuffleKey(r.Spec.RunId, drillId, stageIndex, o.Id))
+        .ToArray() ?? [];
+
+        var loadGenerators = r.Spec.LoadReplicas ?? 1;
+        var ttl = r.Spec.TtlSeconds;
 
         return new RunView(
             r.Spec.RunId,
@@ -273,31 +354,43 @@ public sealed record RunView(
             r.Spec.Owner ?? "",
             status,
             r.Status?.Namespace,
-            r.Spec.TtlSeconds,
-            r.Metadata.Annotations?.ContainsKey(RunBroker.RenewedAnnotation) != true,
+            ttl,
+            annotations?.ContainsKey(RunBroker.RenewedAnnotation) != true,
             createdAt,
             r.Spec.ApiReplicas ?? 3,
+            r.Spec.CanaryReplicas ?? 0,
             (r.Spec.CacheReplicas ?? 0) > 0,
             r.Spec.ReleaseTrack ?? "stable",
             r.Spec.DataState ?? "healthy",
             r.Spec.TargetPool ?? "apps",
-            (r.Spec.LoadReplicas ?? 1) > 0,
-            r.Spec.LoadReplicas ?? 1,
+            loadGenerators > 0,
+            loadGenerators,
+            r.Spec.GatewayReplicas ?? 1,
+            LoadModel.Offered(loadGenerators),
             r.Spec.RestartToken ?? "baseline",
             accepted,
             available,
             definition is null ? "" : drillId,
             definition?.Title ?? "",
             definition?.Objective ?? "",
-            (int)Math.Round(elapsedSeconds),
-            duration,
-            // A drill ends when it is SOLVED. There is no deadline: the elapsed clock is only used to
-            // stagger when options unlock (so there is a baseline to judge against), and running past
-            // the nominal duration is not a failure state.
+            definition?.Mode ?? "",
+            stage is null ? 0 : stageIndex + 1,
+            definition?.Stages.Count ?? 0,
+            stage?.Title ?? "",
+            stage?.Objective ?? "",
+            stage?.Handoff ?? "",
+            elapsedMs,
+            (int)Math.Round(stageElapsed),
+            definition?.ParSeconds ?? 0,
+            // A drill ends when it is SOLVED. There is no deadline: the stage clock only staggers
+            // when options unlock (so there is a baseline to judge against), and running past par is
+            // a slower result, not a failed one.
             solved,
             solved,
             correctChosen,
             correctTotal,
+            correctChosenAll,
+            correctTotalAll,
             wrongChosen,
             options,
             [],
@@ -305,31 +398,62 @@ public sealed record RunView(
             (int)RunBroker.GoalHold.TotalSeconds);
     }
 
+    /// <summary>Stable, process-independent ordering key. String.GetHashCode is seeded per process,
+    /// so with two api replicas it would deal the options differently depending on which one served
+    /// the poll — the list would visibly reshuffle under the cursor twice a second.</summary>
+    private static string ShuffleKey(string runId, string drillId, int stage, string optionId)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes($"{runId}:{drillId}:{stage}:{optionId}"));
+        return Convert.ToHexStringLower(bytes.AsSpan(0, 8));
+    }
+
+    private static DateTime? ParseTime(string? value) =>
+        !string.IsNullOrEmpty(value) &&
+        DateTime.TryParse(
+            value, null,
+            System.Globalization.DateTimeStyles.AdjustToUniversal |
+            System.Globalization.DateTimeStyles.AssumeUniversal,
+            out var parsed)
+            ? parsed
+            : null;
+
     private static IReadOnlyList<AcceptedDecision> ReadAcceptedDecisions(
         LabRunResource resource,
-        DateTime? createdAt)
+        ScenarioDefinition? definition,
+        DateTime? since)
     {
-        const string prefix = "homeops.isaacwallace.dev/decision-";
         if (resource.Metadata.Annotations is null) return [];
 
         return resource.Metadata.Annotations
-            .Where(pair => pair.Key.StartsWith(prefix, StringComparison.Ordinal))
+            .Where(pair => pair.Key.StartsWith(RunBroker.DecisionAnnotationPrefix, StringComparison.Ordinal))
             .Select(pair =>
             {
                 var acceptedAt = DateTime.TryParse(pair.Value, out var parsed)
                     ? parsed.ToUniversalTime()
-                    : createdAt ?? DateTime.UtcNow;
-                var offset = createdAt is null
+                    : since ?? DateTime.UtcNow;
+                var offset = since is null
                     ? 0
-                    : Math.Max(0, (int)(acceptedAt - createdAt.Value).TotalMilliseconds - 16_000);
-                var id = pair.Key[prefix.Length..];
-                var label = ScenarioDefinitions.All.GetValueOrDefault(resource.Spec.ScenarioId)?
-                    .Decisions.FirstOrDefault(d => d.Id == id)?.Label ?? id;
-                return new AcceptedDecision(id, label, offset);
+                    : Math.Max(0, (int)(acceptedAt - since.Value).TotalMilliseconds);
+
+                // "decision-2-rollback" → stage 2, id "rollback". Keys written before drills had
+                // stages carry no index; they belong to the only stage such a drill had.
+                var suffix = pair.Key[RunBroker.DecisionAnnotationPrefix.Length..];
+                var stage = 0;
+                var dash = suffix.IndexOf('-');
+                if (dash > 0 && int.TryParse(suffix[..dash], out var parsedStage))
+                {
+                    stage = parsedStage;
+                    suffix = suffix[(dash + 1)..];
+                }
+
+                var label = definition is not null && stage < definition.Stages.Count
+                    ? definition.Stages[stage].Decisions.FirstOrDefault(d => d.Id == suffix)?.Label ?? suffix
+                    : suffix;
+                return new AcceptedDecision(suffix, label, offset, stage);
             })
             .OrderBy(decision => decision.AcceptedAtMs)
             .ToArray();
     }
 }
 
-public sealed record AcceptedDecision(string Id, string Label, int AcceptedAtMs);
+public sealed record AcceptedDecision(string Id, string Label, int AcceptedAtMs, int Stage);

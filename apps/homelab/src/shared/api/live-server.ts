@@ -19,6 +19,7 @@ export async function liveFetch(
   path: string,
   init?: RequestInit,
   owner?: string,
+  ownerName?: string,
 ): Promise<Response> {
   return fetch(`${API_BASE}${path}`, {
     ...init,
@@ -28,6 +29,9 @@ export async function liveFetch(
       // Identifies which signed-in person owns the cluster. Resolved server-side from the SSO
       // session; the browser never supplies it, so it cannot be spoofed by a caller.
       ...(owner ? { "X-Owner-Key": owner } : {}),
+      // The name to put on the leaderboard, from the same verified session. Display only — nothing
+      // is ever authorised by it, so the API can take it at face value for a row label.
+      ...(ownerName ? { "X-Owner-Name": ownerName } : {}),
       ...init?.headers,
     },
     cache: "no-store",

@@ -8,24 +8,36 @@ namespace IsaacWallace.Api.Runs;
 // errors — the arena renders exactly these numbers.
 //
 // Envoy's counters/histograms are cumulative since start, so a single read can't show "right now".
-// Each call therefore takes TWO prometheus scrapes ~1s apart and reports the delta: request rate and
+// Each call therefore takes TWO prometheus scrapes ~2s apart and reports the delta: request rate and
 // 5xx rate over the window, and a windowed p95 via histogram-quantile over the bucket delta. That
 // makes the metrics live — p95 actually falls once a scale decision relieves the saturation — and
 // stateless, so it works regardless of which api replica serves the poll.
+//
+// The gateway is a scalable tier, so a run may have several Envoys and each one only counts the
+// requests it served. Both rounds therefore scrape EVERY gateway pod directly by IP and sum them.
+// Going through the ClusterIP Service instead would have kube-proxy pick one pod per round: the two
+// rounds could land on different pods (a meaningless, often negative delta) and even when they
+// agreed the run would report one gateway's share as though it were the whole cluster's throughput.
 public sealed partial class EnvoyScraper(ILogger<EnvoyScraper> log)
 {
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(3) };
 
-    public async Task<EnvoyMetrics?> ScrapeAsync(string runId, string ns, CancellationToken ct)
+    /// <param name="gatewayIps">Pod IPs of the run's Envoy replicas. Empty falls back to the
+    /// namespace Service, which is correct only while the gateway is a single pod.</param>
+    public async Task<EnvoyMetrics?> ScrapeAsync(
+        string runId, string ns, IReadOnlyList<string> gatewayIps, CancellationToken ct)
     {
-        var url = $"http://envoy.{ns}.svc.cluster.local:9901/stats/prometheus";
+        var urls = gatewayIps.Count > 0
+            ? gatewayIps.Select(ip => $"http://{ip}:9901/stats/prometheus").ToArray()
+            : [$"http://envoy.{ns}.svc.cluster.local:9901/stats/prometheus"];
+
         Sample a, b;
         var t0 = DateTime.UtcNow;
         try
         {
-            a = Parse(await http.GetStringAsync(url, ct));
+            a = await SampleAllAsync(urls, ct);
             await Task.Delay(2000, ct);
-            b = Parse(await http.GetStringAsync(url, ct));
+            b = await SampleAllAsync(urls, ct);
         }
         catch (Exception ex)
         {
@@ -44,6 +56,46 @@ public sealed partial class EnvoyScraper(ILogger<EnvoyScraper> log)
             RequestsPerSec: (int)Math.Round(dCompleted / dt),
             P95LatencyMs: (int)Math.Round(p95),
             ErrorRatePct: Math.Round(errPct, 2));
+    }
+
+    // One round: every gateway at once, summed. Scraping them in parallel keeps the round short, so
+    // the delta window stays close to the 2s the rate is divided by.
+    //
+    // A gateway that fails to answer is skipped rather than failing the round. A replica that has
+    // just been scheduled has no stats to give, and losing the whole frame because the fleet is mid
+    // scale-out would blank the graph at precisely the moment the operator is watching it.
+    private async Task<Sample> SampleAllAsync(IReadOnlyList<string> urls, CancellationToken ct)
+    {
+        var texts = await Task.WhenAll(urls.Select(async url =>
+        {
+            try { return await http.GetStringAsync(url, ct); }
+            catch (Exception ex)
+            {
+                log.LogDebug(ex, "Gateway {Url} did not answer this round.", url);
+                return null;
+            }
+        }));
+
+        var answered = texts.OfType<string>().ToArray();
+        if (answered.Length == 0) throw new HttpRequestException("No gateway answered.");
+
+        long completed = 0, fivexx = 0;
+        // Histograms merge by summing each bucket's count across gateways: the fleet's latency
+        // distribution is the sum of its members' distributions, so a quantile over the merged
+        // buckets is the fleet-wide quantile.
+        var buckets = new Dictionary<double, long>();
+        foreach (var one in answered.Select(Parse))
+        {
+            completed += one.Completed;
+            fivexx += one.FiveXx;
+            foreach (var (le, count) in one.Buckets)
+                buckets[le] = buckets.GetValueOrDefault(le) + count;
+        }
+
+        return new Sample(
+            completed,
+            fivexx,
+            buckets.OrderBy(pair => pair.Key).Select(pair => (pair.Key, pair.Value)).ToArray());
     }
 
     // histogram_quantile(0.95) over the per-bucket delta between two cumulative samples.

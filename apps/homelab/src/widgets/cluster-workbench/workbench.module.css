@@ -350,6 +350,145 @@
 .drillItem svg {
   color: var(--ink-dim);
 }
+/* What the drill has cost people: stages, its par time, everyone's average, and your own best. */
+.drillMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+  margin-top: 5px;
+}
+.drillMeta em {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.drillMine {
+  color: var(--mint) !important;
+}
+.drillGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 14px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-mid);
+}
+.drillGroup span {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+/* Ranked is the headline action, so it is the one thing in the picker that is not a list row. */
+.rankedCard {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  text-align: left;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: inherit;
+  cursor: pointer;
+}
+.rankedCard:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.rankedCard:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.rankedCard b {
+  display: block;
+  font-size: 13px;
+  color: var(--ink);
+}
+.rankedCard small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+.rankedIcon svg {
+  color: var(--accent);
+}
+.rankedTag {
+  margin-left: 7px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+/* One pip per stage: the shape of a cascade, and where in it you are. */
+.stageTrack {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.stageTrack i {
+  width: 16px;
+  height: 3px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--line) 80%, transparent);
+}
+.stageDone {
+  background: var(--mint) !important;
+}
+.stageNow {
+  background: var(--accent) !important;
+}
+.stageTrack span {
+  margin-left: 4px;
+  font-size: 10.5px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.stageName {
+  margin: 0 0 4px !important;
+  font-size: 12px !important;
+  font-weight: 600;
+  color: var(--ink) !important;
+}
+
+/* The handover note between stages: what the last fix caused. Amber because it is a new incident,
+   not an error in the page. */
+.handoff {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--amber) 38%, var(--line));
+  background: color-mix(in srgb, var(--amber) 9%, transparent);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-mid);
+}
+.handoff svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--amber);
+}
 
 .objective {
   padding: 11px;
@@ -942,6 +1081,25 @@
 .solvedSub {
   color: var(--ink-dim) !important;
   font-size: 11.5px !important;
+}
+/* What the time is worth: the drill's par, everyone's average, and your own best. A number with
+   nothing to compare it against is not a result. */
+.compareRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 14px;
+  font-size: 11px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.compareRow span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.compareRow svg {
+  color: currentColor;
 }
 .primarySm {
   display: inline-flex;

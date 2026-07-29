@@ -1,7 +1,7 @@
 import type { RunTelemetry, RunView } from "@iw/lab-runtime";
 import type { DrillGoal } from "@/shared/api/live-client";
 
-/** One option in the active drill's quiz. Correctness is withheld until it is chosen. */
+/** One option in the active stage's quiz. Correctness is withheld until it is chosen. */
 export interface DrillOption {
   id: string;
   label: string;
@@ -16,9 +16,9 @@ export interface DrillOption {
 
 // Projects the API's run model into the shape the arena renders. Everything here is real: the run is
 // a Crossplane LabRun (disposable namespace + live workload), the telemetry is measured by that run's
-// Envoy gateway and metrics-server, and the drill clock, decisions, and their unlock state are
-// broker-authoritative. Nothing is simulated — the event stream comes from real Kubernetes Events on
-// a separate endpoint, and operator decisions patch the live workload.
+// Envoy gateways and metrics-server, and the drill clock, stage, decisions, and their unlock state
+// are broker-authoritative. Nothing is simulated — the event stream comes from real Kubernetes Events
+// on a separate endpoint, and operator decisions patch the live workload.
 
 // SLO the arena scores against (ms). Matches the drill objectives in the API catalog.
 const LATENCY_TARGET_MS = 120;
@@ -34,23 +34,38 @@ export interface RealRun {
   targetPool?: "apps" | "infra";
   loadEnabled?: boolean;
   loadGenerators?: number;
+  canaryReplicas?: number;
+  gatewayReplicas?: number;
+  /** What the generators are asking for, at a fixed rate each — demand, not capacity. */
+  offeredRequestsPerSec?: number;
   restartToken?: string;
   acceptedDecisions?: {
     id: string;
     label: string;
     acceptedAtMs: number;
+    stage: number;
   }[];
   availableDecisions?: string[];
-  // The drill currently layered on this cluster ("" when it is an open sandbox).
+  // The drill currently running on this cluster ("" when it is an open sandbox).
   drillId?: string;
   drillTitle?: string;
   drillObjective?: string;
-  drillElapsedSeconds?: number;
-  drillDurationSeconds?: number;
+  drillMode?: string;
+  drillStage?: number;
+  drillStageCount?: number;
+  drillStageTitle?: string;
+  drillStageObjective?: string;
+  drillStageHandoff?: string;
+  /** Whole-drill elapsed, frozen at the solve. */
+  drillElapsedMs?: number;
+  drillStageElapsedSeconds?: number;
+  drillParSeconds?: number;
   drillComplete?: boolean;
   drillSolved?: boolean;
   drillCorrectChosen?: number;
   drillCorrectTotal?: number;
+  drillCorrectChosenAll?: number;
+  drillCorrectTotalAll?: number;
   drillWrongChosen?: number;
   drillOptions?: DrillOption[];
   drillGoals?: DrillGoal[];
@@ -87,20 +102,42 @@ export interface LiveRunView extends RunView {
   loadEnabled: boolean;
   /** How many k6 generators are running — the load-intensity dial. */
   loadGenerators: number;
+  /** Envoy replicas. Past ~2000 rps the gateway, not the app tier, is where requests queue. */
+  gatewayReplicas: number;
+  /** Replicas serving the candidate build beside the stable fleet. Zero is no canary. */
+  canaryReplicas: number;
+  /** Requests a second the generators are offering, served or not. */
+  offeredRequestsPerSec: number;
   restartToken: string;
-  // Active drill layered on this cluster ("" when it is an open sandbox).
+  // Active drill running on this cluster ("" when the cluster is an open sandbox).
   drillId: string;
   drillTitle: string;
   drillObjective: string;
+  /** practice | ranked. Ranked drills are cascades and are the ones the board is built from. */
+  drillMode: string;
+  /** Position in the cascade, 1-based. Single-stage drills are stage 1 of 1. */
+  drillStage: number;
+  drillStageCount: number;
+  drillStageTitle: string;
+  drillStageObjective: string;
+  /** What the last fix caused. Empty on the first stage of a drill. */
+  drillStageHandoff: string;
+  /** Seconds since the current stage began — what option unlocks are gated on. */
+  drillStageElapsedSeconds: number;
+  /** A reference time for the drill, not a deadline. */
+  drillParSeconds: number;
   drillComplete: boolean;
   drillSolved: boolean;
   drillCorrectChosen: number;
   drillCorrectTotal: number;
+  /** The same counts across every stage so far — what the end-of-drill summary is about. */
+  drillCorrectChosenAll: number;
+  drillCorrectTotalAll: number;
   drillWrongChosen: number;
   drillOptions: DrillOption[];
-  /** Live progress against the drill's objective — what actually ends it. */
+  /** Live progress against the current stage's objective — what actually ends it. */
   drillGoals: DrillGoal[];
-  /** How long every condition has held, and how long it must, before the drill resolves. */
+  /** How long every condition has held, and how long it must, before the stage resolves. */
   drillHeldSeconds: number;
   drillHoldSeconds: number;
 }
@@ -108,16 +145,12 @@ export interface LiveRunView extends RunView {
 export function toLiveRunView(real: RealRun): LiveRunView {
   const createdMs = real.createdAt ? Date.parse(real.createdAt) : Date.now();
 
-  // The active drill's clock is owned by the API (it starts when the drill starts, not when the
-  // cluster was provisioned). Everything below is measured or broker-authoritative.
+  // The drill clock is owned by the API: it starts when the drill starts (not when the cluster was
+  // provisioned) and STOPS at the solve. It is deliberately not clamped to anything — a drill has no
+  // deadline, so a long run is a slow result rather than a capped one. Clamping it to the scenario's
+  // par time is what used to freeze every finished drill at 01:04.
   const drillId = real.drillId ?? "";
-  const drillDurationMs = (real.drillDurationSeconds ?? 0) * 1000;
-  const drillElapsedMs = Math.min(
-    (real.drillElapsedSeconds ?? 0) * 1000,
-    drillDurationMs || Number.MAX_SAFE_INTEGER,
-  );
-
-  const accepted = new Set((real.acceptedDecisions ?? []).map((d) => d.id));
+  const drillElapsedMs = Math.max(0, real.drillElapsedMs ?? 0);
 
   // Treat the cluster as "running" once its pods are measured, not only when the LabRun's Ready
   // condition flips (that lags Crossplane reconciliation by up to a minute).
@@ -131,9 +164,9 @@ export function toLiveRunView(real: RealRun): LiveRunView {
           ? "running"
           : "provisioning";
 
-  // 100% real telemetry — request rate, p95, and error rate are measured by the run's Envoy gateway;
-  // replicas and cache reflect actual cluster state. Score and Postgres load are derived from those
-  // real signals (there is no telemetry model any more).
+  // 100% real telemetry — request rate, p95, and error rate are measured by the run's Envoy
+  // gateways; replicas and cache reflect actual cluster state. Score and Postgres load are derived
+  // from those real signals (there is no telemetry model any more).
   const t = real.telemetry;
   const target = LATENCY_TARGET_MS;
   const p95 = t?.p95LatencyMs ?? 0;
@@ -149,17 +182,17 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     score: Math.max(0, 100 - (p95 > target ? 30 : 0) - (errRate > 1 ? 25 : 0)),
   };
 
-  // Decisions and their unlock state are broker-authoritative (gated on the drill's own clock).
-  const acceptedDecisions =
-    real.acceptedDecisions ??
-    [...accepted].map((id) => ({
-      id,
-      label: id,
-      acceptedAtMs: 0,
-    }));
+  const acceptedDecisions = (real.acceptedDecisions ?? []).map((d) => ({
+    id: d.id,
+    label: d.label,
+    acceptedAtMs: d.acceptedAtMs,
+  }));
   const availableDecisions = real.availableDecisions ?? [];
 
   const ttlMs = real.ttlSeconds * 1000;
+  const loadGenerators =
+    real.loadGenerators ?? (real.loadEnabled === false ? 0 : 1);
+
   return {
     runId: real.runId,
     scenarioId: real.scenarioId,
@@ -167,7 +200,7 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     queuePosition: 0,
     createdAt: real.createdAt ?? new Date().toISOString(),
     elapsedMs: drillElapsedMs,
-    durationMs: drillDurationMs,
+    durationMs: (real.drillParSeconds ?? 0) * 1000,
     ttlMs,
     renewable: real.renewable ?? false,
     deleting: real.status === "deleting",
@@ -188,16 +221,29 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     releaseTrack: real.releaseTrack ?? "stable",
     dataState: real.dataState ?? "healthy",
     targetPool: real.targetPool ?? "apps",
-    loadEnabled: real.loadEnabled ?? true,
-    loadGenerators: real.loadGenerators ?? (real.loadEnabled === false ? 0 : 1),
+    loadEnabled: loadGenerators > 0,
+    loadGenerators,
+    gatewayReplicas: real.gatewayReplicas ?? 1,
+    canaryReplicas: real.canaryReplicas ?? 0,
+    offeredRequestsPerSec: real.offeredRequestsPerSec ?? 0,
     restartToken: real.restartToken ?? "baseline",
     drillId,
     drillTitle: real.drillTitle ?? "",
     drillObjective: real.drillObjective ?? "",
+    drillMode: real.drillMode ?? "",
+    drillStage: real.drillStage ?? 0,
+    drillStageCount: real.drillStageCount ?? 0,
+    drillStageTitle: real.drillStageTitle ?? "",
+    drillStageObjective: real.drillStageObjective ?? "",
+    drillStageHandoff: real.drillStageHandoff ?? "",
+    drillStageElapsedSeconds: real.drillStageElapsedSeconds ?? 0,
+    drillParSeconds: real.drillParSeconds ?? 0,
     drillComplete: real.drillComplete ?? false,
     drillSolved: real.drillSolved ?? false,
     drillCorrectChosen: real.drillCorrectChosen ?? 0,
     drillCorrectTotal: real.drillCorrectTotal ?? 0,
+    drillCorrectChosenAll: real.drillCorrectChosenAll ?? 0,
+    drillCorrectTotalAll: real.drillCorrectTotalAll ?? 0,
     drillWrongChosen: real.drillWrongChosen ?? 0,
     drillOptions: real.drillOptions ?? [],
     drillGoals: real.drillGoals ?? [],

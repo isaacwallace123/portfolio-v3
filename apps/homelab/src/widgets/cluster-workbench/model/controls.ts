@@ -27,8 +27,32 @@ export const SLIDERS = [
     unit: (n: number) => `${n} replica${n === 1 ? "" : "s"}`,
   },
   {
-    label: "Load intensity",
-    hint: "Each generator runs the same closed-loop script — more generators mean more concurrent users.",
+    // The canary runs the candidate build beside the stable fleet and shares the gateway's backend
+    // pool, so its share of traffic is simply its share of the replicas.
+    label: "Canary replicas",
+    hint: "Replicas running the candidate build alongside the stable ones. Their share of the replicas is their share of the traffic.",
+    min: 0,
+    max: 3,
+    prefix: "canary-",
+    value: (r: LiveRunView) => r.canaryReplicas,
+    apply: (r: LiveRunView, n: number) => ({ ...r, canaryReplicas: n }),
+    unit: (n: number) => (n === 0 ? "no canary" : `${n} on candidate`),
+  },
+  {
+    label: "Gateway replicas",
+    hint: "Envoy is CPU-limited like every other tier. Past roughly 2000 rps the front door, not the app behind it, is where requests queue.",
+    min: 1,
+    max: 3,
+    prefix: "gateway-",
+    value: (r: LiveRunView) => r.gatewayReplicas,
+    apply: (r: LiveRunView, n: number) => ({ ...r, gatewayReplicas: n }),
+    unit: (n: number) => `${n} gateway${n === 1 ? "" : "s"}`,
+  },
+  {
+    // Offered load, not achieved load: the generators run an open-loop script at a fixed arrival
+    // rate, so this dial is how much traffic ARRIVES. Whether it gets served is the exercise.
+    label: "Offered load",
+    hint: "Each generator offers a fixed 500 requests a second whether or not the stack can serve them. The shortfall is what a capacity drill is scored on.",
     min: 0,
     max: 4,
     prefix: "load-",
@@ -37,8 +61,9 @@ export const SLIDERS = [
       ...r,
       loadGenerators: n,
       loadEnabled: n > 0,
+      offeredRequestsPerSec: n * 500,
     }),
-    unit: (n: number) => (n === 0 ? "no traffic" : `${n}× generator`),
+    unit: (n: number) => (n === 0 ? "no traffic" : `${n * 500}/s offered`),
   },
 ] as const;
 

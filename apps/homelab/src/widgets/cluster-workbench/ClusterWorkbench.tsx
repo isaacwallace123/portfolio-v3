@@ -66,6 +66,9 @@ export default function ClusterWorkbench() {
     run?.runId,
     run?.telemetry.apiReplicas,
     run?.loadGenerators,
+    // The gateway and canary are scalable tiers now, so their replica counts move cards too.
+    run?.gatewayReplicas,
+    run?.canaryReplicas,
   ]);
 
   // ── first paint: still resolving the session ──────────────────────────────
@@ -108,6 +111,10 @@ export default function ClusterWorkbench() {
         return run.loadGenerators;
       case "redis":
         return run.telemetry.cacheActive ? 1 : 0;
+      case "envoy":
+        return run.gatewayReplicas;
+      case "checkout-canary":
+        return run.canaryReplicas;
       default:
         return 1;
     }

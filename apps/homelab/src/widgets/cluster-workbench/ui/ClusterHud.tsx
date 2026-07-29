@@ -130,9 +130,27 @@ export function ClusterHud({
       </div>
 
       <div className={styles.hudBottomRight}>
-        <div className={styles.stat}>
-          <span>Throughput</span>
-          <b>{t.requestsPerSec}/s</b>
+        {/* Served against offered. The generators run at a fixed arrival rate, so a throughput
+            number on its own cannot tell you whether the stack is keeping up — the shortfall
+            between these two is the whole signal a capacity drill is scored on. */}
+        <div
+          className={`${styles.stat} ${
+            run.offeredRequestsPerSec > 0 &&
+            t.requestsPerSec < run.offeredRequestsPerSec * 0.8
+              ? styles.statBad
+              : ""
+          }`}
+        >
+          <span>
+            {run.offeredRequestsPerSec > 0 ? "Served / offered" : "Throughput"}
+          </span>
+          <b>
+            {t.requestsPerSec}
+            {run.offeredRequestsPerSec > 0
+              ? ` / ${run.offeredRequestsPerSec}`
+              : ""}
+            /s
+          </b>
         </div>
         <div
           className={`${styles.stat} ${t.p95LatencyMs > t.latencyTargetMs ? styles.statBad : ""}`}

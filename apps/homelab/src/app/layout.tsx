@@ -19,6 +19,7 @@ const NAV_LINKS = [
   { href: "/", label: "Overview" },
   // One surface: provision a cluster, operate it, and run drills on it.
   { href: "/practice", label: "Practice cluster" },
+  { href: "/leaderboard", label: "Leaderboard" },
   { href: "/topology", label: "Live topology" },
 ] as const;
 
