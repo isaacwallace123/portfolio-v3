@@ -158,14 +158,11 @@ public static class RunEndpoints
             var resource = await broker.GetOwnedAsync(runId, owner, ct);
             if (resource is null) return Results.NotFound(new { error = "No such run." });
 
-            // Gathered concurrently: the slowest of these is the Envoy scrape, and serialising them
-            // would put the whole frame behind it.
-            var telemetryTask = broker.GetTelemetryAsync(runId, owner, ct);
-            var componentsTask = broker.GetComponentsAsync(runId, owner, ct);
-            var eventsTask = broker.GetEventsAsync(runId, owner, ct);
-            var traceTask = broker.GetTraceAsync(runId, owner, ct);
-            await Task.WhenAll(telemetryTask, componentsTask, eventsTask, traceTask);
-            var telemetry = await telemetryTask;
+            // One pass over the namespace. Composing this from the four public read methods meant
+            // each of them re-fetched the LabRun to find the namespace and separately listed pods
+            // and metrics — five GETs of a run already in hand, twice the listings, every 1.2s.
+            var frame = await broker.GetFrameAsync(resource, ct);
+            var telemetry = frame.Telemetry;
 
             // Judging the drill needs the run and its telemetry together, which is exactly what a
             // snapshot has. Doing it here also means completion is recorded from the same numbers
@@ -179,9 +176,9 @@ public static class RunEndpoints
             {
                 run = RunView.From(judged.Resource) with { DrillGoals = judged.Goals },
                 telemetry,
-                components = await componentsTask ?? [],
-                events = await eventsTask ?? [],
-                trace = await traceTask,
+                components = frame.Components,
+                events = frame.Events,
+                trace = frame.Trace,
             });
         }).RequireScope(ApiScopes.RunsRead);
 

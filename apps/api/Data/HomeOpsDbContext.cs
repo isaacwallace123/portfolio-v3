@@ -26,6 +26,9 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
             e.HasIndex(r => new { r.RunId, r.DrillId, r.StartedUtc }).IsUnique();
             e.HasIndex(r => r.DrillId);
             e.HasIndex(r => r.OwnerKey);
+            // The leaderboard reads ranked rows for a set of drills; the stats endpoint groups by
+            // drill. Both start with this pair, so one composite index serves the two hot reads.
+            e.HasIndex(r => new { r.Mode, r.DrillId });
         });
     }
 
@@ -61,6 +64,7 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
                   ON "DrillResults" ("RunId", "DrillId", "StartedUtc");
               CREATE INDEX IF NOT EXISTS "IX_DrillResults_DrillId" ON "DrillResults" ("DrillId");
               CREATE INDEX IF NOT EXISTS "IX_DrillResults_OwnerKey" ON "DrillResults" ("OwnerKey");
+              CREATE INDEX IF NOT EXISTS "IX_DrillResults_Mode_DrillId" ON "DrillResults" ("Mode", "DrillId");
               """
             : """
               CREATE TABLE IF NOT EXISTS "DrillResults" (
@@ -82,6 +86,7 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
                   ON "DrillResults" ("RunId", "DrillId", "StartedUtc");
               CREATE INDEX IF NOT EXISTS "IX_DrillResults_DrillId" ON "DrillResults" ("DrillId");
               CREATE INDEX IF NOT EXISTS "IX_DrillResults_OwnerKey" ON "DrillResults" ("OwnerKey");
+              CREATE INDEX IF NOT EXISTS "IX_DrillResults_Mode_DrillId" ON "DrillResults" ("Mode", "DrillId");
               """, ct);
     }
 }

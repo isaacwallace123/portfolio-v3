@@ -66,9 +66,17 @@ export default function ClusterWorkbench() {
   // made a wrong answer easy to click past.
   const drill = useDrillState(run, act, liveDecision);
 
+  // Which cards exist, as a value rather than as an array identity. The poll hands back a fresh
+  // components array every 1.2s even when nothing changed, and passing that in re-ran the layout
+  // effect on every frame — a forced getBoundingClientRect over every card, several times a second,
+  // for a graph that had not moved. Edges only need re-measuring when a card appears or disappears.
+  const cardSignature = components
+    .map((c) => `${c.name}:${c.pods.map((p) => p.name).join("|")}`)
+    .join(",");
+
   // Re-measured whenever the set of cards changes, which is what moves the edges.
   const { canvasRef, cardRefs, paths } = useClusterEdges([
-    components,
+    cardSignature,
     run?.runId,
     run?.telemetry.apiReplicas,
     run?.loadGenerators,

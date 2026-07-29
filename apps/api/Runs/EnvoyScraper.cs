@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -8,10 +9,12 @@ namespace IsaacWallace.Api.Runs;
 // errors — the arena renders exactly these numbers.
 //
 // Envoy's counters/histograms are cumulative since start, so a single read can't show "right now".
-// Each call therefore takes TWO prometheus scrapes ~2s apart and reports the delta: request rate and
-// 5xx rate over the window, and a windowed p95 via histogram-quantile over the bucket delta. That
-// makes the metrics live — p95 actually falls once a scale decision relieves the saturation — and
-// stateless, so it works regardless of which api replica serves the poll.
+// A call reports the DELTA between two readings: request rate and 5xx rate over the window, and a
+// windowed p95 via histogram-quantile over the bucket delta. That makes the metrics live — p95
+// actually falls once a scale decision relieves the saturation.
+//
+// The second reading is normally the previous poll's, kept per run below, so a frame costs one
+// scrape rather than two and a wait. Only the first frame of a run pays for a baseline.
 //
 // The gateway is a scalable tier, so a run may have several Envoys and each one only counts the
 // requests it served. Both rounds therefore scrape EVERY gateway pod directly by IP and sum them.
@@ -22,6 +25,26 @@ public sealed partial class EnvoyScraper(ILogger<EnvoyScraper> log)
 {
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(3) };
 
+    // The previous reading per run, so the usual frame needs ONE scrape instead of two-plus-a-wait.
+    //
+    // Taking both samples inside the request meant every snapshot blocked for the full two-second
+    // window, and the page polls every 1.2s — so requests permanently overlapped and each frame was
+    // already two seconds stale by the time it rendered. The page is polling anyway, which means a
+    // perfectly good previous sample already exists; the delta is against that. First frame for a
+    // run still pays for a baseline, and nothing else does.
+    //
+    // Per-replica by design. Two api replicas each keep their own last reading and each sees a run
+    // roughly every other poll, which is still a sane delta window.
+    private readonly ConcurrentDictionary<string, Reading> previous = new(StringComparer.Ordinal);
+
+    /// <summary>Shortest gap that still makes a meaningful rate. Below this the counters have barely
+    /// moved and the arithmetic amplifies noise.</summary>
+    private static readonly TimeSpan MinWindow = TimeSpan.FromMilliseconds(400);
+
+    /// <summary>Past this the baseline is too old to describe "now" — a paused tab, a slow poll, or
+    /// a run that sat idle. Take a fresh pair instead.</summary>
+    private static readonly TimeSpan MaxWindow = TimeSpan.FromSeconds(30);
+
     /// <param name="gatewayIps">Pod IPs of the run's Envoy replicas. Empty falls back to the
     /// namespace Service, which is correct only while the gateway is a single pod.</param>
     public async Task<EnvoyMetrics?> ScrapeAsync(
@@ -31,13 +54,16 @@ public sealed partial class EnvoyScraper(ILogger<EnvoyScraper> log)
             ? gatewayIps.Select(ip => $"http://{ip}:9901/stats/prometheus").ToArray()
             : [$"http://envoy.{ns}.svc.cluster.local:9901/stats/prometheus"];
 
-        Sample a, b;
-        var t0 = DateTime.UtcNow;
+        // Which gateways the counters came from. A scale-up or scale-down changes the basis — the
+        // new pod starts its counters at zero — so a delta across that boundary is meaningless and
+        // the baseline has to be rebuilt rather than subtracted from.
+        var fleet = string.Join(",", gatewayIps.OrderBy(ip => ip, StringComparer.Ordinal));
+
+        Sample current;
+        var takenAt = DateTime.UtcNow;
         try
         {
-            a = await SampleAllAsync(urls, ct);
-            await Task.Delay(2000, ct);
-            b = await SampleAllAsync(urls, ct);
+            current = await SampleAllAsync(urls, ct);
         }
         catch (Exception ex)
         {
@@ -45,12 +71,40 @@ public sealed partial class EnvoyScraper(ILogger<EnvoyScraper> log)
             return null;
         }
 
-        var dt = Math.Max(0.5, (DateTime.UtcNow - t0).TotalSeconds);
+        if (previous.TryGetValue(runId, out var last) &&
+            last.Fleet == fleet &&
+            takenAt - last.At >= MinWindow &&
+            takenAt - last.At <= MaxWindow)
+        {
+            previous[runId] = new Reading(takenAt, current, fleet);
+            return Delta(last.Sample, current, (takenAt - last.At).TotalSeconds);
+        }
+
+        // No usable baseline: first frame for this run on this replica, or the gateway fleet just
+        // changed. Pay for a second reading once so this frame still has numbers.
+        try
+        {
+            await Task.Delay(1200, ct);
+            var second = await SampleAllAsync(urls, ct);
+            var secondAt = DateTime.UtcNow;
+            previous[runId] = new Reading(secondAt, second, fleet);
+            Evict();
+            return Delta(current, second, (secondAt - takenAt).TotalSeconds);
+        }
+        catch (Exception ex)
+        {
+            log.LogDebug(ex, "Envoy baseline scrape failed for {RunId}.", runId);
+            return null;
+        }
+    }
+
+    private static EnvoyMetrics Delta(Sample a, Sample b, double seconds)
+    {
+        var dt = Math.Max(0.4, seconds);
+        // Clamped because counters restart when a gateway pod does, which reads as a negative delta.
         var dCompleted = Math.Max(0, b.Completed - a.Completed);
         var d5xx = Math.Max(0, b.FiveXx - a.FiveXx);
-
         var errPct = dCompleted > 0 ? (double)d5xx / dCompleted * 100.0 : 0;
-        var p95 = P95FromDelta(a.Buckets, b.Buckets);
 
         return new EnvoyMetrics(
             RequestsPerSec: (int)Math.Round(dCompleted / dt),
@@ -59,12 +113,24 @@ public sealed partial class EnvoyScraper(ILogger<EnvoyScraper> log)
             // well-cached run genuinely sits inside that first bucket — rounded to an int it
             // reported "0 ms", which reads as a broken scrape rather than as the best possible
             // result. It is the difference between "no sample" and "faster than we can bucket".
-            P95LatencyMs: Math.Round(p95, 1),
+            P95LatencyMs: Math.Round(P95FromDelta(a.Buckets, b.Buckets), 1),
             ErrorRatePct: Math.Round(errPct, 2));
     }
 
+    /// <summary>Runs are short-lived and few, but nothing here removes a torn-down one, so drop
+    /// readings that can no longer be anyone's baseline.</summary>
+    private void Evict()
+    {
+        if (previous.Count <= 32) return;
+        var cutoff = DateTime.UtcNow - MaxWindow;
+        foreach (var (key, reading) in previous)
+            if (reading.At < cutoff) previous.TryRemove(key, out _);
+    }
+
+    private sealed record Reading(DateTime At, Sample Sample, string Fleet);
+
     // One round: every gateway at once, summed. Scraping them in parallel keeps the round short, so
-    // the delta window stays close to the 2s the rate is divided by.
+    // the reading lands close to the instant it is timestamped with.
     //
     // A gateway that fails to answer is skipped rather than failing the round. A replica that has
     // just been scheduled has no stats to give, and losing the whole frame because the fleet is mid

@@ -348,7 +348,24 @@ public sealed class RunBroker
         if (run is null) return null;
         var ns = run.Namespace ?? runId;
 
-        // Measured usage per pod (metrics-server); absent for pods that have not been sampled yet.
+        var usage = await UsageAsync(ns, ct);
+        try
+        {
+            var deployments = await _k8s.AppsV1.ListNamespacedDeploymentAsync(ns, cancellationToken: ct);
+            var pods = await _k8s.CoreV1.ListNamespacedPodAsync(ns, cancellationToken: ct);
+            return BuildComponents(deployments, pods, usage);
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogDebug(ex, "Components unavailable for {RunId}.", runId);
+            return [];
+        }
+    }
+
+    /// <summary>Measured usage per pod (metrics-server); absent for pods not yet sampled.</summary>
+    private async Task<Dictionary<string, (int Cpu, int Mem)>> UsageAsync(
+        string ns, CancellationToken ct)
+    {
         var usage = new Dictionary<string, (int Cpu, int Mem)>(StringComparer.Ordinal);
         try
         {
@@ -367,13 +384,18 @@ public sealed class RunBroker
             }
         }
         catch (HttpOperationException) { /* metrics not ready yet */ }
+        return usage;
+    }
 
+    /// <summary>Pure projection, so the snapshot can build tiers from lists it already has rather
+    /// than fetching the namespace a second time.</summary>
+    private static IReadOnlyList<RunComponent> BuildComponents(
+        k8s.Models.V1DeploymentList deployments,
+        k8s.Models.V1PodList pods,
+        Dictionary<string, (int Cpu, int Mem)> usage)
+    {
         List<RunComponent> components = [];
-        try
         {
-            var deployments = await _k8s.AppsV1.ListNamespacedDeploymentAsync(ns, cancellationToken: ct);
-            var pods = await _k8s.CoreV1.ListNamespacedPodAsync(ns, cancellationToken: ct);
-
             foreach (var d in deployments.Items.OrderBy(d => d.Metadata.Name, StringComparer.Ordinal))
             {
                 var app = d.Metadata.Name;
@@ -419,10 +441,6 @@ public sealed class RunBroker
                     podViews));
             }
         }
-        catch (HttpOperationException ex)
-        {
-            _log.LogDebug(ex, "Components unavailable for {RunId}.", runId);
-        }
 
         return components;
     }
@@ -457,7 +475,19 @@ public sealed class RunBroker
 
         try
         {
-            var list = await _k8s.CoreV1.ListNamespacedEventAsync(ns, cancellationToken: ct);
+            return BuildEvents(await _k8s.CoreV1.ListNamespacedEventAsync(ns, cancellationToken: ct));
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogDebug(ex, "Events unavailable for {RunId}.", runId);
+            return [];
+        }
+    }
+
+    /// <summary>Pure projection over an already-fetched event list.</summary>
+    private static IReadOnlyList<RunEventView> BuildEvents(k8s.Models.Corev1EventList list)
+    {
+        {
             return list.Items
                 .Select(e => new
                 {
@@ -481,11 +511,6 @@ public sealed class RunBroker
                     $"{x.Event.InvolvedObject?.Kind}".ToLowerInvariant()))
                 .ToArray();
         }
-        catch (HttpOperationException ex)
-        {
-            _log.LogDebug(ex, "Events unavailable for {RunId}.", runId);
-            return [];
-        }
     }
 
     // Events are cluster-internal text; keep them short and free of image digests / node identities.
@@ -493,6 +518,131 @@ public sealed class RunBroker
     {
         var text = message.Length <= 160 ? message : message[..160] + "…";
         return text.Replace("\n", " ").Trim();
+    }
+
+    // Everything the live page needs for one frame, gathered once.
+    //
+    // Assembled from the four public read methods, this cost five GETs of the same LabRun (each of
+    // them re-fetched it to find the namespace), two identical metrics-server listings, and two pod
+    // listings — per poll, at 1.2s, per viewer. The run is already in hand here and every namespace
+    // listing is taken exactly once, so a frame is now: pods, metrics, deployments, events, a trace
+    // and a gateway scrape. The pod list does double duty as the components view and as the source
+    // of the gateway IPs to scrape.
+    public async Task<RunFrame> GetFrameAsync(LabRunResource resource, CancellationToken ct)
+    {
+        var view = RunView.From(resource);
+        var runId = view.RunId;
+        var ns = view.Namespace ?? runId;
+
+        var podsTask = ListPodsAsync(ns, ct);
+        var usageTask = UsageAsync(ns, ct);
+        var deploymentsTask = ListDeploymentsAsync(ns, ct);
+        var eventsTask = ListEventsAsync(ns, ct);
+        var traceTask = ScrapeTraceAsync(runId, ns, ct);
+
+        // The gateway scrape needs pod IPs, so it starts as soon as the pod list lands rather than
+        // waiting for the rest of the frame.
+        var pods = await podsTask;
+        var gatewayIps = pods is null
+            ? []
+            : pods.Items
+                .Where(p => p.Metadata?.Labels is { } l &&
+                            l.TryGetValue("app", out var a) && a == "envoy" &&
+                            p.Status?.PodIP is { Length: > 0 })
+                .Select(p => p.Status.PodIP)
+                .ToArray();
+        var envoyTask = _envoy.ScrapeAsync(runId, ns, gatewayIps, ct);
+
+        await Task.WhenAll(usageTask, deploymentsTask, eventsTask, traceTask, envoyTask);
+
+        var usage = await usageTask;
+        var deployments = await deploymentsTask;
+        var events = await eventsTask;
+        var envoy = await envoyTask;
+
+        var components = deployments is null || pods is null
+            ? []
+            : BuildComponents(deployments, pods, usage);
+
+        var telemetry = BuildTelemetry(view, usage, envoy);
+
+        return new RunFrame(
+            telemetry,
+            components,
+            events is null ? [] : BuildEvents(events),
+            await traceTask);
+    }
+
+    // Namespace listings, each tolerant of a namespace that is still being composed. Returning null
+    // rather than throwing keeps one missing piece from blanking the whole frame.
+    private async Task<k8s.Models.V1PodList?> ListPodsAsync(string ns, CancellationToken ct)
+    {
+        try { return await _k8s.CoreV1.ListNamespacedPodAsync(ns, cancellationToken: ct); }
+        catch (HttpOperationException ex)
+        {
+            _log.LogDebug(ex, "Pods unavailable in {Namespace}.", ns);
+            return null;
+        }
+    }
+
+    private async Task<k8s.Models.V1DeploymentList?> ListDeploymentsAsync(string ns, CancellationToken ct)
+    {
+        try { return await _k8s.AppsV1.ListNamespacedDeploymentAsync(ns, cancellationToken: ct); }
+        catch (HttpOperationException ex)
+        {
+            _log.LogDebug(ex, "Deployments unavailable in {Namespace}.", ns);
+            return null;
+        }
+    }
+
+    private async Task<k8s.Models.Corev1EventList?> ListEventsAsync(string ns, CancellationToken ct)
+    {
+        try { return await _k8s.CoreV1.ListNamespacedEventAsync(ns, cancellationToken: ct); }
+        catch (HttpOperationException ex)
+        {
+            _log.LogDebug(ex, "Events unavailable in {Namespace}.", ns);
+            return null;
+        }
+    }
+
+    private async Task<RunTrace?> ScrapeTraceAsync(string runId, string ns, CancellationToken ct)
+    {
+        try { return await _traces.ScrapeAsync(runId, ns, ct); }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Trace unavailable for {RunId}.", runId);
+            return null;
+        }
+    }
+
+    /// <summary>Sum the namespace's measured usage and pair it with the gateway's request metrics.
+    /// Pure, so the snapshot builds it from lists it already holds.</summary>
+    private static RunTelemetry BuildTelemetry(
+        RunView view,
+        Dictionary<string, (int Cpu, int Mem)> usage,
+        EnvoyMetrics? envoy)
+    {
+        double cpuMillis = 0, memMiB = 0, postgresCpuMillis = 0;
+        foreach (var (name, u) in usage)
+        {
+            cpuMillis += u.Cpu;
+            memMiB += u.Mem;
+            if (name.StartsWith("postgres-", StringComparison.Ordinal) || name == "postgres")
+                postgresCpuMillis += u.Cpu;
+        }
+
+        return new RunTelemetry(
+            // Pods that metrics-server has actually sampled, NOT pods that exist. The page reads a
+            // non-zero count as "this cluster is serving" and flips out of its provisioning state on
+            // it, so counting scheduled-but-not-running pods here would call a starting namespace
+            // ready.
+            usage.Count,
+            (int)Math.Round(cpuMillis), (int)Math.Round(memMiB),
+            Math.Clamp((int)Math.Round(postgresCpuMillis / 5.0), 0, 100),
+            view.ApiReplicas, view.CacheEnabled,
+            envoy?.RequestsPerSec ?? 0,
+            envoy?.P95LatencyMs ?? 0,
+            envoy?.ErrorRatePct ?? 0);
     }
 
     public async Task<RunView?> GetRunAsync(string runId, string owner, CancellationToken ct)
@@ -743,57 +893,27 @@ public sealed class RunBroker
         if (run is null) return null;
         var ns = run.Namespace ?? runId;
 
+        // Same single-pass shape as a frame, minus the parts a mutation response does not render.
+        var podsTask = ListPodsAsync(ns, ct);
+        var usageTask = UsageAsync(ns, ct);
+        await Task.WhenAll(podsTask, usageTask);
+
+        var pods = await podsTask;
         // Every gateway replica, by pod IP. The gateway is a scalable tier and each replica only
         // counts the requests it served, so the run's throughput is the sum across them — via the
         // Service it would be whichever single pod kube-proxy happened to pick.
-        var gatewayIps = new List<string>();
-        try
-        {
-            var envoyPods = await _k8s.CoreV1.ListNamespacedPodAsync(
-                ns, labelSelector: "app=envoy", cancellationToken: ct);
-            gatewayIps.AddRange(envoyPods.Items
-                .Where(p => p.Status?.PodIP is { Length: > 0 })
-                .Select(p => p.Status.PodIP));
-        }
-        catch (HttpOperationException ex)
-        {
-            _log.LogDebug(ex, "Could not list gateways for {RunId}; falling back to the service.", runId);
-        }
-
-        int pods = 0;
-        double cpuMillis = 0, memMiB = 0, postgresCpuMillis = 0;
-        try
-        {
-            var obj = await _k8s.CustomObjects.ListNamespacedCustomObjectAsync(
-                "metrics.k8s.io", "v1beta1", ns, "pods", cancellationToken: ct);
-            var list = KubernetesJson.Deserialize<PodMetricsList>(KubernetesJson.Serialize(obj));
-            pods = list.Items.Count;
-            foreach (var pod in list.Items)
-                foreach (var c in pod.Containers)
-                {
-                    var containerCpu = ParseCpuMillicores(c.Usage.Cpu);
-                    cpuMillis += containerCpu;
-                    memMiB += ParseMemoryMiB(c.Usage.Memory);
-                    if (pod.Metadata.Name.StartsWith("postgres-", StringComparison.Ordinal) ||
-                        pod.Metadata.Name == "postgres")
-                        postgresCpuMillis += containerCpu;
-                }
-        }
-        catch (HttpOperationException)
-        {
-            // Metrics not available yet for this namespace — report zero usage.
-        }
+        var gatewayIps = pods is null
+            ? []
+            : pods.Items
+                .Where(p => p.Metadata?.Labels is { } l &&
+                            l.TryGetValue("app", out var a) && a == "envoy" &&
+                            p.Status?.PodIP is { Length: > 0 })
+                .Select(p => p.Status.PodIP)
+                .ToArray();
 
         // Real request metrics from the run's Envoy gateways (null while the workload is starting).
         var envoy = await _envoy.ScrapeAsync(runId, ns, gatewayIps, ct);
-
-        return new RunTelemetry(
-            pods, (int)Math.Round(cpuMillis), (int)Math.Round(memMiB),
-            Math.Clamp((int)Math.Round(postgresCpuMillis / 5.0), 0, 100),
-            run.ApiReplicas, run.CacheEnabled,
-            envoy?.RequestsPerSec ?? 0,
-            envoy?.P95LatencyMs ?? 0,
-            envoy?.ErrorRatePct ?? 0);
+        return BuildTelemetry(run, await usageTask, envoy);
     }
 
     // metrics-server reports CPU in nanocores ("n") by convention; also handle m/u/cores.
@@ -1158,6 +1278,14 @@ public sealed class RunBroker
 public sealed record DrillEvaluation(
     IReadOnlyList<DrillGoalState> Goals,
     LabRunResource Resource);
+
+/// <summary>One frame of a run: everything the live page renders, gathered from a single pass over
+/// the namespace.</summary>
+public sealed record RunFrame(
+    RunTelemetry? Telemetry,
+    IReadOnlyList<RunComponent> Components,
+    IReadOnlyList<RunEventView> Events,
+    RunTrace? Trace);
 
 public sealed record PlatformStatus(
     string Cluster,
