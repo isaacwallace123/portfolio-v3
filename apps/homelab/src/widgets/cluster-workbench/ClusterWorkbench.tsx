@@ -136,7 +136,8 @@ export default function ClusterWorkbench() {
   })).find((x) => x.want !== x.have);
 
   const createdMs = run.createdAt ? Date.parse(run.createdAt) : now;
-  const remainingMs = Math.max(0, run.ttlMs - (now - createdMs));
+  const elapsedMs = Math.max(0, now - createdMs);
+  const remainingMs = Math.max(0, run.ttlMs - elapsedMs);
   const offerRenewal =
     remainingMs > 0 &&
     remainingMs <= RENEWAL_WINDOW_MS &&
@@ -172,6 +173,7 @@ export default function ClusterWorkbench() {
             busy={busy}
             error={error}
             remainingMs={remainingMs}
+            elapsedMs={elapsedMs}
             converging={converging}
             onTeardown={teardown}
             onDismissError={() => setError(null)}

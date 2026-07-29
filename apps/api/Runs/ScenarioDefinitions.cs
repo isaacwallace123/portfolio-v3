@@ -241,7 +241,12 @@ public static class ScenarioDefinitions
         {
             var (current, met) = g.Metric switch
             {
-                "p95" => ($"{t.P95LatencyMs} ms", t.P95LatencyMs < g.Threshold),
+                // A zero p95 while traffic is flowing is a missing sample, not a fast service —
+                // Envoy's windowed scrape reports it during a rollout, when the old pods have gone
+                // and the new ones have not served anything yet. Treating it as excellent is how a
+                // saturated cluster briefly looked healthy enough to finish a drill.
+                "p95" => ($"{t.P95LatencyMs} ms",
+                    t.P95LatencyMs > 0 && t.P95LatencyMs < g.Threshold),
                 "errors" => ($"{t.ErrorRatePct:0.00}%", t.ErrorRatePct < g.Threshold),
                 "throughput" => ($"{t.RequestsPerSec}/s", t.RequestsPerSec > g.Threshold),
                 "release" => (spec.ReleaseTrack ?? "", spec.ReleaseTrack == g.State),

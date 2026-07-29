@@ -196,6 +196,7 @@ public sealed class RunBroker
         {
             ["homeops.isaacwallace.dev/drill-started"] = DateTime.UtcNow.ToString("O"),
             [DrillSolvedAnnotation] = null, // null removes the annotation in a merge patch
+            [DrillGoalsMetSinceAnnotation] = null,
         };
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
             if (key.StartsWith("homeops.isaacwallace.dev/decision-", StringComparison.Ordinal))
@@ -234,6 +235,7 @@ public sealed class RunBroker
         var annotations = new Dictionary<string, string?>
         {
             [DrillSolvedAnnotation] = null,
+            [DrillGoalsMetSinceAnnotation] = null,
         };
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
             if (key.StartsWith("homeops.isaacwallace.dev/decision-", StringComparison.Ordinal))
@@ -721,16 +723,21 @@ public sealed class RunBroker
     }
 
     public const string DrillSolvedAnnotation = "homeops.isaacwallace.dev/drill-solved-at";
+    public const string DrillGoalsMetSinceAnnotation = "homeops.isaacwallace.dev/drill-goals-met-since";
+
+    /// <summary>How long the objective must hold continuously before a drill counts as resolved.</summary>
+    public static readonly TimeSpan GoalHold = TimeSpan.FromSeconds(15);
 
     // Judge the active drill against what the cluster is measurably doing, and record the first
     // moment it is genuinely resolved.
     //
     // Completion used to mean "every correct option has been clicked", which announced success
-    // before the workload had actually recovered — and would have announced it even if the recovery
-    // never landed. It now means the objective itself holds: p95 under target, errors under budget,
-    // the release rolled back, with real traffic flowing so an idle cluster cannot pass by serving
-    // nothing. Writing the moment down rather than recomputing it means a later dip in a noisy
-    // signal cannot retract a result the operator has already earned.
+    // before the workload had recovered. It now means the objective itself holds — and holds, which
+    // is the important word: measured signals are noisy, and a single sampling window can read well
+    // in the middle of a rollout while the service is still saturated. So the clock starts when
+    // every condition is first met and the drill is only resolved if they are all still met
+    // GoalHold later; one bad reading in between resets it. Once recorded, a later dip cannot
+    // retract a result the operator has already earned.
     public async Task<IReadOnlyList<DrillGoalState>> EvaluateDrillAsync(
         LabRunResource resource, RunTelemetry telemetry, CancellationToken ct)
     {
@@ -741,37 +748,67 @@ public sealed class RunBroker
             return [];
 
         var goals = ScenarioDefinitions.Evaluate(drill, telemetry, resource.Spec);
-        var alreadySolved =
-            resource.Metadata.Annotations?.ContainsKey(DrillSolvedAnnotation) == true;
+        var annotations = resource.Metadata.Annotations;
+        if (annotations?.ContainsKey(DrillSolvedAnnotation) == true)
+            return goals;
 
-        if (!alreadySolved && goals.All(g => g.Met))
+        var heldSince = annotations?.GetValueOrDefault(DrillGoalsMetSinceAnnotation);
+        var now = DateTime.UtcNow;
+
+        if (!goals.All(g => g.Met))
         {
-            var patch = new k8s.Models.V1Patch(
-                new
+            // Lost it. Whatever streak was building does not count.
+            if (!string.IsNullOrEmpty(heldSince))
+                await SetAnnotationsAsync(
+                    view.RunId, new() { [DrillGoalsMetSinceAnnotation] = null }, ct);
+            return goals;
+        }
+
+        if (string.IsNullOrEmpty(heldSince))
+        {
+            await SetAnnotationsAsync(
+                view.RunId,
+                new() { [DrillGoalsMetSinceAnnotation] = now.ToString("O") },
+                ct);
+            return goals;
+        }
+
+        if (DateTime.TryParse(
+                heldSince, null,
+                DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+                out var since) &&
+            now - since >= GoalHold)
+        {
+            await SetAnnotationsAsync(
+                view.RunId,
+                new()
                 {
-                    metadata = new
-                    {
-                        annotations = new Dictionary<string, string>
-                        {
-                            [DrillSolvedAnnotation] = DateTime.UtcNow.ToString("O"),
-                        },
-                    },
+                    [DrillSolvedAnnotation] = now.ToString("O"),
+                    [DrillGoalsMetSinceAnnotation] = null,
                 },
-                k8s.Models.V1Patch.PatchType.MergePatch);
-            try
-            {
-                await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
-                    patch, LabRun.Group, LabRun.Version, LabRun.Plural,
-                    view.RunId, cancellationToken: ct);
-            }
-            catch (HttpOperationException ex)
-            {
-                // The next poll evaluates again; nothing is lost by failing to record it now.
-                _log.LogDebug(ex, "Could not record drill completion for {RunId}.", view.RunId);
-            }
+                ct);
         }
 
         return goals;
+    }
+
+    // Best effort by design: the next poll evaluates again, so failing to record progress now costs
+    // nothing but a little time.
+    private async Task SetAnnotationsAsync(
+        string runId, Dictionary<string, string?> annotations, CancellationToken ct)
+    {
+        var patch = new k8s.Models.V1Patch(
+            new { metadata = new { annotations } },
+            k8s.Models.V1Patch.PatchType.MergePatch);
+        try
+        {
+            await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+                patch, LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogDebug(ex, "Could not update drill annotations on {RunId}.", runId);
+        }
     }
 
     // One extension, on request, before the cluster expires.

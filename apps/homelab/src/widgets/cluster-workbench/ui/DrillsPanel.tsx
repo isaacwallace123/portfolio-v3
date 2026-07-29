@@ -174,6 +174,7 @@ function DrillInProgress({
   act: Act;
 }) {
   const met = run.drillGoals.filter((g) => g.met).length;
+  const allMet = run.drillGoals.length > 0 && met === run.drillGoals.length;
   const progress = Math.min(
     100,
     (met / Math.max(1, run.drillGoals.length)) * 100,
@@ -197,6 +198,15 @@ function DrillInProgress({
       </div>
 
       <GoalList goals={run.drillGoals} />
+
+      {allMet && run.drillHoldSeconds > 0 && (
+        <p className={styles.holding}>
+          <Loader2 size={12} className={styles.spin} />
+          Every condition is met — confirming it holds ({run.drillHeldSeconds}s
+          of {run.drillHoldSeconds}s). Measured signals are noisy, so one good
+          reading is not a recovery.
+        </p>
+      )}
 
       <p className={styles.qHint}>
         Pick the actions you think resolve this. Every option is really applied

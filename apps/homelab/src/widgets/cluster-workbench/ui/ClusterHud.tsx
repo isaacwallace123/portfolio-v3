@@ -32,6 +32,7 @@ export function ClusterHud({
   busy,
   error,
   remainingMs,
+  elapsedMs,
   converging,
   onTeardown,
   onDismissError,
@@ -46,6 +47,7 @@ export function ClusterHud({
   busy: string | null;
   error: string | null;
   remainingMs: number;
+  elapsedMs: number;
   converging: Converging | undefined;
   onTeardown: () => void;
   onDismissError: () => void;
@@ -69,9 +71,11 @@ export function ClusterHud({
       <div className={styles.hudTopRight}>
         <span
           className={`${styles.hudCard} ${remainingMs < 60_000 ? styles.warnText : ""}`}
-          title="Time until this cluster is automatically destroyed"
+          title="How long this cluster has been running"
         >
-          <Timer size={13} /> {clock(remainingMs)}
+          {/* A stopwatch, not a countdown. The last minute is still marked, and the renewal
+              prompt is what actually announces the deadline. */}
+          <Timer size={13} /> {clock(elapsedMs)}
           {!run.renewable && <em className={styles.extended}>extended</em>}
         </span>
         <button

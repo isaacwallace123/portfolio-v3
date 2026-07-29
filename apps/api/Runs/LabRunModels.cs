@@ -170,7 +170,11 @@ public sealed record RunView(
     int DrillWrongChosen,
     IReadOnlyList<DrillOption> DrillOptions,
     // Live progress against the drill's objective. Empty unless telemetry was available.
-    IReadOnlyList<DrillGoalState> DrillGoals)
+    IReadOnlyList<DrillGoalState> DrillGoals,
+    // How long the objective has held so far, and how long it must, so the page can explain the
+    // wait instead of looking stuck once every condition is green.
+    int DrillHeldSeconds,
+    int DrillHoldSeconds)
 {
     // Map the LabRun's Crossplane conditions to a small, public lifecycle vocabulary, and surface the
     // decision-driven state (replica count, cache tier) so a caller can see the effect of a decision.
@@ -230,6 +234,18 @@ public sealed record RunView(
         var correctTotal = definition?.Decisions.Count(d => d.IsCorrect) ?? 0;
         var correctChosen = definition?.Decisions.Count(d => d.IsCorrect && acceptedIds.Contains(d.Id)) ?? 0;
         var wrongChosen = definition?.Decisions.Count(d => !d.IsCorrect && acceptedIds.Contains(d.Id)) ?? 0;
+        // How long every condition has held continuously, per the broker's running record.
+        var heldSeconds = 0;
+        var heldSince = r.Metadata.Annotations?
+            .GetValueOrDefault(RunBroker.DrillGoalsMetSinceAnnotation);
+        if (!string.IsNullOrEmpty(heldSince) &&
+            DateTime.TryParse(
+                heldSince, null,
+                System.Globalization.DateTimeStyles.AdjustToUniversal |
+                System.Globalization.DateTimeStyles.AssumeUniversal,
+                out var heldFrom))
+            heldSeconds = Math.Max(0, (int)(DateTime.UtcNow - heldFrom).TotalSeconds);
+
         // Solved is a recorded fact, not a recomputation: the broker writes this annotation the first
         // time the objective is actually met.
         var solved =
@@ -284,7 +300,9 @@ public sealed record RunView(
             correctTotal,
             wrongChosen,
             options,
-            []);
+            [],
+            heldSeconds,
+            (int)RunBroker.GoalHold.TotalSeconds);
     }
 
     private static IReadOnlyList<AcceptedDecision> ReadAcceptedDecisions(

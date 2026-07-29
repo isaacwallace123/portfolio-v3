@@ -54,6 +54,8 @@ export interface RealRun {
   drillWrongChosen?: number;
   drillOptions?: DrillOption[];
   drillGoals?: DrillGoal[];
+  drillHeldSeconds?: number;
+  drillHoldSeconds?: number;
   ttlSeconds: number;
   renewable: boolean;
   createdAt?: string;
@@ -98,6 +100,9 @@ export interface LiveRunView extends RunView {
   drillOptions: DrillOption[];
   /** Live progress against the drill's objective — what actually ends it. */
   drillGoals: DrillGoal[];
+  /** How long every condition has held, and how long it must, before the drill resolves. */
+  drillHeldSeconds: number;
+  drillHoldSeconds: number;
 }
 
 export function toLiveRunView(real: RealRun): LiveRunView {
@@ -196,5 +201,7 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     drillWrongChosen: real.drillWrongChosen ?? 0,
     drillOptions: real.drillOptions ?? [],
     drillGoals: real.drillGoals ?? [],
+    drillHeldSeconds: real.drillHeldSeconds ?? 0,
+    drillHoldSeconds: real.drillHoldSeconds ?? 0,
   };
 }
