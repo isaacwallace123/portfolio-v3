@@ -1,14 +1,27 @@
-import { NextResponse } from "next/server";
+import { guardInventory, jsonNoStore } from "@/shared/api/guard";
 import { liveEnabled, liveFetch } from "@/shared/api/live-server";
 import { getCaller } from "@/shared/api/session";
 
 // GET /api/live/status — what this visitor may do right now: whether live control is configured,
 // whether they are signed in, and (if so) the cluster they already own so a reload resumes it.
+//
+// Public, because a visitor has to be able to ask before they can sign in — but throttled, because
+// answering costs an auth round trip plus a run listing for anyone who presents a cookie.
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const enabled = liveEnabled();
-  const caller = enabled ? await getCaller(req) : null;
+  if (!liveEnabled())
+    return jsonNoStore({
+      enabled: false,
+      signedIn: false,
+      displayName: null,
+      myRunId: null,
+    });
+
+  const denied = guardInventory(req);
+  if (denied) return denied;
+
+  const caller = await getCaller(req);
 
   let myRunId: string | null = null;
   if (caller) {
@@ -23,13 +36,10 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json(
-    {
-      enabled,
-      signedIn: caller !== null,
-      displayName: caller?.displayName ?? null,
-      myRunId,
-    },
-    { headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex" } },
-  );
+  return jsonNoStore({
+    enabled: true,
+    signedIn: caller !== null,
+    displayName: caller?.displayName ?? null,
+    myRunId,
+  });
 }

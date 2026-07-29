@@ -15,25 +15,47 @@ export function liveEnabled(): boolean {
   return RUNS_KEY.length > 0;
 }
 
+// A request that never answers is worse than one that fails: without a deadline a stalled upstream
+// pins a server worker for as long as the socket stays open, and enough of them take the page down
+// while the cluster itself is fine. Long enough for a real cluster read, short enough to give up.
+const UPSTREAM_TIMEOUT_MS = 10_000;
+
+/**
+ * Call the HomeOps API with the scoped key attached.
+ *
+ * Never throws on a transport failure: an unreachable or stalled API comes back as a synthetic 504
+ * so every caller keeps its one shape — check `res.ok`, read the body — instead of half of them
+ * needing a try/catch to avoid turning a bad minute upstream into a 500 on the page.
+ */
 export async function liveFetch(
   path: string,
   init?: RequestInit,
   owner?: string,
   ownerName?: string,
 ): Promise<Response> {
-  return fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${RUNS_KEY}`,
-      // Identifies which signed-in person owns the cluster. Resolved server-side from the SSO
-      // session; the browser never supplies it, so it cannot be spoofed by a caller.
-      ...(owner ? { "X-Owner-Key": owner } : {}),
-      // The name to put on the leaderboard, from the same verified session. Display only — nothing
-      // is ever authorised by it, so the API can take it at face value for a row label.
-      ...(ownerName ? { "X-Owner-Name": ownerName } : {}),
-      ...init?.headers,
-    },
-    cache: "no-store",
-  });
+  try {
+    return await fetch(`${API_BASE}${path}`, {
+      ...init,
+      signal: init?.signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${RUNS_KEY}`,
+        // Identifies which signed-in person owns the cluster. Resolved server-side from the SSO
+        // session; the browser never supplies it, so it cannot be spoofed by a caller.
+        ...(owner ? { "X-Owner-Key": owner } : {}),
+        // The name to put on the leaderboard, from the same verified session. Display only — nothing
+        // is ever authorised by it, so the API can take it at face value for a row label.
+        ...(ownerName ? { "X-Owner-Name": ownerName } : {}),
+        ...init?.headers,
+      },
+      cache: "no-store",
+    });
+  } catch {
+    // The reason is deliberately not forwarded: upstream hostnames and connection errors are
+    // operator detail, and the page can do nothing differently with them.
+    return Response.json(
+      { error: "The homelab API is not responding right now." },
+      { status: 504 },
+    );
+  }
 }

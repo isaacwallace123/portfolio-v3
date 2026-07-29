@@ -3,6 +3,7 @@ using IsaacWallace.Api.Data;
 using IsaacWallace.Api.Runs;
 using k8s;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 
@@ -100,6 +101,18 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseForwardedHeaders();
+
+// Baseline response hardening. This service answers JSON to machines, so the browser-facing surface
+// is small — but a sniffed content type is still the cheapest way to turn an API response into
+// something a browser will execute, and none of this is ever a document worth framing.
+app.Use(async (ctx, next) =>
+{
+    ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    ctx.Response.Headers["X-Frame-Options"] = "DENY";
+    ctx.Response.Headers["Referrer-Policy"] = "no-referrer";
+    await next();
+});
+
 app.UseCors();
 
 // Interactive API reference in dev: /scalar (spec at /openapi/v1.json).
@@ -114,7 +127,11 @@ app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "isaacwallace-api" }));
+// Exempt from the rate limiter on purpose: this is the kubelet's liveness and readiness target, and
+// a probe that 429s is a probe that fails, which restarts a pod that was healthy. Liveness must
+// never depend on how much traffic strangers are sending.
+app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "isaacwallace-api" }))
+    .DisableRateLimiting();
 
 // Whoami — lets an integrator confirm their key, name, and granted scopes. Requires any valid key.
 app.MapGet("/v1/me", (HttpContext ctx) =>
