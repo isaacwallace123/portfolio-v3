@@ -2,19 +2,22 @@
 
 import { memo, useEffect, useMemo, useRef } from "react";
 import { Crosshair, Minus, Plus } from "lucide-react";
+import type { ViewNode } from "../model/collapse";
 import { orthogonalPath, type FlowLayout } from "../model/layout";
 import { useViewport } from "../model/useViewport";
 import { FlowNode } from "./FlowNode";
 import s from "../topology.module.css";
 
 interface Props {
-  layout: FlowLayout;
+  layout: FlowLayout<ViewNode>;
   selectedId: string | null;
   hoveredId: string | null;
   /** Ids one hop from the focused node, in either direction. */
   neighbours: Set<string>;
   onSelect: (id: string) => void;
   onHover: (id: string | null) => void;
+  /** Opening a collapsed layer swaps its box for the components it stands for. */
+  onExpand: (layer: string) => void;
   /** Set by the parent when a node is picked from the list, so the canvas can bring it into view. */
   focusRequest: { id: string; nonce: number } | null;
 }
@@ -26,6 +29,7 @@ function FlowChartImpl({
   neighbours,
   onSelect,
   onHover,
+  onExpand,
   focusRequest,
 }: Props) {
   const {
@@ -102,7 +106,18 @@ function FlowChartImpl({
                   >
                     <path className={s.edgeLine} d={d} />
                     <path className={s.edgeArrow} d={arrow} />
-                    <title>{`${edge.source} → ${edge.target} (${edge.kind})`}</title>
+                    {edge.bidirectional && (
+                      <path
+                        className={s.edgeArrow}
+                        d={backArrow(edge.points)}
+                      />
+                    )}
+                    <title>
+                      {`${edge.source} ${edge.bidirectional ? "↔" : "→"} ${edge.target}` +
+                        (edge.weight && edge.weight > 1
+                          ? ` — ${edge.weight} relationships`
+                          : ` (${edge.kind})`)}
+                    </title>
                   </g>
                 );
               })}
@@ -118,6 +133,7 @@ function FlowChartImpl({
                   focusing={focusing}
                   onSelect={onSelect}
                   onHover={onHover}
+                  onExpand={onExpand}
                 />
               ))}
             </g>
@@ -139,6 +155,14 @@ function FlowChartImpl({
       <p className={s.hint}>Drag to pan · scroll to zoom</p>
     </div>
   );
+}
+
+/** A head at the source end too, for a connector standing in for a two-way relationship. */
+function backArrow(points: { x: number; y: number }[]): string {
+  const tail = points[0];
+  const w = 4.5;
+  const h = 7;
+  return `M ${tail.x} ${tail.y} L ${tail.x - w} ${tail.y + h} L ${tail.x + w} ${tail.y + h} Z`;
 }
 
 /** A small filled triangle at the end of the connector, pointing into the target's top edge. */

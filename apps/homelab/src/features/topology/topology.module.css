@@ -220,6 +220,20 @@
   color: var(--on-accent);
 }
 
+.collapseAll {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.collapseAll:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.collapseAll:disabled:hover {
+  color: var(--ink-dim);
+  border-color: var(--line);
+}
+
 .count {
   white-space: nowrap;
   color: var(--ink-dim);
@@ -407,6 +421,32 @@
 .nodeSpine {
   fill: var(--accent-layer);
   opacity: 0.85;
+}
+
+/* A collapsed layer is a container, not a component, so it is filled and outlined rather than
+   plain — the difference has to be obvious before you read the label. */
+.node[data-group] .nodeBox {
+  fill: color-mix(in srgb, var(--accent-layer) 12%, var(--flow-node-bg));
+  stroke: color-mix(in srgb, var(--accent-layer) 55%, transparent);
+  stroke-dasharray: 4 3;
+}
+.node[data-group]:hover .nodeBox,
+.node[data-group]:focus-visible .nodeBox,
+.node[data-group][data-selected] .nodeBox {
+  fill: color-mix(in srgb, var(--accent-layer) 18%, var(--flow-node-bg));
+  stroke-dasharray: none;
+}
+.nodeGlyph,
+.nodeChevron {
+  color: var(--accent-layer);
+  pointer-events: none;
+}
+.nodeChevron {
+  opacity: 0.7;
+  transition: opacity var(--dur-fast) ease;
+}
+.node[data-group]:hover .nodeChevron {
+  opacity: 1;
 }
 
 .nodeStatus {
@@ -645,6 +685,86 @@
 }
 .metrics dd[data-short] {
   color: var(--amber);
+}
+
+.expandButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  font:
+    700 10px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease;
+}
+.expandButton:hover {
+  background: var(--surface-2);
+  border-color: var(--accent-layer, var(--mint));
+}
+
+.memberList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.memberList strong {
+  position: sticky;
+  top: 0;
+  padding-bottom: 8px;
+  background: var(--surface);
+  color: var(--ink-dim);
+  font:
+    700 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.memberList button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: var(--radius-md);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) ease;
+}
+.memberList button:hover {
+  background: var(--surface-2);
+}
+.memberList span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.memberList b {
+  color: var(--ink);
+  font:
+    650 11px/1.2 ui-monospace,
+    monospace;
+}
+.memberList small {
+  color: var(--ink-dim);
+  font:
+    600 9px/1.2 ui-monospace,
+    monospace;
+  letter-spacing: 0.06em;
+}
+
+.relations button[data-group] {
+  border-style: dashed;
 }
 
 .relations strong {
