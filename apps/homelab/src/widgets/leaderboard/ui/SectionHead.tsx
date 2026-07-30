@@ -1,11 +1,22 @@
 import styles from "../leaderboard.module.css";
 
-/** A titled divider between the board's two halves, with a rule that draws itself in. */
-export function SectionHead({ title, note }: { title: string; note: string }) {
+/** A numbered divider keeps the long competitive record easy to scan. */
+export function SectionHead({
+  index,
+  title,
+  note,
+}: {
+  index: string;
+  title: string;
+  note: string;
+}) {
   return (
     <div className={styles.sectionHead}>
-      <h2>{title}</h2>
-      <p>{note}</p>
+      <span>{index}</span>
+      <div>
+        <h2>{title}</h2>
+        <p>{note}</p>
+      </div>
     </div>
   );
 }

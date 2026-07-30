@@ -1,13 +1,5 @@
-import type { Metadata } from "next";
-import { Leaderboard } from "@/widgets/leaderboard";
-
-export const metadata: Metadata = {
-  title: "Leaderboard",
-  description:
-    "Seasonless DevOps ELO standings and verified speed records from live multi-stage incident scenarios.",
-  alternates: { canonical: "/leaderboard" },
-};
+import { permanentRedirect } from "next/navigation";
 
 export default function LeaderboardPage() {
-  return <Leaderboard />;
+  permanentRedirect("/ranked#standings");
 }

@@ -35,29 +35,42 @@ export function BoardTable({
         {note && <p>{note}</p>}
       </header>
       {held ? (
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Operator</th>
-              {overall && <th className={styles.num}>Cascades</th>}
-              <th className={styles.num}>{overall ? "Average" : "Time"}</th>
-              {overall && <th className={styles.num}>Best</th>}
-              <th className={styles.num}>Missteps</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry, i) => (
-              <BoardRow
-                key={`${entry.rank}-${entry.displayName}`}
-                entry={entry}
-                overall={overall}
-                index={i}
-                fastest={fastest}
-              />
-            ))}
-          </tbody>
-        </table>
+        <>
+          <div
+            className={styles.tableScroller}
+            role="group"
+            aria-label={`${title} speed records. Scroll horizontally if needed.`}
+            tabIndex={0}
+          >
+            <table className={styles.table}>
+              <caption className={styles.visuallyHidden}>
+                {title} verified speed records
+              </caption>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Operator</th>
+                  {overall && <th className={styles.num}>Cascades</th>}
+                  <th className={styles.num}>{overall ? "Average" : "Time"}</th>
+                  {overall && <th className={styles.num}>Best</th>}
+                  <th className={styles.num}>Missteps</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((entry, i) => (
+                  <BoardRow
+                    key={`${entry.rank}-${entry.displayName}`}
+                    entry={entry}
+                    overall={overall}
+                    index={i}
+                    fastest={fastest}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className={styles.scrollHint}>Scroll to see the complete record</p>
+        </>
       ) : (
         <UnclaimedRecord />
       )}

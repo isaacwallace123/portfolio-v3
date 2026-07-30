@@ -20,7 +20,8 @@ import {
   useCoaching,
   useDrillState,
 } from "@/features/drill";
-import { RankedEntry, RankedResult } from "@/features/ranked";
+import { RankedResult } from "@/features/ranked";
+import { RankedHub } from "@/widgets/leaderboard";
 import { SCALABLE, type ServiceId } from "./model/topology";
 import { useClusterEdges } from "./model/useClusterEdges";
 import { useClusterRun } from "./model/useClusterRun";
@@ -152,6 +153,22 @@ export default function ClusterWorkbench({
           <span>Looking for your cluster…</span>
         </div>
       </div>
+    );
+  }
+
+  if (surface === "ranked" && (!run || run.drillId.length === 0)) {
+    return (
+      <RankedHub
+        status={status}
+        platform={platform}
+        run={run}
+        busy={busy}
+        provisioning={run?.status === "provisioning"}
+        expired={expired}
+        error={error}
+        onProvision={provision}
+        act={act}
+      />
     );
   }
 
@@ -310,15 +327,8 @@ export default function ClusterWorkbench({
                   </a>
                 </div>
               ) : surface === "ranked" ? (
-                drill.phase.kind === "browsing" ? (
-                  <RankedEntry
-                    run={run}
-                    busy={busy}
-                    provisioning={provisioning}
-                    act={act}
-                  />
-                ) : drill.phase.kind === "solved" ||
-                  drill.phase.kind === "failed" ? (
+                drill.phase.kind === "solved" ||
+                drill.phase.kind === "failed" ? (
                   <RankedResult run={run} busy={busy} act={act} />
                 ) : (
                   <DrillPanel

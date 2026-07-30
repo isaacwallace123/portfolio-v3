@@ -97,7 +97,7 @@ export function RankedResult({
   );
 
   return (
-    <div className={`${styles.result} ${won ? styles.won : styles.lost}`}>
+    <div className={`${styles.result} ${won ? "" : styles.lost}`}>
       <span className={styles.resultIcon}>
         {won ? <Trophy size={27} /> : <ShieldX size={27} />}
       </span>
@@ -226,7 +226,7 @@ export function RankedResult({
           : "Return to ranked queue"}
       </button>
 
-      <a className={styles.boardLink} href="/leaderboard">
+      <a className={styles.boardLink} href="/ranked#standings">
         Open standings <ArrowRight size={12} />
       </a>
     </div>

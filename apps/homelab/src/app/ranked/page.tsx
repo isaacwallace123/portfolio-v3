@@ -4,7 +4,7 @@ import ClusterWorkbench from "@/widgets/cluster-workbench";
 export const metadata: Metadata = {
   title: "Ranked",
   description:
-    "Enter a server-drawn, multi-stage incident on a real isolated Kubernetes workload. Every result moves seasonless ELO; clean recoveries also record an official time.",
+    "Compete in server-drawn Kubernetes incidents, climb the seasonless HomeOps rating ladder, and chase verified speed records.",
   alternates: { canonical: "/ranked" },
 };
 
