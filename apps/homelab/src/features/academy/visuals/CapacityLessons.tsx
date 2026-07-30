@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Stage } from "./Stage";
 import styles from "./visuals.module.css";
 
 // Capacity and convergence.
@@ -38,7 +39,7 @@ export function OfferedVsServed({
   const sharePct = Math.round((served / Math.max(offered, 1)) * 100);
 
   return (
-    <div className={styles.stage}>
+    <Stage>
       <svg
         viewBox={`0 0 ${BAR_VIEW_W} ${BAR_VIEW_H}`}
         role="img"
@@ -131,7 +132,7 @@ export function OfferedVsServed({
           The rest produced no sample at all.
         </text>
       </svg>
-    </div>
+    </Stage>
   );
 }
 
@@ -165,7 +166,7 @@ export function DesiredVsObserved({ animate }: { animate: boolean }) {
   const visibleReady = animate ? ready : desired;
 
   return (
-    <div className={styles.stage}>
+    <Stage>
       <svg
         viewBox="0 0 640 200"
         role="img"
@@ -251,7 +252,7 @@ export function DesiredVsObserved({ animate }: { animate: boolean }) {
           you do not have yet.
         </text>
       </svg>
-    </div>
+    </Stage>
   );
 }
 
@@ -298,7 +299,7 @@ export function ReplicaConvergence({
   const capacity = visibleReady * 120;
 
   return (
-    <div className={styles.stage}>
+    <Stage>
       <svg
         viewBox="0 0 640 176"
         role="img"
@@ -365,6 +366,6 @@ export function ReplicaConvergence({
             : "The desired count changed the instant you moved the dial. The capacity has not arrived yet."}
         </text>
       </svg>
-    </div>
+    </Stage>
   );
 }

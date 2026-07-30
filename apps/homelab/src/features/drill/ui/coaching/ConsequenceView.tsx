@@ -83,7 +83,7 @@ export function ConsequenceView({
         {!correct && hypothesis && (
           <p>
             <b>Against your hypothesis: </b>
-            you predicted {hypothesis.predicts.toLowerCase()} That is the signal
+            you predicted &ldquo;{hypothesis.predicts}&rdquo; That is the signal
             to check — if it has not moved, the tier you blamed is not the one
             that was constrained.
           </p>

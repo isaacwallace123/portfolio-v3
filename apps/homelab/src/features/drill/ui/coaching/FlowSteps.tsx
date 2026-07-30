@@ -28,9 +28,21 @@ export function FlowSteps({ phase }: { phase: CoachingPhase }) {
       {ORDER.map((step, i) => {
         const state = i < current ? "done" : i === current ? "current" : "todo";
         return (
-          <li key={step.phase} className={styles.step} data-state={state}>
+          <li
+            key={step.phase}
+            className={styles.step}
+            data-state={state}
+            // Without this a screen reader gets six words and no indication of which one you are
+            // on, which is the only thing the strip is for.
+            aria-current={state === "current" ? "step" : undefined}
+          >
             <span className={styles.stepBar} />
-            <span className={styles.stepLabel}>{step.label}</span>
+            <span className={styles.stepLabel}>
+              {step.label}
+              {state === "done" && (
+                <span className={styles.srOnly}> (done)</span>
+              )}
+            </span>
           </li>
         );
       })}

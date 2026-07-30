@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { checkProblems } from "../model/checks";
 import {
   courseUnits,
+  drillTitle,
+  DRILL_TITLES,
   segmentChecks,
   segmentDrillIds,
   type LearningBlock,
@@ -159,6 +161,31 @@ describe("drills the curriculum points at", () => {
   it("gives every segment a distinct capstone", () => {
     const capstones = course.segments.map((s) => s.capstoneDrillId);
     expect(new Set(capstones).size).toBe(capstones.length);
+  });
+
+  it("has a human title for every drill it names, matching the API catalog", () => {
+    // Learner-facing text must never show a slug. The titles are mirrored into the Academy so a
+    // lesson can render before anyone has provisioned a cluster, and this keeps the mirror honest.
+    const source = readFileSync(SCENARIOS, "utf8");
+    const titles = new Map(
+      [...source.matchAll(/Drill\("([a-z0-9-]+)", "([^"]+)"/g)].map((m) => [
+        m[1],
+        m[2],
+      ]),
+    );
+
+    const named = [
+      ...course.segments.flatMap(segmentDrillIds),
+      course.finalAssessmentDrillId,
+    ];
+    for (const drillId of new Set(named)) {
+      expect(DRILL_TITLES, drillId).toHaveProperty(drillId);
+      expect(DRILL_TITLES[drillId], drillId).toBe(titles.get(drillId));
+      // A prose title, not the id and not the id with its dashes taken out.
+      expect(drillTitle(drillId)).not.toBe(drillId);
+      expect(drillTitle(drillId)).not.toBe(drillId.replaceAll("-", " "));
+      expect(drillTitle(drillId)).toMatch(/[A-Z]/);
+    }
   });
 
   it("only points lesson summaries at drills that exist", () => {

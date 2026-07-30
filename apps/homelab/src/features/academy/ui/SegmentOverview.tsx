@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import {
   checkpointUnitId,
+  drillTitle,
   drillUnitId,
   lessonUnitId,
   segmentChecks,
@@ -95,7 +96,7 @@ export function SegmentOverview({
             {segment.lessons.reduce((n, l) => n + l.estimatedMinutes, 0)} min
           </span>
           <span>{checks.length} knowledge checks</span>
-          <span>capstone {segment.capstoneDrillId}</span>
+          <span>capstone · {drillTitle(segment.capstoneDrillId)}</span>
         </p>
       </header>
 
@@ -347,7 +348,7 @@ function CapstoneRow({
         )}
       </span>
       <span className={styles.unitBody}>
-        <b>{drillId}</b>
+        <b>{drillTitle(drillId)}</b>
         <small>
           {label}
           {done && clean && " · solved with no wrong action"}

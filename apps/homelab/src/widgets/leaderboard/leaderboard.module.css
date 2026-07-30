@@ -20,6 +20,12 @@
   padding: 70px 28px 90px;
 }
 
+.page a:focus-visible,
+.page button:focus-visible {
+  outline: 2px solid var(--mint);
+  outline-offset: 2px;
+}
+
 .heading {
   margin-bottom: 46px;
 }

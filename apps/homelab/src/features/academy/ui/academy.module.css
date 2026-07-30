@@ -118,9 +118,14 @@
   margin-top: 26px;
 }
 
-:where(.primary, .secondary, .quiet):focus-visible {
+/* Every interactive thing in the Academy, not just the buttons. The links — course-map segments,
+   lesson rows, breadcrumbs, the sandbox and certificate cards — are the primary way through the
+   course by keyboard, and the UA default ring is weak against this background. */
+:where(.primary, .secondary, .quiet, .unit, .option, .nextUp a):focus-visible,
+:where(.crumbs, .pathHead) a:focus-visible {
   outline: 2px solid var(--mint);
   outline-offset: 3px;
+  border-radius: var(--radius-sm);
 }
 
 /* ── Continue card: the dashboard's single answer to "what now?" ───────── */
@@ -760,10 +765,13 @@
     border-color var(--dur-fast) ease,
     background var(--dur-fast) ease;
 }
-.choice:hover:not(:disabled) {
+.choice:hover:not(:disabled):not([aria-disabled="true"]) {
   border-color: color-mix(in srgb, var(--mint) 46%, var(--line));
 }
-.choice:disabled {
+/* Answered options stay focusable so keyboard focus is not thrown to the body mid-explanation.
+   They are inert, and they have to look inert. */
+.choice:disabled,
+.choice[aria-disabled="true"] {
   cursor: default;
 }
 .choice:focus-visible {
@@ -1213,9 +1221,46 @@
   }
 }
 
+/* Tablet. The reading column is already capped, so this is about giving back the vertical space
+   the desktop header padding takes and letting the segment path use the full width. */
+@media (max-width: 1024px) {
+  .shell {
+    padding: 40px 24px 80px;
+  }
+  .continueCard {
+    padding: 24px 22px;
+  }
+  .certificate {
+    padding: 40px 32px;
+  }
+}
+
 @media (max-width: 760px) {
   .shell {
     padding: 38px 16px 72px;
+  }
+  .continueCard {
+    padding: 22px 18px;
+  }
+  /* The lesson's own chrome: crumbs and meta wrap rather than forcing the page to scroll sideways. */
+  .lessonMeta,
+  .progressMeta,
+  .pathMeta {
+    gap: 6px 12px;
+  }
+  .unit {
+    grid-template-columns: 24px minmax(0, 1fr);
+    row-gap: 6px;
+  }
+  .unitAside {
+    grid-column: 2;
+  }
+  .requirement {
+    grid-template-columns: 20px minmax(0, 1fr);
+    row-gap: 4px;
+  }
+  .requirementCount {
+    grid-column: 2;
   }
   .pathItem {
     grid-template-columns: 40px minmax(0, 1fr);

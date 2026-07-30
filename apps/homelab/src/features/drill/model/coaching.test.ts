@@ -306,6 +306,17 @@ describe("the coaching phase machine", () => {
     expect(decisionsUnlocked("act")).toBe(true);
   });
 
+  it("keeps the controls locked in every phase before acting", () => {
+    // The gate is evidence, and `consequence` is excluded because that screen owns the panel —
+    // the operator console is not on it. `useCoaching` calls this rather than restating it.
+    expect(decisionsUnlocked("briefing")).toBe(false);
+    expect(decisionsUnlocked("observe")).toBe(false);
+    expect(decisionsUnlocked("hypothesise")).toBe(false);
+    expect(decisionsUnlocked("consequence")).toBe(false);
+    expect(decisionsUnlocked("debrief")).toBe(false);
+    expect(decisionsUnlocked("verify")).toBe(true);
+  });
+
   it("shows the consequence of a wrong action instead of ending the drill", () => {
     const misstep = inputs({
       briefingRead: true,

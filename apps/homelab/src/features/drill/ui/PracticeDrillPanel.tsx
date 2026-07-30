@@ -105,8 +105,9 @@ export function PracticeDrillPanel({
         <FlowSteps phase={phase} />
         <HypothesisStep
           options={coaching.hypotheses}
-          chosen={coaching.hypothesis?.id ?? null}
-          onChoose={coaching.choose}
+          selected={coaching.pendingHypothesis}
+          onSelect={coaching.selectHypothesis}
+          onConfirm={coaching.confirmHypothesis}
         />
       </div>
     );

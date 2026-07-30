@@ -309,9 +309,15 @@ export function evidenceRemaining(inspected: number, total: number): number {
   return Math.max(0, Math.ceil(total * EVIDENCE_FRACTION) - inspected);
 }
 
-/** Whether the operator's controls should be usable at all. The gate is evidence, never a clock. */
+/**
+ * Whether the operator's controls should accept input. The gate is evidence, never a clock.
+ *
+ * Not `consequence`: while a decision's measured effect is being read, that screen owns the panel
+ * and the console is not on it. This is the single source of truth for the rule — `useCoaching`
+ * calls it rather than restating it, so the two cannot drift.
+ */
 export function decisionsUnlocked(phase: CoachingPhase): boolean {
-  return phase === "act" || phase === "verify" || phase === "consequence";
+  return phase === "act" || phase === "verify";
 }
 
 // ── Debrief ────────────────────────────────────────────────────────────────

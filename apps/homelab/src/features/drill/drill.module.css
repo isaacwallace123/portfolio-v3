@@ -80,6 +80,14 @@
   color: var(--ink);
   border-color: var(--ink-dim);
 }
+.primary:focus-visible,
+.ghost:focus-visible,
+.forfeit:focus-visible,
+.drillItem:focus-visible,
+.decision:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .ghost:disabled {
   opacity: 0.5;
   cursor: not-allowed;

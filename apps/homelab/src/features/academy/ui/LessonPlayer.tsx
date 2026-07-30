@@ -16,7 +16,7 @@ import type {
   LearningLesson,
   LearningSegment,
 } from "../model/course";
-import { lessonUnitId } from "../model/course";
+import { drillTitle, lessonUnitId } from "../model/course";
 import type { CheckAnswers } from "../model/checks";
 import { GuidedVisual, LessonVisual } from "../visuals";
 import { KnowledgeCheckBlock, PredictionBlock } from "./KnowledgeCheck";
@@ -339,7 +339,8 @@ function Block({
                 aria-hidden
                 style={{ verticalAlign: -1, marginRight: 6 }}
               />
-              You will prove this on a real cluster in <b>{block.drillId}</b>.
+              You will prove this on a real cluster in{" "}
+              <b>{drillTitle(block.drillId)}</b>.
               {block.watchFor ? ` ${block.watchFor}` : ""}
             </p>
           )}

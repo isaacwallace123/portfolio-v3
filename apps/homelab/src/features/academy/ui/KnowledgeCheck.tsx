@@ -47,8 +47,12 @@ export function PredictionBlock({
               key={option.id}
               type="button"
               className={styles.choice}
-              disabled={answered}
-              onClick={() => onChoose(option.id)}
+              // `aria-disabled` rather than `disabled`: a disabled button leaves the tab order, so
+              // answering would throw a keyboard user's focus back to the document body at the
+              // exact moment the explanation appears below them. Inert but focusable keeps them
+              // where they are and lets them read on.
+              aria-disabled={answered}
+              onClick={() => !answered && onChoose(option.id)}
               data-verdict={answered && isActual ? "actual" : undefined}
               data-dimmed={
                 answered && !isActual && option.id !== chosen
@@ -123,8 +127,11 @@ export function KnowledgeCheckBlock({
             key={option.id}
             type="button"
             className={styles.choice}
-            disabled={answered}
-            onClick={() => onChoose(option.id)}
+            // Focusable after answering, for the same reason as the prediction above: losing focus
+            // to the body is the worst possible moment to lose it, because the explanation the
+            // learner is meant to read has just appeared underneath.
+            aria-disabled={answered}
+            onClick={() => !answered && onChoose(option.id)}
             data-verdict={
               !answered
                 ? undefined
