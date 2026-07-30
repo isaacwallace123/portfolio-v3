@@ -33,10 +33,19 @@ export async function liveFetch(
   owner?: string,
   ownerName?: string,
 ): Promise<Response> {
+  // A caller's own signal is added to the deadline, never substituted for it. Falling back with
+  // `??` would mean any route that passed one — forwarding `req.signal` to cancel work when the
+  // browser goes away is the obvious thing to reach for — silently opted out of the timeout, which
+  // is the exact failure this is here to prevent.
+  const timeout = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+  const signal = init?.signal
+    ? AbortSignal.any([init.signal, timeout])
+    : timeout;
+
   try {
     return await fetch(`${API_BASE}${path}`, {
       ...init,
-      signal: init?.signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      signal,
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${RUNS_KEY}`,

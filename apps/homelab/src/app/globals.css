@@ -215,11 +215,6 @@ body::after {
   backdrop-filter: blur(16px);
   overflow: hidden;
 }
-@keyframes podPulse {
-  to {
-    opacity: 0.45;
-  }
-}
 
 .metric {
   min-height: 90px;
@@ -292,63 +287,6 @@ body > footer {
   border-color: color-mix(in srgb, var(--mint) 32%, var(--line));
   box-shadow: 0 24px 64px -40px color-mix(in srgb, var(--mint) 35%, #000);
   transform: translateY(-2px);
-}
-@keyframes home-flow-arrow {
-  50% {
-    color: var(--acid);
-    filter: drop-shadow(0 0 5px var(--mint));
-    transform: translateX(4px);
-  }
-}
-
-@keyframes home-ring-breathe {
-  50% {
-    filter: drop-shadow(
-      0 0 18px color-mix(in srgb, var(--acid) 26%, transparent)
-    );
-    transform: scale(1.025);
-  }
-}
-
-@keyframes home-ring-orbit {
-  to {
-    transform: rotate(1turn);
-  }
-}
-
-@keyframes home-signal-sweep {
-  55%,
-  100% {
-    transform: translateX(360%);
-  }
-}
-
-@keyframes home-node-scan {
-  45%,
-  100% {
-    transform: translateX(120%);
-  }
-}
-
-@keyframes home-event-arrive {
-  from {
-    opacity: 0;
-    transform: translateX(-12px);
-  }
-}
-
-@keyframes home-trace-flow {
-  to {
-    background-position: -220% 0;
-  }
-}
-
-@keyframes home-platform-float {
-  50% {
-    color: var(--mint);
-    text-shadow: 0 0 14px color-mix(in srgb, var(--mint) 55%, transparent);
-    transform: translateY(-2px);
-  }
 }
 
 :root[data-theme="light"] .lab-ambient-scene {
@@ -424,18 +362,6 @@ html[data-reduce-motion] *::after {
   .metric {
     border-right: 0;
     border-bottom: 1px solid var(--line);
-  }
-}
-
-@keyframes livePulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55);
-  }
-  70% {
-    box-shadow: 0 0 0 7px rgba(52, 211, 153, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
   }
 }
 
@@ -743,24 +669,6 @@ html[data-reduce-motion] *::after {
   color: var(--acid);
   font-size: 10px;
   font-style: normal;
-}
-:root {
-}
-:root[data-theme="light"] {
-}
-@keyframes trafficDash {
-  to {
-    stroke-dashoffset: -20;
-  }
-}
-
-@keyframes nodePulse {
-  0% {
-    box-shadow: 0 0 10px rgba(255, 106, 114, 0.1);
-  }
-  100% {
-    box-shadow: 0 0 28px rgba(255, 106, 114, 0.35);
-  }
 }
 
 @media (max-width: 1100px) {
