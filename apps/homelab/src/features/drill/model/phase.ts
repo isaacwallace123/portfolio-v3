@@ -2,12 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DrillOption, LiveRunView } from "@/shared/api/live-client";
-import {
-  impactOf,
-  mark,
-  type DecisionRecord,
-  type TierImpact,
-} from "./impact";
+import { impactOf, mark, type DecisionRecord, type TierImpact } from "./impact";
 
 // The drill's state, said once and out loud.
 //
@@ -65,7 +60,9 @@ export function useDrillState(
   const [lit, setLit] = useState<TierImpact[]>([]);
 
   // The run as it was when the option was clicked. Impact is a diff, so it needs the before.
-  const pending = useRef<{ before: LiveRunView; option: DrillOption } | null>(null);
+  const pending = useRef<{ before: LiveRunView; option: DrillOption } | null>(
+    null,
+  );
   const attempt = run ? `${run.drillId}:${run.drillStage}` : "";
 
   // A new drill clears everything: a ledger from the last attempt is not evidence about this one.
@@ -167,7 +164,8 @@ function derivePhase(
     return { kind: "misstep", move: misstep, record: recordFor(misstep.id) };
 
   // The handoff explains what the last fix just caused; it is read before the next stage is worked.
-  if (run.drillStageHandoff && ackedStage !== attempt) return { kind: "briefing" };
+  if (run.drillStageHandoff && ackedStage !== attempt)
+    return { kind: "briefing" };
 
   const met = run.drillGoals.filter((g) => g.met).length;
   if (

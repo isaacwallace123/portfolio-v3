@@ -210,7 +210,9 @@ export default function ClusterWorkbench() {
             cardRefs={cardRefs}
             intendedPods={intendedPods}
             blockedReason={blockedReason}
-            impactTiers={drill.impact.filter((i) => i.degrading).map((i) => i.tier)}
+            impactTiers={drill.impact
+              .filter((i) => i.degrading)
+              .map((i) => i.tier)}
           />
         </div>
 

@@ -53,7 +53,10 @@ const LOAD = "k6";
 const DATA = "postgres";
 
 /** Diff two runs into the tier changes a decision caused. */
-export function impactOf(before: LiveRunView, after: LiveRunView): TierImpact[] {
+export function impactOf(
+  before: LiveRunView,
+  after: LiveRunView,
+): TierImpact[] {
   const out: TierImpact[] = [];
 
   const num = (
@@ -79,8 +82,19 @@ export function impactOf(before: LiveRunView, after: LiveRunView): TierImpact[] 
     before.telemetry.apiReplicas,
     after.telemetry.apiReplicas,
   );
-  num(CANARY, "Canary replicas", before.canaryReplicas, after.canaryReplicas, false);
-  num(GATEWAY, "Gateway replicas", before.gatewayReplicas, after.gatewayReplicas);
+  num(
+    CANARY,
+    "Canary replicas",
+    before.canaryReplicas,
+    after.canaryReplicas,
+    false,
+  );
+  num(
+    GATEWAY,
+    "Gateway replicas",
+    before.gatewayReplicas,
+    after.gatewayReplicas,
+  );
   num(LOAD, "Offered load", before.loadGenerators, after.loadGenerators, false);
 
   if (before.telemetry.cacheActive !== after.telemetry.cacheActive)
