@@ -9,6 +9,7 @@ RUN go mod init checkout-demo \
  && go get go.opentelemetry.io/otel@v1.44.0 \
  && go get go.opentelemetry.io/otel/sdk@v1.44.0 \
  && go get go.opentelemetry.io/otel/sdk/resource@v1.44.0 \
+ && go get golang.org/x/text@v0.39.0 \
  && CGO_ENABLED=0 go build -ldflags="-s -w" -o /checkout .
 
 FROM gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
