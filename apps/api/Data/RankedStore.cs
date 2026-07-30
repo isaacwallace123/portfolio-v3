@@ -1,5 +1,6 @@
 using System.Data;
 using IsaacWallace.Api.Ranked;
+using IsaacWallace.Api.Runs;
 using Microsoft.EntityFrameworkCore;
 
 namespace IsaacWallace.Api.Data;
@@ -19,7 +20,43 @@ public sealed record RankedAttemptView(
     int PreRating,
     double ExpectedScore,
     int RatingDelta,
-    int PostRating);
+    int PostRating,
+    RankedPerformanceView? Performance);
+
+public sealed record RankedPerformanceView(
+    int QualityScore,
+    double RatingScore,
+    int SloHealthScore,
+    int ObjectiveHealthScore,
+    int ActionScore,
+    int ContainmentScore,
+    int TargetedActions,
+    int HarmfulActions,
+    int UnnecessaryActions,
+    int RedundantActions,
+    int ConvergenceViolations,
+    int SampleCount,
+    double PeakP95LatencyMs,
+    double PeakErrorRatePct,
+    int MinimumServedRatioPct,
+    int VerificationSeconds,
+    string Band);
+
+public sealed record RankedTelemetryObservation(
+    string AttemptId,
+    string RunId,
+    string OwnerKey,
+    DateTime RecordedUtc,
+    int Stage,
+    int OfferedRequestsPerSec,
+    int ServedRequestsPerSec,
+    double P95LatencyMs,
+    double ErrorRatePct,
+    int ObjectiveGoalsMet,
+    int ObjectiveGoalsTotal,
+    int SloGoalsMet,
+    int SloGoalsTotal,
+    int HeldSeconds);
 
 public sealed record RankedProfileView(
     int Rating,
@@ -127,6 +164,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             await using var tx = await db.Database.BeginTransactionAsync(
                 IsolationLevel.Serializable, ct);
             var attempt = await db.RankedAttempts
+                .Include(candidate => candidate.Performance)
                 .SingleOrDefaultAsync(a => a.Id == attemptId && a.OwnerKey == owner, ct);
             if (attempt is null) return null;
             if (attempt.Outcome != RankedOutcomes.Active) return View(attempt);
@@ -140,6 +178,39 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             if (!string.IsNullOrWhiteSpace(displayName))
                 attempt.DisplayName = CleanName(displayName);
 
+            if (!ScenarioDefinitions.All.TryGetValue(attempt.DrillId, out var scenario))
+                throw new InvalidOperationException(
+                    $"Ranked scenario '{attempt.DrillId}' is no longer available for audit.");
+
+            var samples = await db.RankedTelemetry
+                .AsNoTracking()
+                .Where(sample =>
+                    sample.AttemptId == attempt.Id &&
+                    sample.OwnerKey == owner)
+                .OrderBy(sample => sample.RecordedUtc)
+                .ToListAsync(ct);
+            if (outcome == RankedOutcomes.Completed && samples.Count == 0)
+                throw new InvalidOperationException(
+                    "A completed ranked match cannot be rated without measured telemetry.");
+
+            var actions = await db.RankedActions
+                .AsNoTracking()
+                .Where(action =>
+                    action.AttemptId == attempt.Id &&
+                    action.OwnerKey == owner)
+                .OrderBy(action => action.AcceptedUtc)
+                .ToListAsync(ct);
+            var performance = RankedPerformance.Evaluate(
+                outcome,
+                scenario,
+                samples.Select(Signal).ToArray(),
+                actions.Select(action => new RankedActionSignal(
+                    action.Command,
+                    action.Stage,
+                    action.AcceptedUtc)).ToArray(),
+                (int)RunBroker.GoalHold.TotalSeconds);
+            attempt.Performance = Performance(attempt, performance, now);
+
             if (RankedOutcomes.IsRated(outcome))
             {
                 var rating = await db.OperatorRatings
@@ -150,12 +221,11 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
                     db.OperatorRatings.Add(rating);
                 }
 
-                var completed = outcome == RankedOutcomes.Completed;
                 var result = RankedRules.Calculate(
                     rating.Rating,
                     rating.GamesPlayed,
                     attempt.ScenarioRating,
-                    completed,
+                    performance.RatingScore,
                     outcome is RankedOutcomes.Forfeited or RankedOutcomes.Expired);
 
                 attempt.PreRating = result.Before;
@@ -167,7 +237,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
                 rating.Rating = result.After;
                 rating.PeakRating = Math.Max(rating.PeakRating, result.After);
                 rating.GamesPlayed += 1;
-                if (completed)
+                if (outcome == RankedOutcomes.Completed)
                 {
                     rating.Wins += 1;
                     rating.CurrentStreak += 1;
@@ -218,6 +288,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
     {
         var attempt = await db.RankedAttempts
             .AsNoTracking()
+            .Include(candidate => candidate.Performance)
             .SingleOrDefaultAsync(a => a.Id == attemptId && a.OwnerKey == owner, ct);
         return attempt is null ? null : View(attempt);
     }
@@ -229,6 +300,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
     {
         var attempt = await db.RankedAttempts
             .AsNoTracking()
+            .Include(candidate => candidate.Performance)
             .Where(a =>
                 a.RunId == runId &&
                 a.OwnerKey == owner &&
@@ -244,6 +316,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
     {
         var attempt = await db.RankedAttempts
             .AsNoTracking()
+            .Include(candidate => candidate.Performance)
             .Where(a => a.OwnerKey == owner && a.Outcome == RankedOutcomes.Active)
             .OrderByDescending(a => a.StartedUtc)
             .FirstOrDefaultAsync(ct);
@@ -305,6 +378,67 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
         }
     }
 
+    public async Task<bool> RecordTelemetryAsync(
+        RankedTelemetryObservation observation,
+        CancellationToken ct)
+    {
+        var attempt = await db.RankedAttempts
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                candidate =>
+                    candidate.Id == observation.AttemptId &&
+                    candidate.RunId == observation.RunId &&
+                    candidate.OwnerKey == observation.OwnerKey &&
+                    candidate.Outcome == RankedOutcomes.Active,
+                ct);
+        if (attempt is null) return false;
+
+        var recordedUtc = Utc(observation.RecordedUtc);
+        var bucket = Math.Max(
+            0,
+            (long)Math.Floor(
+                (recordedUtc - Utc(attempt.StartedUtc)).TotalSeconds /
+                RankedPerformance.TelemetryBucketSeconds));
+        var id = $"{attempt.Id}:{bucket:x}";
+        if (await db.RankedTelemetry.AsNoTracking().AnyAsync(sample => sample.Id == id, ct))
+            return true;
+
+        db.RankedTelemetry.Add(new RankedTelemetrySample
+        {
+            Id = id,
+            AttemptId = attempt.Id,
+            RunId = attempt.RunId,
+            OwnerKey = attempt.OwnerKey,
+            RecordedUtc = recordedUtc,
+            Stage = Math.Max(1, observation.Stage),
+            OfferedRequestsPerSec = Math.Max(0, observation.OfferedRequestsPerSec),
+            ServedRequestsPerSec = Math.Max(0, observation.ServedRequestsPerSec),
+            P95LatencyMs = Math.Max(0, observation.P95LatencyMs),
+            ErrorRatePct = Math.Clamp(observation.ErrorRatePct, 0, 100),
+            ObjectiveGoalsMet = Math.Max(0, observation.ObjectiveGoalsMet),
+            ObjectiveGoalsTotal = Math.Max(0, observation.ObjectiveGoalsTotal),
+            SloGoalsMet = Math.Max(0, observation.SloGoalsMet),
+            SloGoalsTotal = Math.Max(0, observation.SloGoalsTotal),
+            HeldSeconds = Math.Max(0, observation.HeldSeconds),
+        });
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException ex)
+        {
+            log.LogDebug(
+                ex,
+                "Ranked telemetry bucket {TelemetryBucketId} was already recorded.",
+                id);
+            db.ChangeTracker.Clear();
+            return await db.RankedTelemetry
+                .AsNoTracking()
+                .AnyAsync(sample => sample.Id == id, ct);
+        }
+    }
+
     public async Task<IReadOnlyList<RankedActionView>> ActionsForAttemptAsync(
         string attemptId,
         string owner,
@@ -342,6 +476,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             : null;
         var recent = await db.RankedAttempts
             .AsNoTracking()
+            .Include(attempt => attempt.Performance)
             .Where(a => a.OwnerKey == owner)
             .OrderByDescending(a => a.StartedUtc)
             .Take(12)
@@ -426,5 +561,68 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             attempt.PreRating,
             attempt.ExpectedScore,
             attempt.RatingDelta,
-            attempt.PostRating);
+            attempt.PostRating,
+            attempt.Performance is null ? null : View(attempt.Performance));
+
+    private static RankedPerformanceView View(RankedPerformanceRecord performance) =>
+        new(
+            performance.QualityScore,
+            performance.RatingScore,
+            performance.SloHealthScore,
+            performance.ObjectiveHealthScore,
+            performance.ActionScore,
+            performance.ContainmentScore,
+            performance.TargetedActions,
+            performance.HarmfulActions,
+            performance.UnnecessaryActions,
+            performance.RedundantActions,
+            performance.ConvergenceViolations,
+            performance.SampleCount,
+            performance.PeakP95LatencyMs,
+            performance.PeakErrorRatePct,
+            performance.MinimumServedRatioPct,
+            performance.VerificationSeconds,
+            performance.Band);
+
+    private static RankedTelemetryFrame Signal(RankedTelemetrySample sample) =>
+        new(
+            sample.RecordedUtc,
+            sample.Stage,
+            sample.OfferedRequestsPerSec,
+            sample.ServedRequestsPerSec,
+            sample.P95LatencyMs,
+            sample.ErrorRatePct,
+            sample.ObjectiveGoalsMet,
+            sample.ObjectiveGoalsTotal,
+            sample.SloGoalsMet,
+            sample.SloGoalsTotal,
+            sample.HeldSeconds);
+
+    private static RankedPerformanceRecord Performance(
+        RankedAttempt attempt,
+        RankedPerformanceResult result,
+        DateTime now) =>
+        new()
+        {
+            AttemptId = attempt.Id,
+            OwnerKey = attempt.OwnerKey,
+            QualityScore = result.QualityScore,
+            RatingScore = result.RatingScore,
+            SloHealthScore = result.SloHealthScore,
+            ObjectiveHealthScore = result.ObjectiveHealthScore,
+            ActionScore = result.ActionScore,
+            ContainmentScore = result.ContainmentScore,
+            TargetedActions = result.TargetedActions,
+            HarmfulActions = result.HarmfulActions,
+            UnnecessaryActions = result.UnnecessaryActions,
+            RedundantActions = result.RedundantActions,
+            ConvergenceViolations = result.ConvergenceViolations,
+            SampleCount = result.SampleCount,
+            PeakP95LatencyMs = result.PeakP95LatencyMs,
+            PeakErrorRatePct = result.PeakErrorRatePct,
+            MinimumServedRatioPct = result.MinimumServedRatioPct,
+            VerificationSeconds = result.VerificationSeconds,
+            Band = result.Band,
+            CreatedUtc = now,
+        };
 }

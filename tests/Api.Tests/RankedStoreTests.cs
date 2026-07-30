@@ -30,6 +30,7 @@ public sealed class RankedStoreTests
         Assert.Null(before.LadderRank);
         Assert.Equal(0, before.RatedOperators);
 
+        await RecordControlledRecoveryAsync(fixture.Store, attempt, "owner-a", started);
         var result = await fixture.Store.FinalizeAsync(
             attempt.Id,
             "owner-a",
@@ -53,6 +54,9 @@ public sealed class RankedStoreTests
         Assert.Equal(RankedOutcomes.Completed, result.Outcome);
         Assert.Equal(42_000, result.ElapsedMs);
         Assert.Equal(28, result.RatingDelta);
+        Assert.NotNull(result.Performance);
+        Assert.Equal(100, result.Performance.QualityScore);
+        Assert.Equal(1, result.Performance.RatingScore);
         Assert.Equal(result, duplicate);
 
         var profile = await fixture.Store.ProfileAsync(
@@ -66,6 +70,8 @@ public sealed class RankedStoreTests
         Assert.Equal(1, profile.LadderRank);
         Assert.Equal(1, profile.RatedOperators);
         Assert.Equal(1, await fixture.Db.RatingLedger.CountAsync(
+            CancellationToken.None));
+        Assert.Equal(1, await fixture.Db.RankedPerformance.CountAsync(
             CancellationToken.None));
     }
 
@@ -196,6 +202,11 @@ public sealed class RankedStoreTests
                 owner,
                 DateTime.UtcNow,
                 CancellationToken.None);
+            await RecordControlledRecoveryAsync(
+                fixture.Store,
+                attempt,
+                owner,
+                attempt.StartedUtc);
             await fixture.Store.FinalizeAsync(
                 attempt.Id,
                 owner,
@@ -273,6 +284,91 @@ public sealed class RankedStoreTests
         Assert.Equal(accepted, action.AcceptedUtc);
         Assert.Equal(1, await fixture.Db.RankedActions.CountAsync(
             CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task TelemetryBucketsAreIdempotentAndRequiredForACompletedRating()
+    {
+        await using var fixture = await RankedFixture.CreateAsync();
+        var started = new DateTime(2026, 7, 30, 6, 0, 0, DateTimeKind.Utc);
+        var attempt = await fixture.Store.BeginAsync(
+            "run-hl-measured12",
+            "cascade-scale-release",
+            "owner-measured",
+            "Katherine",
+            started,
+            CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Store.FinalizeAsync(
+                attempt.Id,
+                "owner-measured",
+                RankedOutcomes.Completed,
+                20_000,
+                3,
+                "",
+                "Katherine",
+                CancellationToken.None));
+        fixture.Db.ChangeTracker.Clear();
+
+        var observation = new RankedTelemetryObservation(
+            attempt.Id,
+            attempt.RunId,
+            "owner-measured",
+            started.AddSeconds(6),
+            1,
+            1000,
+            700,
+            350,
+            1.2,
+            2,
+            3,
+            2,
+            3,
+            0);
+        Assert.True(await fixture.Store.RecordTelemetryAsync(
+            observation, CancellationToken.None));
+        Assert.True(await fixture.Store.RecordTelemetryAsync(
+            observation with { RecordedUtc = started.AddSeconds(9) },
+            CancellationToken.None));
+
+        Assert.Equal(1, await fixture.Db.RankedTelemetry.CountAsync(
+            CancellationToken.None));
+    }
+
+    private static async Task RecordControlledRecoveryAsync(
+        RankedStore store,
+        RankedAttemptView attempt,
+        string owner,
+        DateTime at)
+    {
+        await store.RecordActionAsync(
+            $"controlled-{owner}",
+            attempt.Id,
+            attempt.RunId,
+            owner,
+            "scale checkout 6",
+            "scale-6",
+            1,
+            at.AddSeconds(1),
+            CancellationToken.None);
+        await store.RecordTelemetryAsync(
+            new RankedTelemetryObservation(
+                attempt.Id,
+                attempt.RunId,
+                owner,
+                at.AddSeconds(20),
+                1,
+                1000,
+                1000,
+                100,
+                0,
+                3,
+                3,
+                3,
+                3,
+                15),
+            CancellationToken.None);
     }
 
     private sealed class RankedFixture(

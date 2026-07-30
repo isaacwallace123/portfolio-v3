@@ -920,6 +920,88 @@
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+.performanceCard {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--mint) 30%, var(--line));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--mint) 4%, var(--surface));
+  text-align: left;
+}
+.performanceCard > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink-dim);
+  font:
+    700 8.5px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.performanceCard > header b {
+  color: var(--mint);
+  font-variant-numeric: tabular-nums;
+}
+.performanceGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.performanceGrid > div {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border-right: 1px solid var(--line);
+}
+.performanceGrid > div:last-child {
+  border-right: 0;
+}
+.performanceGrid span,
+.performanceCard > small {
+  color: var(--ink-dim);
+  font:
+    650 8px/1.35 ui-monospace,
+    monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.performanceGrid b {
+  color: var(--ink);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.performanceAudit {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.performanceAudit span {
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-dim);
+  font:
+    650 8px/1 ui-monospace,
+    monospace;
+  text-transform: uppercase;
+}
+.performanceAudit b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.performanceCard > p {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 9px;
+  line-height: 1.45;
+}
 .speedCompare {
   display: flex;
   align-items: center;
@@ -965,6 +1047,18 @@
 }
 .resultNote {
   margin: 1px 0 3px;
+}
+
+@media (max-width: 620px) {
+  .performanceGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .performanceGrid > div:nth-child(2) {
+    border-right: 0;
+  }
+  .performanceGrid > div:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--line);
+  }
 }
 
 .spin {

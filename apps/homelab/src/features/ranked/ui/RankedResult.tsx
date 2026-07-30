@@ -174,6 +174,62 @@ export function RankedResult({
         </div>
       </div>
 
+      {settled && attempt.performance && (
+        <section className={styles.performanceCard}>
+          <header>
+            <span>Operational quality</span>
+            <b>
+              {attempt.performance.qualityScore}/100 ·{" "}
+              {attempt.performance.band}
+            </b>
+          </header>
+          <div className={styles.performanceGrid}>
+            <div>
+              <span>SLO health</span>
+              <b>{attempt.performance.sloHealthScore}%</b>
+            </div>
+            <div>
+              <span>Objective control</span>
+              <b>{attempt.performance.objectiveHealthScore}%</b>
+            </div>
+            <div>
+              <span>Action discipline</span>
+              <b>{attempt.performance.actionScore}%</b>
+            </div>
+            <div>
+              <span>Containment</span>
+              <b>{attempt.performance.containmentScore}%</b>
+            </div>
+          </div>
+          <div className={styles.performanceAudit}>
+            <span>
+              <b>{attempt.performance.targetedActions}</b> targeted
+            </span>
+            <span>
+              <b>{attempt.performance.harmfulActions}</b> harmful
+            </span>
+            <span>
+              <b>{attempt.performance.unnecessaryActions}</b> unnecessary
+            </span>
+            <span>
+              <b>{attempt.performance.redundantActions}</b> repeated
+            </span>
+            <span>
+              <b>{attempt.performance.convergenceViolations}</b> before converge
+            </span>
+          </div>
+          <p>
+            Peak {Math.round(attempt.performance.peakP95LatencyMs)}ms p95 ·{" "}
+            {attempt.performance.peakErrorRatePct.toFixed(1)}% errors ·{" "}
+            {attempt.performance.sampleCount} measured windows
+          </p>
+          <small>
+            Rating result {Math.round(attempt.performance.ratingScore * 100)}%.
+            Official time is excluded from this score.
+          </small>
+        </section>
+      )}
+
       <div className={styles.actionLog}>
         <header>
           <span>Operational timeline</span>

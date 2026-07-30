@@ -1204,6 +1204,7 @@ public sealed class RunBroker
 
         var goals = ScenarioDefinitions.Evaluate(stage, telemetry, resource.Spec);
         await TryPersistRankedActionsAsync(resource, view, ct);
+        await TryRecordRankedTelemetryAsync(resource, view, telemetry, stage, goals, ct);
         var annotations = resource.Metadata.Annotations;
         // Nothing further is judged once the attempt is decided, either way. A failed ranked run
         // keeps measuring and drawing — the point is to watch what the wrong move did — but it can
@@ -1482,6 +1483,54 @@ public sealed class RunBroker
         }
     }
 
+    private async Task TryRecordRankedTelemetryAsync(
+        LabRunResource resource,
+        RunView view,
+        RunTelemetry telemetry,
+        DrillStage stage,
+        IReadOnlyList<DrillGoalState> goals,
+        CancellationToken ct)
+    {
+        if (view.DrillMode != "ranked") return;
+        var attemptId = resource.Metadata.Annotations?
+            .GetValueOrDefault(RankedAttemptIdAnnotation) ?? "";
+        if (attemptId.Length == 0) return;
+
+        var evaluated = stage.Goals.Zip(goals).ToArray();
+        var slo = evaluated
+            .Where(pair => pair.First.Metric is "throughput" or "p95" or "errors")
+            .ToArray();
+        try
+        {
+            var recorded = await _ranked.RecordTelemetryAsync(
+                new RankedTelemetryObservation(
+                    attemptId,
+                    view.RunId,
+                    view.Owner,
+                    DateTime.UtcNow,
+                    view.DrillStage,
+                    view.OfferedRequestsPerSec,
+                    telemetry.RequestsPerSec,
+                    telemetry.P95LatencyMs,
+                    telemetry.ErrorRatePct,
+                    evaluated.Count(pair => pair.Second.Met),
+                    evaluated.Length,
+                    slo.Count(pair => pair.Second.Met),
+                    slo.Length,
+                    view.DrillHeldSeconds),
+                ct);
+            if (!recorded)
+                throw new InvalidOperationException(
+                    $"Ranked telemetry could not be attached to attempt '{attemptId}'.");
+        }
+        catch (Exception ex)
+        {
+            // A completed match is not rated without at least one durable sample. The solve stays on
+            // the LabRun, so the next snapshot can retry both this bucket and finalization.
+            _log.LogError(ex, "Could not record ranked telemetry for {RunId}.", view.RunId);
+        }
+    }
+
     private async Task PersistRankedActionsAsync(
         LabRunResource resource,
         RunView view,
@@ -1520,6 +1569,10 @@ public sealed class RunBroker
         int? stageReached = null)
     {
         if (view.DrillMode != "ranked") return null;
+
+        // Rating must explain every mutation the cluster accepted. If the durable action copy is
+        // unavailable, keep the attempt active and retry from the LabRun annotations next poll.
+        await PersistRankedActionsAsync(resource, view, ct);
 
         var attemptId = resource.Metadata.Annotations?
             .GetValueOrDefault(RankedAttemptIdAnnotation);

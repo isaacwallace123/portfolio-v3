@@ -23,6 +23,7 @@ public sealed class RankedAttempt
     public double ExpectedScore { get; set; }
     public int RatingDelta { get; set; }
     public int PostRating { get; set; }
+    public RankedPerformanceRecord? Performance { get; set; }
 }
 
 public sealed class OperatorRating

@@ -255,6 +255,26 @@ export interface LeaderboardView {
 export type RankedOutcome =
   "active" | "completed" | "failed" | "forfeited" | "expired" | "void";
 
+export interface RankedPerformance {
+  qualityScore: number;
+  ratingScore: number;
+  sloHealthScore: number;
+  objectiveHealthScore: number;
+  actionScore: number;
+  containmentScore: number;
+  targetedActions: number;
+  harmfulActions: number;
+  unnecessaryActions: number;
+  redundantActions: number;
+  convergenceViolations: number;
+  sampleCount: number;
+  peakP95LatencyMs: number;
+  peakErrorRatePct: number;
+  minimumServedRatioPct: number;
+  verificationSeconds: number;
+  band: string;
+}
+
 export interface RankedAttempt {
   id: string;
   runId: string;
@@ -271,6 +291,7 @@ export interface RankedAttempt {
   expectedScore: number;
   ratingDelta: number;
   postRating: number;
+  performance: RankedPerformance | null;
 }
 
 export interface RankedProfile {

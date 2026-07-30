@@ -31,8 +31,8 @@ public sealed record RankedDivision(
 
 /// <summary>
 /// Seasonless solo ELO. The incident is the opponent: its calibrated rating determines how much a
-/// clean solve is worth and how costly a failed call is. Time deliberately does not enter this
-/// calculation; it remains an independent, global recovery-time ladder.
+/// controlled recovery is worth and how costly a failed call is. Time deliberately does not enter
+/// this calculation; it remains an independent, global recovery-time ladder.
 /// </summary>
 public static class RankedRules
 {
@@ -76,14 +76,33 @@ public static class RankedRules
         int scenarioRating,
         bool completed,
         bool abandoned = false)
+        => Calculate(
+            playerRating,
+            gamesPlayed,
+            scenarioRating,
+            completed ? 1.0 : 0.0,
+            abandoned);
+
+    public static RatingResult Calculate(
+        int playerRating,
+        int gamesPlayed,
+        int scenarioRating,
+        double score,
+        bool abandoned = false)
     {
         var expected = ExpectedScore(playerRating, scenarioRating);
         var k = gamesPlayed < 10 ? 40 : 24;
-        var score = completed ? 1.0 : 0.0;
+        score = Math.Clamp(score, 0, 1);
         var rawDelta = (int)Math.Round(k * (score - expected), MidpointRounding.AwayFromZero);
-        if (!completed && abandoned)
+        if (score == 0 && abandoned)
             rawDelta = Math.Min(rawDelta, -MinimumAbandonmentLoss);
-        var delta = rawDelta == 0 ? (completed ? 1 : -1) : rawDelta;
+        var delta = rawDelta != 0
+            ? rawDelta
+            : score > expected
+                ? 1
+                : score < expected
+                    ? -1
+                    : 0;
         var after = Math.Max(100, playerRating + delta);
         return new RatingResult(playerRating, after - playerRating, after, expected, k);
     }

@@ -94,4 +94,14 @@ public sealed class RankedRulesTests
 
         Assert.Equal(fast, slow);
     }
+
+    [Fact]
+    public void OperationalQualityChangesTheValueOfACompletedRecovery()
+    {
+        var controlled = RankedRules.Calculate(1300, 12, 1300, score: 1);
+        var reckless = RankedRules.Calculate(1300, 12, 1300, score: 0.62);
+
+        Assert.True(controlled.Delta > reckless.Delta);
+        Assert.True(reckless.Delta > 0);
+    }
 }

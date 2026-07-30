@@ -24,6 +24,9 @@ describe("the unified Ranked destination", () => {
     const result = read("features/ranked/ui/RankedResult.tsx");
     expect(result).toContain('href="/ranked#standings"');
     expect(result).not.toContain('href="/leaderboard"');
+    expect(result).toContain("Operational quality");
+    expect(result).toContain("SLO health");
+    expect(result).toContain("Official time is excluded from this score.");
   });
 
   it("uses the lobby until a ranked incident becomes active", () => {
