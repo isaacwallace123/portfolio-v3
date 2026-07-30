@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace IsaacWallace.Api.Ranked;
@@ -38,6 +40,7 @@ public sealed record RankedScenarioSeed(string SeedId, int GeneratorVersion, int
 
     public const int MinRating = 100;
     public const int MaxRating = 2600;
+    public const string PublicDrillId = "ranked-generated";
 
     private static readonly Regex SeedIdPattern =
         new("^[a-f0-9]{32}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -59,6 +62,13 @@ public sealed record RankedScenarioSeed(string SeedId, int GeneratorVersion, int
         string.Create(
             CultureInfo.InvariantCulture,
             $"{TokenPrefix}-{GeneratorVersion}-{Quantize(PlayerRating)}-{SeedId}");
+
+    /// <summary>
+    /// A public receipt for the active match. It proves the later seed reveal was committed before
+    /// play without exposing the deterministic generator input while the operator can exploit it.
+    /// </summary>
+    public string Commitment =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Token)));
 
     public static bool IsToken(string value) => TokenPattern.IsMatch(value ?? "");
 

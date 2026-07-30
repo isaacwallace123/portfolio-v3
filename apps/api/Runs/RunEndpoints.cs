@@ -161,20 +161,22 @@ public static class RunEndpoints
             return Results.Ok(
                 string.IsNullOrEmpty(owner)
                     ? []
-                    : all.Where(r => r.Owner == owner).ToArray());
+                    : all.Where(r => r.Owner == owner).Select(Public).ToArray());
         }).RequireScope(ApiScopes.RunsRead);
 
         app.MapGet("/v1/runs/{runId}", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
             var run = await broker.GetRunAsync(runId, Owner(ctx), ct);
-            return run is null ? Results.NotFound(new { error = "No such run." }) : Results.Ok(run);
+            return run is null
+                ? Results.NotFound(new { error = "No such run." })
+                : Results.Ok(Public(run));
         }).RequireScope(ApiScopes.RunsRead).ValidatesRunId();
 
         app.MapPost("/v1/runs", async (CreateRunRequest req, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
             var result = await broker.CreateRunAsync(req.ScenarioId ?? "", Owner(ctx), ct);
             return result.Run is not null
-                ? Results.Created($"/v1/runs/{result.Run.RunId}", result.Run)
+                ? Results.Created($"/v1/runs/{result.Run.RunId}", Public(result.Run))
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite);
 
@@ -212,7 +214,7 @@ public static class RunEndpoints
 
             return Results.Ok(new
             {
-                run = RunView.From(judged.Resource) with { DrillGoals = goals },
+                run = Public(RunView.From(judged.Resource) with { DrillGoals = goals }),
                 telemetry = telemetry is null
                     ? null
                     : PublicRunTelemetry.From(telemetry, plan?.Telemetry),
@@ -256,7 +258,7 @@ public static class RunEndpoints
             var result = await broker.SubmitDecisionAsync(
                 runId, req.DecisionId ?? "", Owner(ctx), OwnerName(ctx), ct);
             return result.Run is not null
-                ? Results.Ok(result.Run)
+                ? Results.Ok(Public(result.Run))
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
@@ -265,7 +267,7 @@ public static class RunEndpoints
         {
             var result = await broker.SubmitPracticeActionAsync(runId, req.ActionId ?? "", Owner(ctx), ct);
             return result.Run is not null
-                ? Results.Ok(result.Run)
+                ? Results.Ok(Public(result.Run))
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
@@ -275,7 +277,7 @@ public static class RunEndpoints
             var result = await broker.SubmitRankedCommandAsync(
                 runId, req.Command ?? "", Owner(ctx), ct);
             return result.Run is not null
-                ? Results.Ok(result.Run)
+                ? Results.Ok(Public(result.Run))
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
@@ -297,7 +299,7 @@ public static class RunEndpoints
         {
             var result = await broker.RenewRunAsync(runId, Owner(ctx), ct);
             return result.Run is not null
-                ? Results.Ok(result.Run)
+                ? Results.Ok(Public(result.Run))
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
@@ -315,7 +317,7 @@ public static class RunEndpoints
                 OwnerName(ctx),
                 ct);
             return result.Run is not null
-                ? Results.Ok(result.Run)
+                ? Results.Ok(Public(result.Run))
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
@@ -324,7 +326,7 @@ public static class RunEndpoints
         {
             var result = await broker.EndDrillAsync(runId, Owner(ctx), OwnerName(ctx), ct);
             return result.Run is not null
-                ? Results.Ok(result.Run)
+                ? Results.Ok(Public(result.Run))
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
@@ -360,6 +362,8 @@ public static class RunEndpoints
             drillId = resource.Spec.ScenarioId;
         return RankedScenarioCatalog.TryPlan(drillId ?? "");
     }
+
+    private static RunView Public(RunView run) => run.ForPublic();
 
     private static IReadOnlyList<DrillGoalState> ProjectGoals(
         LabRunResource resource,

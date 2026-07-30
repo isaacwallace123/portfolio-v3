@@ -1,4 +1,4 @@
-import { guard, jsonNoStore } from "@/shared/api/guard";
+import { guard, jsonNoStore, readBoundedStringBody } from "@/shared/api/guard";
 import { liveFetch } from "@/shared/api/live-server";
 
 export const dynamic = "force-dynamic";
@@ -8,15 +8,16 @@ export async function POST(
   context: { params: Promise<{ runId: string }> },
 ) {
   const { runId } = await context.params;
-  const g = await guard(req, { runId });
+  const g = await guard(req, { runId, kind: "inspect" });
   if (!g.ok) return g.response;
 
-  const body = await req.json().catch(() => ({}));
+  const body = await readBoundedStringBody(req, "query", 128);
+  if (!body.ok) return body.response;
   const res = await liveFetch(
     `/v1/ranked/${runId}/inspect`,
     {
       method: "POST",
-      body: JSON.stringify({ query: String(body.query ?? "") }),
+      body: JSON.stringify({ query: body.value }),
     },
     g.caller.owner,
     g.caller.displayName,

@@ -42,6 +42,8 @@ public static class RankedRules
     public const int MinimumAbandonmentLoss = 12;
     public const int CalibrationPriorAttempts = 10;
     public const int MaximumCalibrationAdjustment = 200;
+    public const int MaxActionsPerAttempt = 64;
+    public const int MaxEvidencePerAttempt = 128;
 
     private static readonly IReadOnlyDictionary<string, int> ScenarioRatings =
         new Dictionary<string, int>(StringComparer.Ordinal)

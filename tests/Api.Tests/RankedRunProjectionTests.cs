@@ -1,5 +1,6 @@
 using IsaacWallace.Api.Ranked;
 using IsaacWallace.Api.Runs;
+using System.Text.Json;
 using Xunit;
 
 namespace IsaacWallace.Api.Tests;
@@ -21,6 +22,12 @@ public sealed class RankedRunProjectionTests
         Assert.Equal(0, view.DrillCorrectTotal);
         Assert.NotNull(view.RankedBriefing);
         Assert.Null(view.RankedDebrief);
+
+        var projected = view.ForPublic();
+        Assert.Equal("", projected.Owner);
+        Assert.Equal(RankedScenarioSeed.PublicDrillId, projected.DrillId);
+        Assert.Equal(plan.Seed.Commitment, projected.RankedBriefing!.SeedCommitment);
+        Assert.DoesNotContain(plan.Seed.SeedId, JsonSerializer.Serialize(projected));
     }
 
     [Fact]
@@ -31,10 +38,13 @@ public sealed class RankedRunProjectionTests
         resource.Metadata.Annotations![RunBroker.DrillSolvedAnnotation] =
             DateTime.UtcNow.ToString("O");
 
-        var view = RunView.From(resource);
+        var view = RunView.From(resource).ForPublic();
 
         Assert.True(view.DrillSolved);
+        Assert.Equal(plan.DrillId, view.DrillId);
         Assert.NotNull(view.RankedDebrief);
+        Assert.Equal(plan.Seed.SeedId, view.RankedDebrief.SeedId);
+        Assert.Equal(plan.Seed.Commitment, view.RankedBriefing!.SeedCommitment);
         Assert.Equal(
             plan.Faults.Select(fault => fault.ModuleId).OrderBy(id => id),
             view.RankedDebrief.Faults.Select(fault => fault.ModuleId).OrderBy(id => id));

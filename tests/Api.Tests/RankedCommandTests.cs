@@ -53,4 +53,13 @@ public sealed class RankedCommandTests
         Assert.False(RankedCommand.TryParse(text, out var command, out _));
         Assert.Null(command);
     }
+
+    [Fact]
+    public void OversizedInputIsRejectedBeforeTokenization()
+    {
+        var input = new string('a', RankedCommand.MaxInputLength + 1);
+        Assert.False(RankedCommand.TryParse(input, out var command, out var error));
+        Assert.Null(command);
+        Assert.Contains("characters or fewer", error);
+    }
 }

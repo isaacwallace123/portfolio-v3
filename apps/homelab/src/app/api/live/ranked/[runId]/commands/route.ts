@@ -1,4 +1,4 @@
-import { guard, jsonNoStore } from "@/shared/api/guard";
+import { guard, jsonNoStore, readBoundedStringBody } from "@/shared/api/guard";
 import { liveFetch } from "@/shared/api/live-server";
 import { toLiveRunView } from "@/shared/api/live-view";
 
@@ -12,12 +12,13 @@ export async function POST(
   const g = await guard(req, { runId });
   if (!g.ok) return g.response;
 
-  const body = await req.json().catch(() => ({}));
+  const body = await readBoundedStringBody(req, "command", 128);
+  if (!body.ok) return body.response;
   const res = await liveFetch(
     `/v1/ranked/${runId}/commands`,
     {
       method: "POST",
-      body: JSON.stringify({ command: String(body.command ?? "") }),
+      body: JSON.stringify({ command: body.value }),
     },
     g.caller.owner,
     g.caller.displayName,

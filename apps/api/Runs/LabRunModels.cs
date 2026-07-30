@@ -256,6 +256,20 @@ public sealed record RunView(
     RankedMatchBriefing? RankedBriefing,
     RankedMatchDebrief? RankedDebrief)
 {
+    /// <summary>
+    /// Remove authorization material and deterministic generator input before a run crosses the
+    /// API boundary. The full token remains available internally for evaluation and is revealed
+    /// only after the match is sealed.
+    /// </summary>
+    public RunView ForPublic() =>
+        this with
+        {
+            Owner = "",
+            DrillId = RankedBriefing is not null && RankedDebrief is null
+                ? RankedScenarioSeed.PublicDrillId
+                : DrillId,
+        };
+
     // Map the LabRun's Crossplane conditions to a small, public lifecycle vocabulary, and surface the
     // decision-driven state (replica count, cache tier) so a caller can see the effect of a decision.
     public static RunView From(LabRunResource r)

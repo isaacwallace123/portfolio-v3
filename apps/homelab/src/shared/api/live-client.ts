@@ -304,7 +304,7 @@ export interface RankedTelemetryVisibility {
 }
 
 export interface RankedMatchBriefing {
-  seedId: string;
+  seedCommitment: string;
   generatorVersion: number;
   scenarioRating: number;
   difficulty: string;

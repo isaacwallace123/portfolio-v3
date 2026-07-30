@@ -6,6 +6,8 @@ public sealed record RankedInspection(
     string? Service,
     bool WarningsOnly)
 {
+    public const int MaxInputLength = 128;
+
     private static readonly IReadOnlyDictionary<string, string> Services =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -25,6 +27,11 @@ public sealed record RankedInspection(
     {
         inspection = null;
         error = "";
+        if (input.Length > MaxInputLength)
+        {
+            error = $"Inspections must be {MaxInputLength} characters or fewer.";
+            return false;
+        }
         var command = string.Join(
             ' ',
             input.Trim().ToLowerInvariant()

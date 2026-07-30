@@ -397,12 +397,19 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(id) ||
+            id.Length > 64 ||
             string.IsNullOrWhiteSpace(attemptId) ||
+            string.IsNullOrWhiteSpace(runId) ||
             string.IsNullOrWhiteSpace(owner))
             return false;
 
-        if (await db.RankedActions.AsNoTracking().AnyAsync(a => a.Id == id, ct))
-            return true;
+        var existing = await db.RankedActions
+            .AsNoTracking()
+            .SingleOrDefaultAsync(action => action.Id == id, ct);
+        if (existing is not null)
+            return existing.AttemptId == attemptId &&
+                existing.RunId == runId &&
+                existing.OwnerKey == owner;
 
         var attemptExists = await db.RankedAttempts
             .AsNoTracking()
@@ -414,9 +421,18 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
                 ct);
         if (!attemptExists) return false;
 
+        var actionCount = await db.RankedActions
+            .AsNoTracking()
+            .CountAsync(action =>
+                action.AttemptId == attemptId &&
+                action.RunId == runId &&
+                action.OwnerKey == owner,
+                ct);
+        if (actionCount >= RankedRules.MaxActionsPerAttempt) return false;
+
         db.RankedActions.Add(new RankedActionEntry
         {
-            Id = id[..Math.Min(id.Length, 64)],
+            Id = id,
             AttemptId = attemptId,
             RunId = runId,
             OwnerKey = owner,
@@ -436,7 +452,12 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             db.ChangeTracker.Clear();
             return await db.RankedActions
                 .AsNoTracking()
-                .AnyAsync(a => a.Id == id, ct);
+                .AnyAsync(action =>
+                    action.Id == id &&
+                    action.AttemptId == attemptId &&
+                    action.RunId == runId &&
+                    action.OwnerKey == owner,
+                    ct);
         }
     }
 
@@ -514,7 +535,9 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(id) ||
+            id.Length > 64 ||
             string.IsNullOrWhiteSpace(attemptId) ||
+            string.IsNullOrWhiteSpace(runId) ||
             string.IsNullOrWhiteSpace(owner))
             return null;
 
@@ -532,11 +555,25 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
         var existing = await db.RankedEvidence
             .AsNoTracking()
             .SingleOrDefaultAsync(evidence => evidence.Id == id, ct);
-        if (existing is not null) return View(existing);
+        if (existing is not null)
+            return existing.AttemptId == attemptId &&
+                existing.RunId == runId &&
+                existing.OwnerKey == owner
+                ? View(existing)
+                : null;
+
+        var evidenceCount = await db.RankedEvidence
+            .AsNoTracking()
+            .CountAsync(evidence =>
+                evidence.AttemptId == attemptId &&
+                evidence.RunId == runId &&
+                evidence.OwnerKey == owner,
+                ct);
+        if (evidenceCount >= RankedRules.MaxEvidencePerAttempt) return null;
 
         var item = new RankedEvidenceEntry
         {
-            Id = id[..Math.Min(id.Length, 64)],
+            Id = id,
             AttemptId = attemptId,
             RunId = runId,
             OwnerKey = owner,
@@ -558,7 +595,12 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             db.ChangeTracker.Clear();
             existing = await db.RankedEvidence
                 .AsNoTracking()
-                .SingleOrDefaultAsync(evidence => evidence.Id == item.Id, ct);
+                .SingleOrDefaultAsync(evidence =>
+                    evidence.Id == item.Id &&
+                    evidence.AttemptId == attemptId &&
+                    evidence.RunId == runId &&
+                    evidence.OwnerKey == owner,
+                    ct);
             return existing is null ? null : View(existing);
         }
     }
@@ -706,11 +748,14 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
         return trimmed.Length == 0 ? "operator" : trimmed[..Math.Min(trimmed.Length, 48)];
     }
 
-    private static RankedAttemptView View(RankedAttempt attempt) =>
-        new(
+    private static RankedAttemptView View(RankedAttempt attempt)
+    {
+        var plan = ReadPlan(attempt);
+        var activeGenerated = attempt.Outcome == RankedOutcomes.Active && plan is not null;
+        return new(
             attempt.Id,
             attempt.RunId,
-            attempt.DrillId,
+            activeGenerated ? RankedScenarioSeed.PublicDrillId : attempt.DrillId,
             attempt.ScenarioVersion,
             attempt.ScenarioRating,
             attempt.Outcome,
@@ -724,16 +769,17 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             attempt.RatingDelta,
             attempt.PostRating,
             attempt.Performance is null ? null : View(attempt.Performance),
-            ReadPlan(attempt) is { } briefingPlan
-                ? RankedMatchBriefing.From(briefingPlan)
+            plan is not null
+                ? RankedMatchBriefing.From(plan)
                 : null,
-            attempt.Outcome != RankedOutcomes.Active && ReadPlan(attempt) is { } debriefPlan
-                ? RankedMatchDebrief.From(debriefPlan)
+            attempt.Outcome != RankedOutcomes.Active && plan is not null
+                ? RankedMatchDebrief.From(plan)
                 : null,
             attempt.Evidence
                 .OrderBy(evidence => evidence.ObservedUtc)
                 .Select(View)
                 .ToArray());
+    }
 
     private static RankedEvidenceView View(RankedEvidenceEntry evidence) =>
         new(

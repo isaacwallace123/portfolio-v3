@@ -1033,6 +1033,8 @@ public sealed class RunBroker
             return BrokerResult.Fail(409, "No ranked match is active on this cluster.");
         if (view.DrillSolved || view.DrillFailed)
             return BrokerResult.Fail(409, "This ranked match is already sealed.");
+        if (view.RankedActions.Count >= RankedRules.MaxActionsPerAttempt)
+            return BrokerResult.Fail(429, "The action limit for this ranked match was reached.");
 
         if (!RankedCommand.TryParse(input, out var command, out var error) || command is null)
             return BrokerResult.Fail(400, error);
@@ -1161,20 +1163,30 @@ public sealed class RunBroker
         var evidenceId = Guid.NewGuid().ToString("n");
         var attemptId = resource.Metadata.Annotations?
             .GetValueOrDefault(RankedAttemptIdAnnotation) ?? "";
-        var saved = await _ranked.RecordEvidenceAsync(
-            evidenceId,
-            attemptId,
-            runId,
-            owner,
-            inspection.Canonical,
-            inspection.Kind,
-            string.Join(" | ", lines.Take(3)),
-            view.DrillStage,
-            observedUtc,
-            ct);
+        RankedEvidenceView? saved;
+        try
+        {
+            saved = await _ranked.RecordEvidenceAsync(
+                evidenceId,
+                attemptId,
+                runId,
+                owner,
+                inspection.Canonical,
+                inspection.Kind,
+                string.Join(" | ", lines.Take(3)),
+                view.DrillStage,
+                observedUtc,
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Could not persist ranked evidence for {RunId}.", runId);
+            return RankedInspectionBrokerResult.Fail(
+                503, "The evidence audit is temporarily unavailable.");
+        }
         if (saved is null)
             return RankedInspectionBrokerResult.Fail(
-                503, "The evidence audit could not be recorded. Try the inspection again.");
+                429, "The evidence limit for this ranked match was reached.");
 
         return RankedInspectionBrokerResult.Accepted(
             new RankedInspectionResult(
@@ -1296,10 +1308,11 @@ public sealed class RunBroker
                 timestamps: true,
                 cancellationToken: ct);
             using var reader = new StreamReader(stream);
-            var text = await reader.ReadToEndAsync(ct);
+            var text = await RankedLogSanitizer.ReadBoundedAsync(reader, ct: ct);
             lines.AddRange(text
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                .Select(SanitizeLogLine));
+                .Select(RankedLogSanitizer.Sanitize)
+                .Where(line => line.Length > 0));
         }
         return lines.TakeLast(32).ToArray();
     }

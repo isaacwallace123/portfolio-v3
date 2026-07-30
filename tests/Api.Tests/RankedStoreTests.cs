@@ -3,6 +3,7 @@ using IsaacWallace.Api.Ranked;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Text.Json;
 using Xunit;
 
 namespace IsaacWallace.Api.Tests;
@@ -347,6 +348,86 @@ public sealed class RankedStoreTests
     }
 
     [Fact]
+    public async Task IdempotencyKeysCannotCrossOwnerOrAttemptBoundaries()
+    {
+        await using var fixture = await RankedFixture.CreateAsync();
+        var first = await fixture.Store.BeginAsync(
+            "run-hl-collision1",
+            "cascade-scale-release",
+            "owner-first",
+            "First",
+            DateTime.UtcNow,
+            CancellationToken.None);
+        var second = await fixture.Store.BeginAsync(
+            "run-hl-collision2",
+            "cascade-scale-release",
+            "owner-second",
+            "Second",
+            DateTime.UtcNow,
+            CancellationToken.None);
+
+        Assert.True(await fixture.Store.RecordActionAsync(
+            "shared-action-id", first.Id, first.RunId, "owner-first",
+            "scale checkout 4", "scale-4", 1, DateTime.UtcNow,
+            CancellationToken.None));
+        Assert.False(await fixture.Store.RecordActionAsync(
+            "shared-action-id", second.Id, second.RunId, "owner-second",
+            "rollback checkout", "release-stable", 1, DateTime.UtcNow,
+            CancellationToken.None));
+
+        var evidence = await fixture.Store.RecordEvidenceAsync(
+            "shared-evidence-id", first.Id, first.RunId, "owner-first",
+            "inspect pods", "pods", "first-owner-only", 1, DateTime.UtcNow,
+            CancellationToken.None);
+        var collision = await fixture.Store.RecordEvidenceAsync(
+            "shared-evidence-id", second.Id, second.RunId, "owner-second",
+            "inspect logs", "logs", "must-not-leak", 1, DateTime.UtcNow,
+            CancellationToken.None);
+
+        Assert.NotNull(evidence);
+        Assert.Null(collision);
+        Assert.Empty(await fixture.Store.ActionsForAttemptAsync(
+            second.Id, "owner-second", CancellationToken.None));
+        Assert.DoesNotContain(
+            "first-owner-only",
+            JsonSerializer.Serialize(await fixture.Store.ProfileAsync(
+                "owner-second", CancellationToken.None)));
+    }
+
+    [Fact]
+    public async Task AuditLedgersStopAtTheirAuthoritativePerAttemptCaps()
+    {
+        await using var fixture = await RankedFixture.CreateAsync();
+        var attempt = await fixture.Store.BeginAsync(
+            "run-hl-ledgercap1",
+            "cascade-scale-release",
+            "owner-cap",
+            "Cap",
+            DateTime.UtcNow,
+            CancellationToken.None);
+
+        for (var index = 0; index < RankedRules.MaxActionsPerAttempt; index++)
+            Assert.True(await fixture.Store.RecordActionAsync(
+                $"action-{index}", attempt.Id, attempt.RunId, "owner-cap",
+                "scale checkout 4", "scale-4", 1, DateTime.UtcNow,
+                CancellationToken.None));
+        Assert.False(await fixture.Store.RecordActionAsync(
+            "action-over-cap", attempt.Id, attempt.RunId, "owner-cap",
+            "scale checkout 4", "scale-4", 1, DateTime.UtcNow,
+            CancellationToken.None));
+
+        for (var index = 0; index < RankedRules.MaxEvidencePerAttempt; index++)
+            Assert.NotNull(await fixture.Store.RecordEvidenceAsync(
+                $"evidence-{index}", attempt.Id, attempt.RunId, "owner-cap",
+                "inspect pods", "pods", "bounded", 1, DateTime.UtcNow,
+                CancellationToken.None));
+        Assert.Null(await fixture.Store.RecordEvidenceAsync(
+            "evidence-over-cap", attempt.Id, attempt.RunId, "owner-cap",
+            "inspect pods", "pods", "bounded", 1, DateTime.UtcNow,
+            CancellationToken.None));
+    }
+
+    [Fact]
     public async Task TelemetryBucketsAreIdempotentAndRequiredForACompletedRating()
     {
         await using var fixture = await RankedFixture.CreateAsync();
@@ -415,7 +496,9 @@ public sealed class RankedStoreTests
 
         Assert.NotNull(attempt.Briefing);
         Assert.Null(attempt.Debrief);
-        Assert.Equal(plan.Seed.SeedId, attempt.Briefing.SeedId);
+        Assert.Equal(RankedScenarioSeed.PublicDrillId, attempt.DrillId);
+        Assert.Equal(plan.Seed.Commitment, attempt.Briefing.SeedCommitment);
+        Assert.DoesNotContain(plan.Seed.SeedId, JsonSerializer.Serialize(attempt));
         var receipt = Assert.Single(await fixture.Db.RankedScenarios.ToListAsync());
         Assert.Equal(plan.DrillId, receipt.DrillId);
         Assert.Contains(plan.Seed.SeedId, receipt.PlanJson);
@@ -441,6 +524,8 @@ public sealed class RankedStoreTests
         var settled = (await fixture.Store.ProfileAsync(
             "owner-generated", CancellationToken.None)).RecentAttempts.Single();
         Assert.NotNull(settled.Debrief);
+        Assert.Equal(plan.DrillId, settled.DrillId);
+        Assert.Equal(plan.Seed.SeedId, settled.Debrief.SeedId);
         Assert.Equal(
             plan.Faults.Select(fault => fault.ModuleId).OrderBy(id => id),
             settled.Debrief.Faults.Select(fault => fault.ModuleId).OrderBy(id => id));

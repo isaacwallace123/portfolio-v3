@@ -18,7 +18,7 @@ public sealed record RankedMatchBriefing(
     /// <summary>Public on purpose: it is the receipt an operator can quote when asking whether their
     /// match was fair, and it reveals nothing — the seed is opaque and the plan is not derivable by
     /// hand.</summary>
-    string SeedId,
+    string SeedCommitment,
     int GeneratorVersion,
     int ScenarioRating,
     string Difficulty,
@@ -39,7 +39,7 @@ public sealed record RankedMatchBriefing(
     {
         var opening = plan.Phases[0];
         return new RankedMatchBriefing(
-            plan.Seed.SeedId,
+            plan.Seed.Commitment,
             plan.Seed.GeneratorVersion,
             plan.ScenarioRating,
             RankedRules.Division(plan.ScenarioRating).Name,

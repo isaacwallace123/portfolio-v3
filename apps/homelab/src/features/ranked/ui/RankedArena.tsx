@@ -199,7 +199,7 @@ export function RankedArena({
           <>
             <div className={styles.matchReceipt}>
               <span>
-                Seed <code>{briefing.seedId.slice(0, 12)}</code>
+                Commitment <code>{briefing.seedCommitment.slice(0, 12)}</code>
               </span>
               <span>
                 Generator <b>v{briefing.generatorVersion}</b>

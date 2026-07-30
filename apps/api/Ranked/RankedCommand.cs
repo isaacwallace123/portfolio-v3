@@ -7,10 +7,17 @@ public sealed record RankedCommand(
     string ActionId,
     IReadOnlyDictionary<string, object> SpecPatch)
 {
+    public const int MaxInputLength = 128;
+
     public static bool TryParse(string input, out RankedCommand? command, out string error)
     {
         command = null;
         error = "";
+        if (input.Length > MaxInputLength)
+        {
+            error = $"Commands must be {MaxInputLength} characters or fewer.";
+            return false;
+        }
 
         var words = input
             .Trim()

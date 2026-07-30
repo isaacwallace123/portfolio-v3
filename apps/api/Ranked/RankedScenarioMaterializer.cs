@@ -26,8 +26,8 @@ public static class RankedScenarioMaterializer
             Eyebrow,
             // The summary is public the moment a match opens, so it says what kind of shift this is
             // and never what is wrong with the cluster.
-            $"A server-generated incident cut for rating {plan.ScenarioRating} from seed "
-            + $"{plan.Seed.SeedId[..8]}. Read the platform, not a runbook.",
+            $"A server-generated incident cut for rating {plan.ScenarioRating}, commitment "
+            + $"{plan.Seed.Commitment[..12]}. Read the platform, not a runbook.",
             RankedRules.Division(plan.ScenarioRating).Name.ToLowerInvariant(),
             "standard",
             plan.ParSeconds,
