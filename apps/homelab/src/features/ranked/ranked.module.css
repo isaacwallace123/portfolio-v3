@@ -1434,6 +1434,54 @@
   color: var(--mint);
   opacity: 0.45;
 }
+.launchChecks {
+  max-height: 154px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  overflow-y: auto;
+  margin: 0 24px 14px;
+  scrollbar-width: thin;
+}
+.launchChecks > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink-dim);
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+}
+.launchChecks > div[data-state="satisfied"] {
+  color: var(--mint);
+  border-color: color-mix(in srgb, var(--mint) 25%, var(--line));
+}
+.launchChecks > div[data-state="blocked"] {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--line));
+}
+.launchChecks > div > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.launchChecks b {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.launchChecks small {
+  overflow: hidden;
+  color: var(--ink-dim);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .launchTelemetry {
   display: grid;
   grid-template-columns: 1.2fr 1fr 1fr;
@@ -1922,6 +1970,10 @@
   .launchTelemetry {
     grid-template-columns: 1fr;
     margin: 0 18px;
+  }
+  .launchChecks {
+    grid-template-columns: 1fr;
+    margin-inline: 18px;
   }
   .launchFooter {
     align-items: flex-start;

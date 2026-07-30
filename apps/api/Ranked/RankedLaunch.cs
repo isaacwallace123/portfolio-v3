@@ -312,6 +312,31 @@ public sealed record RankedLaunchBudget(
     };
 }
 
+/// <summary>Keeps provisioning time out of the disposable cluster window handed to a live match.
+/// The reaper measures TTL from resource creation, so activation adds the launch's age back once,
+/// guaranteeing the operator receives the normal match window without making abandoned launches
+/// immortal.</summary>
+public static class RankedLaunchTtl
+{
+    public static int AtActivation(
+        DateTime? createdUtc,
+        DateTime activatedUtc,
+        int currentTtlSeconds,
+        int matchWindowSeconds)
+    {
+        var current = Math.Max(1, currentTtlSeconds);
+        var window = Math.Max(1, matchWindowSeconds);
+        if (createdUtc is null) return Math.Max(current, window);
+
+        var launchSeconds = Math.Max(
+            0,
+            (long)Math.Ceiling((activatedUtc - createdUtc.Value).TotalSeconds));
+        return (int)Math.Min(
+            int.MaxValue,
+            Math.Max((long)current, launchSeconds + window));
+    }
+}
+
 /// <summary>
 /// The launch as the front end sees it.
 ///

@@ -445,6 +445,42 @@ export interface RankedActionAudit {
   acceptedUtc: string;
 }
 
+export type RankedLaunchPhase =
+  | "provisioning"
+  | "starting-workloads"
+  | "verifying-telemetry"
+  | "activating-incident"
+  | "active"
+  | "launch-failed";
+
+export interface RankedLaunchCheck {
+  id: string;
+  label: string;
+  status: "pending" | "satisfied" | "blocked";
+  detail: string;
+}
+
+export interface RankedLaunchView {
+  launchId: string;
+  runId: string;
+  phase: RankedLaunchPhase;
+  step: number;
+  steps: number;
+  title: string;
+  detail: string;
+  terminal: boolean;
+  active: boolean;
+  failed: boolean;
+  failureReason: string;
+  retryable: boolean;
+  launchElapsedSeconds: number;
+  launchBudgetSeconds: number;
+  clockStarted: boolean;
+  matchElapsedMs: number;
+  attemptId: string;
+  checks: RankedLaunchCheck[];
+}
+
 export async function fetchDrills(): Promise<DrillCatalog> {
   const res = await fetch("/api/live/drills", { cache: "no-store" });
   return asJson(res);
@@ -479,6 +515,31 @@ export async function fetchRankedActions(
     actions: RankedActionAudit[];
   }>(res);
   return body.actions;
+}
+
+async function rankedLaunchRequest(
+  method: "GET" | "POST" | "DELETE",
+  retry = false,
+): Promise<RankedLaunchView> {
+  const suffix = method === "POST" && retry ? "?retry=true" : "";
+  const res = await fetch(`/api/live/ranked/launch${suffix}`, {
+    method,
+    cache: "no-store",
+  });
+  const body = await asJson<{ launch: RankedLaunchView }>(res);
+  return body.launch;
+}
+
+export function fetchRankedLaunch(): Promise<RankedLaunchView> {
+  return rankedLaunchRequest("GET");
+}
+
+export function advanceRankedLaunch(retry = false): Promise<RankedLaunchView> {
+  return rankedLaunchRequest("POST", retry);
+}
+
+export function cancelRankedLaunch(): Promise<RankedLaunchView> {
+  return rankedLaunchRequest("DELETE");
 }
 
 // A drill runs ON the provisioned cluster: it sets an objective and clock and unlocks decisions

@@ -10,6 +10,29 @@ namespace IsaacWallace.Api.Tests;
 public sealed class RankedLaunchGateTests
 {
     [Fact]
+    public void ActivationPreservesAFullMatchWindowAfterProvisioning()
+    {
+        var created = new DateTime(2026, 7, 30, 12, 0, 0, DateTimeKind.Utc);
+        var activated = created.AddMinutes(7).AddSeconds(4);
+
+        var ttl = RankedLaunchTtl.AtActivation(created, activated, 900, 900);
+
+        Assert.Equal(1_324, ttl);
+        Assert.Equal(900, ttl - (int)(activated - created).TotalSeconds);
+    }
+
+    [Fact]
+    public void ActivationNeverShortensAnExistingExtension()
+    {
+        var created = new DateTime(2026, 7, 30, 12, 0, 0, DateTimeKind.Utc);
+
+        var ttl = RankedLaunchTtl.AtActivation(
+            created, created.AddMinutes(1), 1_800, 900);
+
+        Assert.Equal(1_800, ttl);
+    }
+
+    [Fact]
     public void AnUnreconciledCompositionIsStillProvisioning()
     {
         var gate = RankedLaunchGate.Evaluate(

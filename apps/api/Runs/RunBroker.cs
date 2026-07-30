@@ -417,6 +417,13 @@ public sealed class RunBroker
         {
             ["drillId"] = activation.DrillId,
             ["drillStartedAt"] = startedAt,
+            // The reaper counts from cluster creation. Give the activated match a full normal
+            // window instead of charging it for the platform's provisioning time.
+            ["ttlSeconds"] = RankedLaunchTtl.AtActivation(
+                resource.Metadata.CreationTimestamp,
+                activation.ActivatedUtc,
+                resource.Spec.TtlSeconds,
+                _options.DefaultTtlSeconds),
         };
 
         var activated = await CompareAndSetAsync(

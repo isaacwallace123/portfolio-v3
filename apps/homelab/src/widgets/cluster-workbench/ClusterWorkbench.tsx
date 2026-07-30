@@ -25,7 +25,7 @@ import {
   RankedLaunchScreen,
   RankedResult,
 } from "@/features/ranked";
-import { rankedLaunchReadiness } from "@/features/ranked/model/launch";
+import { useRankedLaunch } from "@/features/ranked/model/useRankedLaunch";
 import { RankedHub } from "@/widgets/leaderboard";
 import { SCALABLE, type ServiceId } from "./model/topology";
 import { useClusterEdges } from "./model/useClusterEdges";
@@ -96,16 +96,20 @@ export default function ClusterWorkbench({
     now,
     setError,
     act,
+    attach,
+    release,
     provision,
     renew,
     teardown,
   } = useClusterRun();
+  const rankedLaunch = useRankedLaunch({
+    enabled: surface === "ranked" && status?.signedIn === true,
+    onActive: attach,
+    onCancelled: release,
+  });
 
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("drills");
-  const [rankedLaunchRequested, setRankedLaunchRequested] = useState(false);
-  const [rankedLaunchRetry, setRankedLaunchRetry] = useState(0);
-  const rankedActivationStarted = useRef(false);
   // Recorded per cluster: declining the offer on one must not silently suppress it on the next.
   const [renewalDeclinedFor, setRenewalDeclinedFor] = useState<string | null>(
     null,
@@ -132,51 +136,6 @@ export default function ClusterWorkbench({
     notifiedSolve.current = solvedKey;
     onAssignmentResolved?.(run);
   }, [onAssignmentResolved, run, solvedKey]);
-
-  const launchReadiness = rankedLaunchReadiness(run, components, trace);
-
-  useEffect(() => {
-    if (
-      surface !== "ranked" ||
-      !rankedLaunchRequested ||
-      !run ||
-      run.drillId.length > 0 ||
-      !launchReadiness.ready ||
-      busy !== null ||
-      rankedActivationStarted.current
-    ) {
-      return;
-    }
-
-    rankedActivationStarted.current = true;
-    void act("ranked", async () => {
-      const activeRun = await startDrill(run.runId, "", "ranked");
-      setRankedLaunchRequested(false);
-      return activeRun;
-    });
-  }, [
-    act,
-    busy,
-    launchReadiness.ready,
-    rankedLaunchRequested,
-    rankedLaunchRetry,
-    run,
-    surface,
-  ]);
-
-  const requestRankedLaunch = () => {
-    setError(null);
-    rankedActivationStarted.current = false;
-    setRankedLaunchRequested(true);
-    setRankedLaunchRetry((value) => value + 1);
-    if (!run) void provision();
-  };
-
-  const cancelRankedLaunch = () => {
-    setRankedLaunchRequested(false);
-    rankedActivationStarted.current = false;
-    if (run) void teardown();
-  };
 
   // Which cards exist, as a value rather than as an array identity. The poll hands back a fresh
   // components array every 1.2s even when nothing changed, and passing that in re-ran the layout
@@ -211,21 +170,33 @@ export default function ClusterWorkbench({
 
   if (
     surface === "ranked" &&
-    rankedLaunchRequested &&
+    status.signedIn &&
+    rankedLaunch.checking &&
     (!run || run.drillId.length === 0)
   ) {
     return (
+      <div className={styles.shell} data-surface={surface}>
+        <div className={styles.booting}>
+          <Loader2 size={18} className={styles.spin} />
+          <span>Checking your ranked launch…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (
+    surface === "ranked" &&
+    ((rankedLaunch.launch !== null &&
+      (!rankedLaunch.launch.active || !run || run.drillId.length === 0)) ||
+      (rankedLaunch.advancing && rankedLaunch.launch === null))
+  ) {
+    return (
       <RankedLaunchScreen
-        readiness={
-          busy === "ranked"
-            ? { ...launchReadiness, phase: "activating" }
-            : launchReadiness
-        }
-        activating={busy === "ranked"}
-        error={error}
-        runId={run?.runId ?? null}
-        onCancel={cancelRankedLaunch}
-        onRetry={requestRankedLaunch}
+        launch={rankedLaunch.launch}
+        busy={rankedLaunch.advancing || rankedLaunch.cancelling}
+        error={rankedLaunch.error}
+        onCancel={() => void rankedLaunch.cancel()}
+        onRetry={rankedLaunch.retry}
       />
     );
   }
@@ -239,8 +210,9 @@ export default function ClusterWorkbench({
         busy={busy}
         provisioning={run?.status === "provisioning"}
         expired={expired}
-        error={error}
-        onLaunch={requestRankedLaunch}
+        error={rankedLaunch.error ?? error}
+        launching={rankedLaunch.advancing}
+        onLaunch={rankedLaunch.start}
       />
     );
   }

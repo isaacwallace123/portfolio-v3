@@ -47,6 +47,7 @@ export function RankedHub({
   provisioning,
   expired,
   error,
+  launching,
   onLaunch,
 }: {
   status: LiveStatus;
@@ -56,6 +57,7 @@ export function RankedHub({
   provisioning: boolean;
   expired: boolean;
   error: string | null;
+  launching: boolean;
   onLaunch: () => void;
 }) {
   const boardState = useLeaderboard();
@@ -106,7 +108,7 @@ export function RankedHub({
   const poolLoading = eligible === null;
   const poolSize = eligible?.length ?? 0;
   const hasArena = run !== null;
-  const actionBusy = busy !== null;
+  const actionBusy = busy !== null || launching;
   const actionLocked =
     actionBusy ||
     poolLoading ||
@@ -129,6 +131,7 @@ export function RankedHub({
   )}`;
 
   const actionLabel = () => {
+    if (launching) return "Opening secure launch…";
     if (busy === "provision") return "Preparing arena…";
     if (provisioning) return "Resume arena setup";
     if (busy === "ranked") return "Activating incident…";

@@ -152,6 +152,15 @@ export function useClusterRun() {
     [refresh, stopPolling, release],
   );
 
+  const attach = useCallback(
+    async (runId: string) => {
+      attached.current = runId;
+      await refresh(runId).catch(() => undefined);
+      if (attached.current === runId) startPolling(runId);
+    },
+    [refresh, startPolling],
+  );
+
   // Resume the cluster this account already owns. The first paint is a skeleton rather than the
   // launch screen, so a reload never flashes "provision a cluster" at someone who already has one.
   useEffect(() => {
@@ -160,10 +169,8 @@ export function useClusterRun() {
       .then(async (s) => {
         if (!alive) return;
         if (s.myRunId) {
-          attached.current = s.myRunId;
-          await refresh(s.myRunId).catch(() => undefined);
+          await attach(s.myRunId);
           if (!alive) return;
-          startPolling(s.myRunId);
         }
         setStatus(s);
       })
@@ -182,7 +189,7 @@ export function useClusterRun() {
     return () => {
       alive = false;
     };
-  }, [refresh, startPolling]);
+  }, [attach]);
 
   /** Run a mutation, optionally reflecting its effect locally first so the UI responds at once. */
   const act = useCallback(
@@ -264,6 +271,8 @@ export function useClusterRun() {
     now,
     setError,
     act,
+    attach,
+    release,
     provision,
     renew,
     teardown,

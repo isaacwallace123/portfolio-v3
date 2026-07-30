@@ -11,7 +11,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import type { RankedLaunchReadiness } from "../model/launch";
+import type { RankedLaunchView } from "@/shared/api/live-client";
 import styles from "../ranked.module.css";
 
 const STEPS = [
@@ -39,37 +39,40 @@ const STEPS = [
     description: "Draw and commit the rating-matched fault",
     icon: Radio,
   },
+  {
+    id: "active",
+    label: "Open workspace",
+    description: "Hand off to the live measured environment",
+    icon: ShieldCheck,
+  },
 ] as const;
 
 export function RankedLaunchScreen({
-  readiness,
-  activating,
+  launch,
+  busy,
   error,
-  runId,
   onCancel,
   onRetry,
 }: {
-  readiness: RankedLaunchReadiness;
-  activating: boolean;
+  launch: RankedLaunchView | null;
+  busy: boolean;
   error: string | null;
-  runId: string | null;
   onCancel: () => void;
   onRetry: () => void;
 }) {
-  const completed = {
-    namespace: readiness.namespaceReady,
-    workloads: readiness.workloadsReady,
-    telemetry: readiness.telemetryReady,
-    incident: false,
-  };
-  const active =
-    activating || readiness.ready
-      ? "incident"
-      : readiness.phase === "telemetry"
-        ? "telemetry"
-        : readiness.phase === "workloads"
-          ? "workloads"
-          : "namespace";
+  const activeIndex =
+    launch?.phase === "starting-workloads"
+      ? 1
+      : launch?.phase === "verifying-telemetry"
+        ? 2
+        : launch?.phase === "activating-incident"
+          ? 3
+          : launch?.phase === "active"
+            ? 4
+            : 0;
+  const failed = launch?.failed ?? false;
+  const launchSeconds = launch?.launchElapsedSeconds ?? 0;
+  const launchBudget = launch?.launchBudgetSeconds ?? 0;
 
   return (
     <main className={styles.launchPage}>
@@ -83,7 +86,7 @@ export function RankedLaunchScreen({
             <p>
               <ShieldCheck size={12} /> Secure launch sequence
             </p>
-            <h1>Preparing your ranked arena</h1>
+            <h1>{launch?.title ?? "Preparing your ranked arena"}</h1>
             <span>
               The match clock stays at 00:00 until the environment passes every
               readiness check.
@@ -92,9 +95,9 @@ export function RankedLaunchScreen({
         </header>
 
         <div className={styles.launchSteps}>
-          {STEPS.map(({ id, label, description, icon: Icon }) => {
-            const done = completed[id];
-            const current = active === id;
+          {STEPS.map(({ id, label, description, icon: Icon }, index) => {
+            const done = !failed && index < activeIndex;
+            const current = !failed && index === activeIndex;
             return (
               <article
                 key={id}
@@ -115,15 +118,39 @@ export function RankedLaunchScreen({
           })}
         </div>
 
+        {launch && launch.checks.length > 0 && (
+          <div className={styles.launchChecks}>
+            {launch.checks.map((check) => (
+              <div key={check.id} data-state={check.status}>
+                {check.status === "satisfied" ? (
+                  <Check size={11} />
+                ) : check.status === "blocked" ? (
+                  <X size={11} />
+                ) : (
+                  <Loader2 size={11} className={styles.spin} />
+                )}
+                <span>
+                  <b>{check.label}</b>
+                  <small>{check.detail}</small>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className={styles.launchTelemetry}>
           <div>
             <span>Run</span>
-            <code>{runId ?? "allocating"}</code>
+            <code>{launch?.runId || "allocating"}</code>
           </div>
           <div>
-            <span>Workloads</span>
+            <span>Launch time</span>
             <b>
-              {readiness.readyPods}/{readiness.desiredPods || "—"} ready
+              {Math.floor(launchSeconds / 60)
+                .toString()
+                .padStart(2, "0")}
+              :{(launchSeconds % 60).toString().padStart(2, "0")}
+              {launchBudget > 0 ? ` / ${Math.floor(launchBudget / 60)}m` : ""}
             </b>
           </div>
           <div>
@@ -133,19 +160,22 @@ export function RankedLaunchScreen({
         </div>
 
         <footer className={styles.launchFooter}>
-          <p className={error ? styles.launchError : ""}>
-            {error ?? readiness.detail}
+          <p className={error || failed ? styles.launchError : ""}>
+            {error ??
+              (failed ? launch?.failureReason : launch?.detail) ??
+              "Opening the launch…"}
           </p>
           <div>
-            {error && (
-              <button type="button" onClick={onRetry}>
-                Retry check
+            {(failed || error) && (
+              <button type="button" onClick={onRetry} disabled={busy}>
+                {failed ? "Retry launch" : "Retry check"}
               </button>
             )}
             <button
               type="button"
               className={styles.launchCancel}
               onClick={onCancel}
+              disabled={busy || !launch || launch.active}
             >
               <X size={12} /> Cancel setup
             </button>

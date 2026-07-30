@@ -745,8 +745,22 @@ public sealed class RankedLaunchOrchestrator(
                 gate = Gates.GetOrAdd(owner, key => new LaunchGate(key));
                 gate._holders++;
             }
-            await gate._semaphore.WaitAsync(ct);
-            return gate;
+            try
+            {
+                await gate._semaphore.WaitAsync(ct);
+                return gate;
+            }
+            catch
+            {
+                // A request cancelled while waiting never receives a gate to dispose. Roll its
+                // holder count back here, or one abandoned browser request leaves the per-owner
+                // entry resident for the lifetime of the API process.
+                lock (Gates)
+                {
+                    if (--gate._holders <= 0) Gates.TryRemove(owner, out _);
+                }
+                throw;
+            }
         }
 
         public void Dispose()
