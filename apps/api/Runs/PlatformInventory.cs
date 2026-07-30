@@ -12,15 +12,51 @@ public sealed class PlatformInventory
     private readonly IKubernetes _k8s;
     private readonly RunBrokerOptions _options;
 
+    // One snapshot costs seven cluster-wide reads: nodes, deployments, statefulsets, daemonsets,
+    // pod metrics, node metrics, and Argo applications, all across every namespace. The pages that
+    // consume it poll on a timer and there are several of them behind two web replicas, so without
+    // this every visitor is a multiplier on real API-server load. The window is short enough that
+    // "live" still means live — metrics-server only refreshes on a similar cadence anyway.
+    private static readonly TimeSpan SnapshotTtl = TimeSpan.FromSeconds(5);
+
+    // Guards the shared snapshot so a burst of concurrent requests collapses into one sweep instead
+    // of racing to start several. Losers of the race await the winner's result rather than issuing
+    // their own — the stampede is the whole problem, not the cache miss.
+    private readonly SemaphoreSlim _snapshotLock = new(1, 1);
+    private InventorySnapshot? _snapshot;
+    private DateTime _snapshotAt = DateTime.MinValue;
+
     public PlatformInventory(IKubernetes k8s, Microsoft.Extensions.Options.IOptions<RunBrokerOptions> options)
     {
         _k8s = k8s;
         _options = options.Value;
     }
 
+    private async Task<InventorySnapshot> GetSnapshotAsync(CancellationToken ct)
+    {
+        if (_snapshot is { } fresh && DateTime.UtcNow - _snapshotAt < SnapshotTtl)
+            return fresh;
+
+        await _snapshotLock.WaitAsync(ct);
+        try
+        {
+            // Re-check inside the lock: whoever was ahead has already refreshed it.
+            if (_snapshot is { } justRefreshed && DateTime.UtcNow - _snapshotAt < SnapshotTtl)
+                return justRefreshed;
+
+            _snapshot = await ReadSnapshotAsync(ct);
+            _snapshotAt = DateTime.UtcNow;
+            return _snapshot;
+        }
+        finally
+        {
+            _snapshotLock.Release();
+        }
+    }
+
     public async Task<PlatformOverview> GetOverviewAsync(int activeRuns, CancellationToken ct)
     {
-        var snapshot = await ReadSnapshotAsync(ct);
+        var snapshot = await GetSnapshotAsync(ct);
         var ready = snapshot.Nodes.Count(n => n.Ready);
         var desired = snapshot.Workloads.Sum(w => w.Desired);
         var available = snapshot.Workloads.Sum(w => w.Ready);
@@ -46,7 +82,7 @@ public sealed class PlatformInventory
 
     public async Task<HomelabTopology> GetTopologyAsync(CancellationToken ct)
     {
-        var snapshot = await ReadSnapshotAsync(ct);
+        var snapshot = await GetSnapshotAsync(ct);
         var workloads = snapshot.Workloads.ToDictionary(w => $"{w.Namespace}/{w.Name}", StringComparer.Ordinal);
         var graph = new List<TopologyNode>();
 

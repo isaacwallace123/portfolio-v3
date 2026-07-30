@@ -1,6 +1,13 @@
 "use client";
 
-import { Gauge, Loader2, PartyPopper, ShieldCheck, Timer, Trophy } from "lucide-react";
+import {
+  Gauge,
+  Loader2,
+  PartyPopper,
+  ShieldCheck,
+  Timer,
+  Trophy,
+} from "lucide-react";
 import {
   endDrill,
   type DrillCatalogEntry,
@@ -32,7 +39,9 @@ export function DrillResult({
   const average = stat?.averageMs ?? 0;
 
   return (
-    <div className={`${styles.verdict} ${clean ? styles.verdictGood : styles.verdictMessy}`}>
+    <div
+      className={`${styles.verdict} ${clean ? styles.verdictGood : styles.verdictMessy}`}
+    >
       <span className={styles.verdictIcon}>
         {clean ? <PartyPopper size={26} /> : <ShieldCheck size={26} />}
       </span>
@@ -63,7 +72,9 @@ export function DrillResult({
 
       {/* What the time is worth. A number with nothing to compare it against is not a result. */}
       <div className={styles.compareRow}>
-        <span className={parMs > 0 && run.elapsedMs < parMs ? styles.okText : ""}>
+        <span
+          className={parMs > 0 && run.elapsedMs < parMs ? styles.okText : ""}
+        >
           <Timer size={11} /> par {clock(parMs)}
         </span>
         {average > 0 && (
@@ -80,8 +91,8 @@ export function DrillResult({
 
       {run.drillStageCount > 1 && (
         <p className={styles.verdictSub}>
-          You worked {run.drillStageCount} consecutive incidents on this cluster,
-          each one caused by the fix before it.
+          You worked {run.drillStageCount} consecutive incidents on this
+          cluster, each one caused by the fix before it.
         </p>
       )}
       <p className={styles.verdictSub}>

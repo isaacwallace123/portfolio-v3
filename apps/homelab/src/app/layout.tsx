@@ -8,11 +8,33 @@ import {
 } from "@iw/ui";
 import "./globals.css";
 
+// Site-wide defaults. Each route sets a short `title` and its own `description`; the template turns
+// that into "Live topology · HomeOps" without every page having to repeat the brand — the same
+// pattern the rest of the network uses.
+const SITE_DESCRIPTION =
+  "Operate a real three-node Kubernetes homelab: inspect its live architecture, provision a disposable practice cluster, and work incidents on it.";
+
 export const metadata: Metadata = {
-  title: "HomeOps — operate a real homelab platform",
-  description:
-    "Interactive SRE drills running on Isaac Wallace's Kubernetes homelab.",
+  title: {
+    default: "HomeOps — operate a real homelab platform",
+    template: "%s · HomeOps",
+  },
+  description: SITE_DESCRIPTION,
   metadataBase: new URL("https://homelab.isaacwallace.dev"),
+  applicationName: "HomeOps",
+  authors: [{ name: "Isaac Wallace", url: "https://isaacwallace.dev" }],
+  openGraph: {
+    type: "website",
+    siteName: "HomeOps",
+    url: "/",
+    title: "HomeOps — operate a real homelab platform",
+    description: SITE_DESCRIPTION,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "HomeOps — operate a real homelab platform",
+    description: SITE_DESCRIPTION,
+  },
 };
 
 const NAV_LINKS = [

@@ -1,7 +1,17 @@
 "use client";
 
-import { ArrowRight, Gauge, Loader2, ShieldX, TrendingDown } from "lucide-react";
-import { endDrill, type DrillOption, type LiveRunView } from "@/shared/api/live-client";
+import {
+  ArrowRight,
+  Gauge,
+  Loader2,
+  ShieldX,
+  TrendingDown,
+} from "lucide-react";
+import {
+  endDrill,
+  type DrillOption,
+  type LiveRunView,
+} from "@/shared/api/live-client";
 import { consequencesOf, type DecisionRecord } from "../model/impact";
 import { clock } from "@/shared/lib/format";
 import styles from "../drill.module.css";
@@ -43,9 +53,13 @@ export function MisstepView({
         <ShieldX size={26} />
       </span>
       <b>{ranked ? "Ranked attempt over" : "That made it worse"}</b>
-      <p className={styles.verdictMove}>{move?.label ?? "An action that did not help"}</p>
+      <p className={styles.verdictMove}>
+        {move?.label ?? "An action that did not help"}
+      </p>
 
-      {move?.explanation && <p className={styles.verdictWhy}>{move.explanation}</p>}
+      {move?.explanation && (
+        <p className={styles.verdictWhy}>{move.explanation}</p>
+      )}
 
       {/* What it actually did to the workload. The deltas are the spec the operator changed. */}
       {record && record.impact.length > 0 && (
@@ -72,7 +86,10 @@ export function MisstepView({
           </p>
           <div className={styles.impactList}>
             {consequences.map((c) => (
-              <div key={c.label} className={c.worse ? styles.impactBad : undefined}>
+              <div
+                key={c.label}
+                className={c.worse ? styles.impactBad : undefined}
+              >
                 <span>{c.label}</span>
                 <b>
                   {c.before} <ArrowRight size={10} /> {c.now}

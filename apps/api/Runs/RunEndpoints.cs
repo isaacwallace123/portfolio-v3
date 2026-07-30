@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using IsaacWallace.Api.Auth;
 using IsaacWallace.Api.Data;
 
@@ -5,6 +6,31 @@ namespace IsaacWallace.Api.Runs;
 
 public static class RunEndpoints
 {
+    // Run ids are broker-issued and always have this shape. Every {runId} route is checked against
+    // it before the handler runs, so a crafted path segment never reaches the Kubernetes client —
+    // where it would otherwise be interpolated into a resource name, a namespace, and the
+    // write-through names derived from it. The ownership check behind it is the real boundary; this
+    // is the cheap one that keeps malformed input from getting that far in the first place.
+    private static readonly Regex RunIdPattern =
+        new(@"^run-hl-[a-z0-9]{6,32}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    // Answers 404 rather than 400: a malformed id and an id belonging to someone else should be
+    // indistinguishable, or the difference is itself a probe.
+    private sealed class RunIdFilter : IEndpointFilter
+    {
+        public async ValueTask<object?> InvokeAsync(
+            EndpointFilterInvocationContext ctx, EndpointFilterDelegate next)
+        {
+            var runId = ctx.HttpContext.Request.RouteValues["runId"]?.ToString() ?? "";
+            return RunIdPattern.IsMatch(runId)
+                ? await next(ctx)
+                : Results.NotFound(new { error = "No such run." });
+        }
+    }
+
+    private static RouteHandlerBuilder ValidatesRunId(this RouteHandlerBuilder builder) =>
+        builder.AddEndpointFilter<RunIdFilter>();
+
     // The front end verifies the visitor's SSO session server-side and forwards an opaque per-user
     // key. The API treats it as the cluster's owner: reads and mutations only ever see clusters that
     // key provisioned. It is never accepted from a browser — only from the scoped, key-authenticated
@@ -18,10 +44,19 @@ public static class RunEndpoints
     private static string Owner(HttpContext ctx) =>
         ctx.Request.Headers[OwnerHeader].ToString().Trim();
 
+    // Display only, but it is persisted and shown to everyone on the leaderboard, so it is narrowed
+    // to printable characters on one line and a length a board row can actually hold. React escapes
+    // it on the way out; this is about a row that reads as a name rather than as an accident.
+    private const int MaxOwnerNameLength = 48;
+
     private static string OwnerName(HttpContext ctx)
     {
-        var name = ctx.Request.Headers[OwnerNameHeader].ToString().Trim();
-        return name.Length is > 0 and <= 128 ? name : "operator";
+        var raw = ctx.Request.Headers[OwnerNameHeader].ToString();
+        var cleaned = new string(raw.Where(c => !char.IsControl(c)).ToArray()).Trim();
+        if (cleaned.Length == 0) return "operator";
+        return cleaned.Length <= MaxOwnerNameLength
+            ? cleaned
+            : cleaned[..MaxOwnerNameLength].TrimEnd();
     }
 
     public static void MapRunEndpoints(this WebApplication app)
@@ -134,7 +169,7 @@ public static class RunEndpoints
         {
             var run = await broker.GetRunAsync(runId, Owner(ctx), ct);
             return run is null ? Results.NotFound(new { error = "No such run." }) : Results.Ok(run);
-        }).RequireScope(ApiScopes.RunsRead);
+        }).RequireScope(ApiScopes.RunsRead).ValidatesRunId();
 
         app.MapPost("/v1/runs", async (CreateRunRequest req, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
@@ -180,7 +215,7 @@ public static class RunEndpoints
                 events = frame.Events,
                 trace = frame.Trace,
             });
-        }).RequireScope(ApiScopes.RunsRead);
+        }).RequireScope(ApiScopes.RunsRead).ValidatesRunId();
 
         app.MapGet("/v1/runs/{runId}/telemetry", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
@@ -188,7 +223,7 @@ public static class RunEndpoints
             return telemetry is null
                 ? Results.NotFound(new { error = "No such run." })
                 : Results.Ok(telemetry);
-        }).RequireScope(ApiScopes.RunsRead);
+        }).RequireScope(ApiScopes.RunsRead).ValidatesRunId();
 
         app.MapGet("/v1/runs/{runId}/trace", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
@@ -196,7 +231,7 @@ public static class RunEndpoints
             return trace is null
                 ? Results.NotFound(new { error = "No trace is available yet." })
                 : Results.Ok(trace);
-        }).RequireScope(ApiScopes.RunsRead);
+        }).RequireScope(ApiScopes.RunsRead).ValidatesRunId();
 
         app.MapGet("/v1/runs/{runId}/report", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
@@ -205,7 +240,7 @@ public static class RunEndpoints
             return report.Ready
                 ? Results.Ok(report)
                 : Results.Json(new { error = "The report is not ready." }, statusCode: 409);
-        }).RequireScope(ApiScopes.RunsRead);
+        }).RequireScope(ApiScopes.RunsRead).ValidatesRunId();
 
         app.MapPost("/v1/runs/{runId}/decisions", async (string runId, DecisionRequest req, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
@@ -213,7 +248,7 @@ public static class RunEndpoints
             return result.Run is not null
                 ? Results.Ok(result.Run)
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
-        }).RequireScope(ApiScopes.RunsWrite);
+        }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
         app.MapPost("/v1/practice/{runId}/actions", async (
             string runId, PracticeActionRequest req, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
@@ -222,7 +257,7 @@ public static class RunEndpoints
             return result.Run is not null
                 ? Results.Ok(result.Run)
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
-        }).RequireScope(ApiScopes.RunsWrite);
+        }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
         // Buy one more window before the cluster expires. Allowed once per cluster.
         app.MapPost("/v1/runs/{runId}/renew", async (
@@ -232,7 +267,7 @@ public static class RunEndpoints
             return result.Run is not null
                 ? Results.Ok(result.Run)
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
-        }).RequireScope(ApiScopes.RunsWrite);
+        }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
         // Start a drill ON a running cluster (objective + clock + decisions over the live workload).
         // With mode "ranked" and no drill id the broker draws one from the multi-stage pool.
@@ -244,7 +279,7 @@ public static class RunEndpoints
             return result.Run is not null
                 ? Results.Ok(result.Run)
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
-        }).RequireScope(ApiScopes.RunsWrite);
+        }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
         // End the active drill; the cluster stays up as an open sandbox.
         app.MapDelete("/v1/runs/{runId}/drill", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
@@ -253,7 +288,7 @@ public static class RunEndpoints
             return result.Run is not null
                 ? Results.Ok(result.Run)
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
-        }).RequireScope(ApiScopes.RunsWrite);
+        }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
         // Per-component / per-pod state of the caller's cluster (drives the request-path flowchart).
         app.MapGet("/v1/runs/{runId}/components", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
@@ -262,7 +297,7 @@ public static class RunEndpoints
             return components is null
                 ? Results.NotFound(new { error = "No such run." })
                 : Results.Ok(components);
-        }).RequireScope(ApiScopes.RunsRead);
+        }).RequireScope(ApiScopes.RunsRead).ValidatesRunId();
 
         // Real Kubernetes Events from the run namespace.
         app.MapGet("/v1/runs/{runId}/events", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
@@ -271,13 +306,13 @@ public static class RunEndpoints
             return events is null
                 ? Results.NotFound(new { error = "No such run." })
                 : Results.Ok(events);
-        }).RequireScope(ApiScopes.RunsRead);
+        }).RequireScope(ApiScopes.RunsRead).ValidatesRunId();
 
         app.MapDelete("/v1/runs/{runId}", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
             var deleted = await broker.DeleteRunAsync(runId, Owner(ctx), ct);
             return deleted ? Results.Ok(new { ok = true }) : Results.NotFound(new { error = "No such run." });
-        }).RequireScope(ApiScopes.RunsWrite);
+        }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
     }
 }
 

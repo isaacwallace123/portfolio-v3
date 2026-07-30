@@ -20,6 +20,11 @@ const LIMITS = {
   provision: { max: 5, windowMs: 60 * 60_000 }, // 5 clusters per hour
   action: { max: 120, windowMs: 60_000 }, // 120 control actions per minute
   read: { max: 60, windowMs: 60_000 }, // 60 public reads per minute
+  // Inventory reads look cheap from here and are not: each one fans out upstream into a
+  // cluster-wide Kubernetes sweep (nodes, every workload in every namespace, pod and node metrics,
+  // GitOps applications). The pages that use them poll on a 15s timer, so 40/min is many times
+  // more than any honest client needs and still refuses to be a load generator.
+  inventory: { max: 40, windowMs: 60_000 },
 } as const;
 
 type Bucket = { count: number; resetAt: number };
@@ -123,6 +128,22 @@ export async function guardPublic(req: Request): Promise<PublicGuardResult> {
     };
 
   return { ok: true, caller };
+}
+
+/**
+ * Guard for the sanitized inventory reads — platform, overview, topology, status.
+ *
+ * These describe the platform rather than a person, so they need no identity and deliberately skip
+ * the auth round trip. What they do need is a ceiling: every one of them costs a real cluster-wide
+ * Kubernetes read upstream, so left open they turn a `curl` loop into sustained load against the
+ * live API server. Throttled on the edge-supplied client address, which behind Cloudflare is the
+ * closest thing to a caller this surface has.
+ */
+export function guardInventory(req: Request): NextResponse | null {
+  if (!liveEnabled()) return deny(503, "Live inventory is not configured.");
+  if (!rateLimit(anonymousKey(req), "inventory"))
+    return deny(429, "Too many requests. Try again in a moment.");
+  return null;
 }
 
 export function jsonNoStore(body: unknown, status = 200): NextResponse {

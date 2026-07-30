@@ -24,7 +24,10 @@ export function ObjectiveList({
 
   return (
     <>
-      <div className={styles.progress} title={`${met} of ${run.drillGoals.length} met`}>
+      <div
+        className={styles.progress}
+        title={`${met} of ${run.drillGoals.length} met`}
+      >
         <i style={{ width: `${progress}%` }} />
       </div>
 

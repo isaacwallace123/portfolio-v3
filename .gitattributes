@@ -1,0 +1,27 @@
+# Normalise line endings in the repository.
+#
+# Without this, files committed from a Windows checkout land with CRLF, and Prettier — which
+# defaults to `endOfLine: "lf"` — fails `format:check` on them in CI. That is what turned the `ci`
+# workflow red on main: the content was fine, the bytes were not.
+#
+# `text=auto eol=lf` stores every text file with LF and checks it out with LF on every platform, so
+# the working tree and the committed blob agree no matter who wrote the file.
+* text=auto eol=lf
+
+# Deployment manifests are rewritten by the publish workflow on every image build, so normalising
+# them here would collide with that bot on every deploy — a rebase for line endings nobody reads.
+# Left exactly as written; nothing lints them, and the workflow that owns them runs on Linux.
+deploy/** -text
+
+# Binary files must never be touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.zip binary
+*.qcow2 binary

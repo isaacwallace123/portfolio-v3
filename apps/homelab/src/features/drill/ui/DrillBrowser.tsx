@@ -1,7 +1,11 @@
 "use client";
 
 import { ChevronRight, Layers, Loader2, Trophy, Zap } from "lucide-react";
-import { startDrill, type DrillCatalogEntry, type LiveRunView } from "@/shared/api/live-client";
+import {
+  startDrill,
+  type DrillCatalogEntry,
+  type LiveRunView,
+} from "@/shared/api/live-client";
 import { clock, clockOrDash as time } from "@/shared/lib/format";
 import styles from "../drill.module.css";
 
@@ -44,9 +48,13 @@ function DrillRow({
               worth putting next to your own. */}
           <em>avg {time(drill.averageMs)}</em>
           {drill.yourBestMs ? (
-            <em className={styles.drillMine}>your best {time(drill.yourBestMs)}</em>
+            <em className={styles.drillMine}>
+              your best {time(drill.yourBestMs)}
+            </em>
           ) : (
-            <em>{drill.attempts === 0 ? "unsolved" : `${drill.attempts} solves`}</em>
+            <em>
+              {drill.attempts === 0 ? "unsolved" : `${drill.attempts} solves`}
+            </em>
           )}
         </span>
       </span>
@@ -79,8 +87,8 @@ export function DrillBrowser({
     <div className={styles.scroll}>
       <p className={styles.hint}>
         A drill sets an objective and a clock on this cluster and unlocks its
-        operator decisions. Nothing is reprovisioned — the workload stays up, and
-        every time you record counts towards the drill&apos;s average.
+        operator decisions. Nothing is reprovisioned — the workload stays up,
+        and every time you record counts towards the drill&apos;s average.
       </p>
 
       {/* Ranked is the drawn run: you do not get to pick the cascade you are timed on. */}
@@ -116,9 +124,9 @@ export function DrillBrowser({
           <p className={styles.group}>
             Cascades · {cascades.length}
             <span>
-              Several incidents in sequence, where resolving one causes the next.
-              Practising a cascade records a time but does not rank it, and a
-              wrong move costs you a misstep rather than the run.
+              Several incidents in sequence, where resolving one causes the
+              next. Practising a cascade records a time but does not rank it,
+              and a wrong move costs you a misstep rather than the run.
             </span>
           </p>
           <div className={styles.drills}>
@@ -128,7 +136,9 @@ export function DrillBrowser({
                 drill={d}
                 busy={busy}
                 disabled={locked}
-                onStart={() => act(`drill-${d.id}`, () => startDrill(run.runId, d.id))}
+                onStart={() =>
+                  act(`drill-${d.id}`, () => startDrill(run.runId, d.id))
+                }
               />
             ))}
           </div>
@@ -148,7 +158,9 @@ export function DrillBrowser({
                 drill={d}
                 busy={busy}
                 disabled={locked}
-                onStart={() => act(`drill-${d.id}`, () => startDrill(run.runId, d.id))}
+                onStart={() =>
+                  act(`drill-${d.id}`, () => startDrill(run.runId, d.id))
+                }
               />
             ))}
           </div>
