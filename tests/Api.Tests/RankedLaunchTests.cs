@@ -381,6 +381,71 @@ public sealed class RankedLaunchTests
     }
 
     [Fact]
+    public async Task AClockedMatchWithAnUnresolvableProjectionStillCannotBeCancelled()
+    {
+        await using var arena = await FakeArena.CreateAsync();
+        arena.MarkPlayable();
+        var live = await LaunchView(arena);
+        arena.LoseLiveDrillProjection();
+
+        var refused = await Abandon(arena);
+
+        Assert.Equal(409, refused.Status);
+        Assert.Equal(0, arena.Discards);
+        Assert.Equal(1, arena.Clusters);
+        var attempt = Assert.Single(await arena.Db.RankedAttempts.ToListAsync());
+        Assert.Equal(RankedOutcomes.Active, attempt.Outcome);
+        Assert.Equal(live.AttemptId, attempt.Id);
+        Assert.Empty(await arena.Db.RatingLedger.ToListAsync());
+    }
+
+    [Fact]
+    public async Task PollingCannotProvisionAClusterWithoutAnExplicitStart()
+    {
+        await using var arena = await FakeArena.CreateAsync();
+
+        var result = await Orchestrator(arena).LaunchAsync(
+            Owner,
+            "Ada",
+            retry: false,
+            allowProvision: false,
+            CancellationToken.None);
+
+        Assert.Equal(404, result.Status);
+        Assert.Equal(0, arena.Provisions);
+        Assert.Equal(0, arena.Clusters);
+    }
+
+    [Fact]
+    public async Task AFailureIsPersistedBeforeItsAttemptIsVoided()
+    {
+        await using var arena = await FakeArena.CreateAsync();
+        arena.MarkPlayable();
+        arena.BeforeActivate = _ => Task.FromResult(false);
+        await LaunchView(arena);
+        Assert.NotEqual("", arena.LaunchAttemptOf(Owner));
+
+        arena.Clock.Advance(RankedLaunchBudget.Default.Total + TimeSpan.FromSeconds(1));
+        arena.FailNextAnnotation = true;
+        var unavailable = await Launch(arena);
+
+        Assert.Equal(503, unavailable.Status);
+        Assert.Equal(
+            RankedOutcomes.Active,
+            Assert.Single(await arena.Db.RankedAttempts.ToListAsync()).Outcome);
+
+        var failed = await LaunchView(arena);
+        Assert.True(failed.Failed);
+        Assert.Equal(
+            RankedOutcomes.Void,
+            Assert.Single(await arena.Db.RankedAttempts.ToListAsync()).Outcome);
+
+        arena.BeforeActivate = null;
+        var retried = await LaunchView(arena, retry: true);
+        Assert.Equal(RankedLaunchPhases.Active, retried.Phase);
+    }
+
+    [Fact]
     public async Task RetryingAFailedProvisionReplacesTheCluster()
     {
         await using var arena = await FakeArena.CreateAsync();
@@ -435,7 +500,12 @@ public sealed class RankedLaunchTests
         var cancelled = await Orchestrator(arena)
             .AbandonAsync(Other, "Mallory", CancellationToken.None);
         var theirs = await Orchestrator(arena)
-            .LaunchAsync(Other, "Mallory", retry: false, CancellationToken.None);
+            .LaunchAsync(
+                Other,
+                "Mallory",
+                retry: false,
+                allowProvision: true,
+                CancellationToken.None);
 
         Assert.Equal(404, peeked.Status);
         Assert.Null(peeked.Launch);
@@ -572,7 +642,8 @@ public sealed class RankedLaunchTests
         new(arena, RankedLaunchBudget.Default, arena.Clock, NullLogger.Instance);
 
     private static Task<RankedLaunchResult> Launch(FakeArena arena, bool retry = false) =>
-        Orchestrator(arena).LaunchAsync(Owner, "Ada", retry, CancellationToken.None);
+        Orchestrator(arena).LaunchAsync(
+            Owner, "Ada", retry, allowProvision: true, CancellationToken.None);
 
     private static Task<RankedLaunchResult> Abandon(FakeArena arena) =>
         Orchestrator(arena).AbandonAsync(Owner, "Ada", CancellationToken.None);
@@ -658,6 +729,7 @@ public sealed class RankedLaunchTests
         // Races a single process cannot stage on its own.
         public Func<RankedLaunchActivation, Task<bool>>? BeforeActivate { get; set; }
         public Func<string, string, Task<bool>>? BeforeOpenAttempt { get; set; }
+        public bool FailNextAnnotation { get; set; }
 
         private int _provisionStatus = 201;
         private string? _provisionError;
@@ -711,6 +783,17 @@ public sealed class RankedLaunchTests
                 .ToArray();
 
         public void MarkDeleting() => _deleting = true;
+
+        public void LoseLiveDrillProjection()
+        {
+            lock (_sync)
+            {
+                var node = Owned(Owner)!;
+                node.DrillId = "";
+                node.DrillMode = "";
+                node.Version++;
+            }
+        }
 
         /// <summary>An arena that is already serving — the state a launch has to reach before it may
         /// activate, and the state a reused cluster is already in.</summary>
@@ -859,6 +942,11 @@ public sealed class RankedLaunchTests
         {
             lock (_sync)
             {
+                if (FailNextAnnotation)
+                {
+                    FailNextAnnotation = false;
+                    return Task.FromResult<RankedLaunchCluster?>(null);
+                }
                 if (!_nodes.TryGetValue(runId, out var node) ||
                     !string.Equals(node.Owner, owner, StringComparison.Ordinal) ||
                     !string.Equals(node.Version.ToString(CultureInfo.InvariantCulture),

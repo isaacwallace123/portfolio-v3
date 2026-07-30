@@ -19,6 +19,8 @@ import { liveEnabled } from "@/shared/api/live-server";
 const LIMITS = {
   provision: { max: 5, windowMs: 60 * 60_000 }, // 5 clusters per hour
   action: { max: 120, windowMs: 60_000 }, // 120 control actions per minute
+  launch: { max: 90, windowMs: 60_000 }, // bounded state-machine advances
+  cancel: { max: 10, windowMs: 60_000 }, // teardown cannot be starved by polling
   inspect: { max: 30, windowMs: 60_000 }, // cluster read plus an evidence write
   read: { max: 60, windowMs: 60_000 }, // 60 public reads per minute
   // Inventory reads look cheap from here and are not: each one fans out upstream into a
@@ -160,7 +162,9 @@ export async function guard(
         429,
         kind === "provision"
           ? "You have provisioned too many clusters recently. Try again later."
-          : "Too many actions. Slow down for a moment.",
+          : kind === "launch"
+            ? "The launch is being checked too often. Try again in a moment."
+            : "Too many actions. Slow down for a moment.",
       ),
     };
 

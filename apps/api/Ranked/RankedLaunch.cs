@@ -319,21 +319,27 @@ public sealed record RankedLaunchBudget(
 public static class RankedLaunchTtl
 {
     public static int AtActivation(
-        DateTime? createdUtc,
+        DateTime? launchStartedUtc,
         DateTime activatedUtc,
         int currentTtlSeconds,
-        int matchWindowSeconds)
+        int matchWindowSeconds,
+        int maximumTtlSeconds,
+        bool alreadyRestored)
     {
         var current = Math.Max(1, currentTtlSeconds);
         var window = Math.Max(1, matchWindowSeconds);
-        if (createdUtc is null) return Math.Max(current, window);
+        var maximum = Math.Max(1, maximumTtlSeconds);
+        var boundedCurrent = Math.Min(current, maximum);
+        if (alreadyRestored) return boundedCurrent;
+        if (launchStartedUtc is null)
+            return Math.Min(maximum, Math.Max(boundedCurrent, window));
 
         var launchSeconds = Math.Max(
             0,
-            (long)Math.Ceiling((activatedUtc - createdUtc.Value).TotalSeconds));
+            (long)Math.Ceiling((activatedUtc - launchStartedUtc.Value).TotalSeconds));
         return (int)Math.Min(
-            int.MaxValue,
-            Math.Max((long)current, launchSeconds + window));
+            maximum,
+            Math.Max((long)boundedCurrent, launchSeconds + window));
     }
 }
 

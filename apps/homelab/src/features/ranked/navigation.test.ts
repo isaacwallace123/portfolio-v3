@@ -40,6 +40,7 @@ describe("the unified Ranked destination", () => {
   it("drives the owner-scoped server launch instead of starting a drill", () => {
     const workbench = read("widgets/cluster-workbench/ClusterWorkbench.tsx");
     const launch = read("features/ranked/model/useRankedLaunch.ts");
+    const client = read("shared/api/live-client.ts");
     const route = read("app/api/live/ranked/launch/route.ts");
     const hub = read("widgets/leaderboard/ui/RankedHub.tsx");
     expect(workbench).toContain("useRankedLaunch");
@@ -49,7 +50,11 @@ describe("the unified Ranked destination", () => {
     expect(launch).toContain("cancelRankedLaunch");
     expect(route).toContain('"/v1/ranked/launch"');
     expect(route).toContain("g.caller.owner");
+    expect(route).toContain('? "provision"');
+    expect(route).toContain('? "cancel"');
+    expect(route).toContain(': "launch"');
     expect(route).not.toContain("runId");
+    expect(client).toContain("AbortSignal.timeout(15_000)");
     expect(hub).toContain("Start ranked");
     expect(hub).not.toContain("startDrill(");
   });
@@ -69,6 +74,11 @@ describe("the unified Ranked destination", () => {
     expect(arena).toContain("floatingPanel");
     expect(arena).toContain('{ id: "console", label: "Console"');
     expect(arena).toContain('{ id: "metrics", label: "Metrics"');
+    expect(arena).toContain("aria-expanded={activeTool === id}");
+    expect(arena).toContain("aria-controls={panelId}");
+    expect(arena).toContain("onKeyDown={closeOnEscape}");
+    expect(arena).toContain("toolButtons.current[closing]?.focus()");
+    expect(arena).toContain('"withheld"');
     expect(workbench).toContain('surface !== "ranked" &&');
   });
 

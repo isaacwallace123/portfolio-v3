@@ -520,11 +520,16 @@ export async function fetchRankedActions(
 async function rankedLaunchRequest(
   method: "GET" | "POST" | "DELETE",
   retry = false,
+  start = false,
 ): Promise<RankedLaunchView> {
-  const suffix = method === "POST" && retry ? "?retry=true" : "";
+  const query = new URLSearchParams();
+  if (method === "POST" && retry) query.set("retry", "true");
+  if (method === "POST" && start) query.set("start", "true");
+  const suffix = query.size > 0 ? `?${query}` : "";
   const res = await fetch(`/api/live/ranked/launch${suffix}`, {
     method,
     cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
   });
   const body = await asJson<{ launch: RankedLaunchView }>(res);
   return body.launch;
@@ -534,8 +539,11 @@ export function fetchRankedLaunch(): Promise<RankedLaunchView> {
   return rankedLaunchRequest("GET");
 }
 
-export function advanceRankedLaunch(retry = false): Promise<RankedLaunchView> {
-  return rankedLaunchRequest("POST", retry);
+export function advanceRankedLaunch(
+  retry = false,
+  start = false,
+): Promise<RankedLaunchView> {
+  return rankedLaunchRequest("POST", retry, start);
 }
 
 export function cancelRankedLaunch(): Promise<RankedLaunchView> {

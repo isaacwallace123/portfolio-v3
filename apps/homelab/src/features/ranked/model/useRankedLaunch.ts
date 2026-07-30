@@ -8,8 +8,7 @@ import {
   LiveError,
   type RankedLaunchView,
 } from "@/shared/api/live-client";
-
-const POLL_MS = 1_500;
+import { rankedLaunchPollDelay } from "./launch-poll";
 
 export function useRankedLaunch({
   enabled,
@@ -25,33 +24,42 @@ export function useRankedLaunch({
   const [advancing, setAdvancing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [advanceFailures, setAdvanceFailures] = useState(0);
   const inFlight = useRef(false);
+  const requestEpoch = useRef(0);
 
   const accept = useCallback(
     async (next: RankedLaunchView) => {
       setLaunch(next);
       setError(null);
+      setAdvanceFailures(0);
       if (next.active) await onActive(next.runId);
     },
     [onActive],
   );
 
   const advance = useCallback(
-    async (retry: boolean) => {
+    async (retry: boolean, start: boolean) => {
       if (!enabled || inFlight.current) return;
+      const epoch = requestEpoch.current;
       inFlight.current = true;
       setAdvancing(true);
       try {
-        await accept(await advanceRankedLaunch(retry));
+        const next = await advanceRankedLaunch(retry, start);
+        if (epoch === requestEpoch.current) await accept(next);
       } catch (cause) {
+        if (epoch !== requestEpoch.current) return;
+        setAdvanceFailures((current) => Math.min(10, current + 1));
         setError(
           cause instanceof Error
             ? cause.message
             : "The ranked launch could not advance.",
         );
       } finally {
-        inFlight.current = false;
-        setAdvancing(false);
+        if (epoch === requestEpoch.current) {
+          inFlight.current = false;
+          setAdvancing(false);
+        }
       }
     },
     [accept, enabled],
@@ -85,12 +93,18 @@ export function useRankedLaunch({
 
   useEffect(() => {
     if (!enabled || !launch || launch.terminal || advancing) return;
-    const timer = window.setTimeout(() => void advance(false), POLL_MS);
+    const timer = window.setTimeout(
+      () => void advance(false, false),
+      rankedLaunchPollDelay(advanceFailures),
+    );
     return () => window.clearTimeout(timer);
-  }, [advance, advancing, enabled, launch]);
+  }, [advance, advanceFailures, advancing, enabled, launch]);
 
   const cancel = useCallback(async () => {
     if (!enabled || cancelling || !launch || launch.active) return;
+    requestEpoch.current += 1;
+    inFlight.current = false;
+    setAdvancing(false);
     setCancelling(true);
     setError(null);
     try {
@@ -114,8 +128,8 @@ export function useRankedLaunch({
     advancing,
     cancelling,
     error,
-    start: () => advance(false),
-    retry: () => advance(true),
+    start: () => advance(false, true),
+    retry: () => advance(true, true),
     cancel,
   };
 }

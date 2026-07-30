@@ -189,6 +189,7 @@ public sealed class RankedLaunchOrchestrator(
         string owner,
         string displayName,
         bool retry,
+        bool allowProvision,
         CancellationToken ct)
     {
         using var gate = await LaunchGate.EnterAsync(owner, ct);
@@ -206,6 +207,9 @@ public sealed class RankedLaunchOrchestrator(
 
             if (cluster is null)
             {
+                if (!allowProvision)
+                    return RankedLaunchResult.Fail(
+                        404, "No ranked launch is in progress.");
                 var provision = await environment.ProvisionClusterAsync(owner, ct);
                 if (provision.Cluster is null)
                     return RankedLaunchResult.Fail(
@@ -279,7 +283,9 @@ public sealed class RankedLaunchOrchestrator(
         var cluster = await environment.FindClusterAsync(owner, ct);
         if (cluster is null)
             return RankedLaunchResult.Fail(404, "No ranked launch is in progress.");
-        if (cluster.IsLiveRankedMatch)
+        if (cluster.LaunchId.Length == 0)
+            return RankedLaunchResult.Fail(404, "No ranked launch is in progress.");
+        if (cluster.ClockStarted)
             return RankedLaunchResult.Fail(
                 409,
                 "A live ranked match cannot be abandoned. Forfeit it to seal the result.");
@@ -288,7 +294,7 @@ public sealed class RankedLaunchOrchestrator(
         // actually owns. A sandbox somebody is practising on is not one, and a practice drill on a
         // cluster with leftover launch bookkeeping is not one either — both belong to the run
         // endpoints, and neither is this button's to delete.
-        if (cluster.LaunchId.Length == 0 || cluster.ActiveDrillId.Length > 0)
+        if (cluster.ActiveDrillId.Length > 0)
             return RankedLaunchResult.Fail(404, "No ranked launch is in progress.");
 
         await VoidLaunchAttemptAsync(cluster, owner, displayName, ct);
@@ -564,8 +570,6 @@ public sealed class RankedLaunchOrchestrator(
         string reason,
         CancellationToken ct)
     {
-        await VoidLaunchAttemptAsync(cluster, owner, displayName, ct);
-
         var failed = await environment.AnnotateAsync(
             cluster.RunId,
             owner,
@@ -577,12 +581,21 @@ public sealed class RankedLaunchOrchestrator(
                 [LaunchFailurePhaseAnnotation] = phase,
                 [LaunchAttemptAnnotation] = null,
             },
-            ct) ?? cluster with
-            {
-                LaunchPhase = RankedLaunchPhases.Failed,
-                LaunchFailure = reason,
-                LaunchFailurePhase = phase,
-            };
+            ct);
+        if (failed is null)
+        {
+            var fresh = await environment.ReadClusterAsync(cluster.RunId, owner, ct);
+            if (fresh is null ||
+                !string.Equals(fresh.LaunchFailure, reason, StringComparison.Ordinal) ||
+                !string.Equals(fresh.LaunchFailurePhase, phase, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    "The ranked launch failure marker did not persist.");
+            failed = fresh;
+        }
+
+        // The durable marker is written first. If the attempt seal is interrupted, retrying the
+        // failed launch sees the marker and performs the orphan cleanup again.
+        await VoidLaunchAttemptAsync(cluster, owner, displayName, ct);
 
         logger.LogWarning(
             "Ranked launch {LaunchId} on {RunId} failed in {Phase}: {Reason}",
@@ -619,8 +632,13 @@ public sealed class RankedLaunchOrchestrator(
 
         var cleared = new Dictionary<string, string?>(StringComparer.Ordinal);
         foreach (var key in LaunchAnnotations) cleared[key] = null;
-        return await environment.AnnotateAsync(
+        var reset = await environment.AnnotateAsync(
             cluster.RunId, owner, cluster.Version, cleared, ct);
+        if (reset is not null) return reset;
+
+        var fresh = await environment.ReadClusterAsync(cluster.RunId, owner, ct);
+        if (fresh is not null && fresh.LaunchFailure.Length == 0) return fresh;
+        throw new InvalidOperationException("The failed ranked launch could not be reset.");
     }
 
     /// <summary>Seal a pre-activation attempt as void. Void is unrated, so a launch that never
@@ -628,7 +646,7 @@ public sealed class RankedLaunchOrchestrator(
     private async Task VoidLaunchAttemptAsync(
         RankedLaunchCluster cluster, string owner, string displayName, CancellationToken ct)
     {
-        if (cluster.IsLiveRankedMatch) return;
+        if (cluster.ClockStarted) return;
 
         var attemptId = cluster.LaunchAttemptId;
         if (attemptId.Length == 0)

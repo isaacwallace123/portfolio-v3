@@ -97,7 +97,20 @@ public sealed class RunBroker
         if (live.Length >= _options.MaxConcurrentRuns)
             return ClusterProvision.Fail(429, "No cluster slots are free. Try again shortly.");
 
-        var runId = $"run-hl-{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(5))}";
+        if (!await _ranked.TryConsumeProvisionAsync(
+                owner,
+                DateTime.UtcNow,
+                Math.Max(1, _options.ProvisionLimit),
+                TimeSpan.FromSeconds(Math.Max(1, _options.ProvisionWindowSeconds)),
+                TimeSpan.FromSeconds(Math.Max(1, _options.ProvisionCooldownSeconds)),
+                ct))
+            return ClusterProvision.Fail(
+                429, "You have provisioned too many clusters recently. Try again later.");
+
+        // The owner key is already a cryptographic digest. Making its first 128 bits the resource
+        // identity turns Kubernetes AlreadyExists into the atomic cross-replica one-owner guard:
+        // two API pods racing the same owner can only create this same object.
+        var runId = RunIdForOwner(owner);
         var setup = scenario.Setup;
         var body = new LabRunResource
         {
@@ -130,11 +143,30 @@ public sealed class RunBroker
             return new ClusterProvision(Parse(created), 201, null);
         }
         catch (HttpOperationException ex)
+            when (ex.Response.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            var existing = await GetResourceAsync(runId, ct);
+            if (existing is not null &&
+                string.Equals(existing.Spec.Owner, owner, StringComparison.Ordinal) &&
+                RunView.From(existing).Status is "provisioning" or "ready")
+                return new ClusterProvision(existing, 200, null);
+
+            _log.LogWarning(
+                ex,
+                "Deterministic LabRun {RunId} already exists but is not reusable by its owner.",
+                runId);
+            return ClusterProvision.Fail(
+                409, "Your previous cluster is still being collected. Try again shortly.");
+        }
+        catch (HttpOperationException ex)
         {
             _log.LogError(ex, "Failed to create LabRun {RunId}.", runId);
             return ClusterProvision.Fail(502, "The run controller rejected the request.");
         }
     }
+
+    public static string RunIdForOwner(string owner) =>
+        $"run-hl-{owner[..Math.Min(32, owner.Length)]}";
 
     /// <summary>The caller's own live cluster, or null. The launch is owner-addressed rather than
     /// run-addressed: there is exactly one per operator, so a caller never names a run id and can
@@ -399,6 +431,7 @@ public sealed class RunBroker
             [RankedLaunchOrchestrator.LaunchPhaseAnnotation] = RankedLaunchPhases.Active,
             [RankedLaunchOrchestrator.LaunchFailureAnnotation] = null,
             [RankedLaunchOrchestrator.LaunchFailurePhaseAnnotation] = null,
+            [RankedTtlRestoredAnnotation] = activation.ActivatedUtc.ToString("O"),
             // Academy progress is never attached to ranked play.
             [LearningCourseAnnotation] = null,
             [LearningCourseVersionAnnotation] = null,
@@ -420,10 +453,14 @@ public sealed class RunBroker
             // The reaper counts from cluster creation. Give the activated match a full normal
             // window instead of charging it for the platform's provisioning time.
             ["ttlSeconds"] = RankedLaunchTtl.AtActivation(
-                resource.Metadata.CreationTimestamp,
+                ParseAnnotationTime(
+                    resource.Metadata.Annotations?.GetValueOrDefault(
+                        RankedLaunchOrchestrator.LaunchStartedAnnotation)),
                 activation.ActivatedUtc,
                 resource.Spec.TtlSeconds,
-                _options.DefaultTtlSeconds),
+                _options.DefaultTtlSeconds,
+                _options.DefaultTtlSeconds + RenewalSeconds,
+                resource.Metadata.Annotations?.ContainsKey(RankedTtlRestoredAnnotation) == true),
         };
 
         var activated = await CompareAndSetAsync(
@@ -517,9 +554,7 @@ public sealed class RunBroker
         string what,
         CancellationToken ct)
     {
-        var guarded = expectedVersion.Length == 0
-            ? patchBody
-            : Merge(patchBody, expectedVersion);
+        var guarded = Merge(patchBody, RequireExpectedVersion(expectedVersion));
         var patch = new k8s.Models.V1Patch(guarded, k8s.Models.V1Patch.PatchType.MergePatch);
         try
         {
@@ -536,7 +571,8 @@ public sealed class RunBroker
         catch (HttpOperationException ex)
         {
             _log.LogError(ex, "Failed to {What} on {RunId}.", what, runId);
-            return null;
+            throw new InvalidOperationException(
+                $"The platform could not {what} on {runId}.", ex);
         }
     }
 
@@ -544,7 +580,16 @@ public sealed class RunBroker
     /// the metadata block twice. Round-tripped through the Kubernetes client's own serializer, so
     /// the merged document is byte-for-byte the one the client would otherwise have produced.
     /// </summary>
-    private static object Merge(object patchBody, string expectedVersion)
+    internal static string RequireExpectedVersion(string expectedVersion)
+    {
+        if (string.IsNullOrWhiteSpace(expectedVersion))
+            throw new ArgumentException(
+                "A Kubernetes resourceVersion is required for a compare-and-set write.",
+                nameof(expectedVersion));
+        return expectedVersion;
+    }
+
+    internal static object Merge(object patchBody, string expectedVersion)
     {
         var json = System.Text.Json.Nodes.JsonNode
             .Parse(KubernetesJson.Serialize(patchBody))?.AsObject() ?? [];
@@ -587,7 +632,7 @@ public sealed class RunBroker
         if (resource is null)
             return BrokerResult.Fail(404, "No such run.");
         var view = RunView.From(resource);
-        if (view.DrillMode == "ranked")
+        if (await HasRatedMatchAsync(resource, view, ct))
         {
             try
             {
@@ -597,7 +642,8 @@ public sealed class RunBroker
                     view,
                     TerminalOutcome(view, RankedOutcomes.Forfeited),
                     displayName,
-                    ct);
+                    ct,
+                    elapsedMs: ProjectionSafeElapsedMs(resource, view));
             }
             catch (Exception ex)
             {
@@ -2291,8 +2337,6 @@ public sealed class RunBroker
         long? elapsedMs = null,
         int? stageReached = null)
     {
-        if (view.DrillMode != "ranked") return null;
-
         // Rating must explain every mutation the cluster accepted. If the durable action copy is
         // unavailable, keep the attempt active and retry from the LabRun annotations next poll.
         await PersistRankedActionsAsync(resource, view, ct);
@@ -2381,6 +2425,8 @@ public sealed class RunBroker
     // the page, since the page is not something the platform gets to trust.
     public const int RenewalSeconds = 900;
     public const string RenewedAnnotation = "homeops.isaacwallace.dev/renewed-at";
+    public const string RankedTtlRestoredAnnotation =
+        "homeops.isaacwallace.dev/ranked-ttl-restored-at";
 
     public async Task<BrokerResult> RenewRunAsync(string runId, string owner, CancellationToken ct)
     {
@@ -2390,7 +2436,10 @@ public sealed class RunBroker
         if (resource.Metadata.Annotations?.ContainsKey(RenewedAnnotation) == true)
             return BrokerResult.Fail(409, "This cluster has already been extended once.");
 
-        var ttl = resource.Spec.TtlSeconds > 0 ? resource.Spec.TtlSeconds : 900;
+        var ttl = resource.Spec.TtlSeconds > 0
+            ? resource.Spec.TtlSeconds
+            : _options.DefaultTtlSeconds;
+        var maximumTtl = _options.DefaultTtlSeconds + RenewalSeconds;
         var patchBody = new
         {
             metadata = new
@@ -2400,7 +2449,7 @@ public sealed class RunBroker
                     [RenewedAnnotation] = DateTime.UtcNow.ToString("O"),
                 },
             },
-            spec = new { ttlSeconds = ttl + RenewalSeconds },
+            spec = new { ttlSeconds = Math.Min(maximumTtl, ttl + RenewalSeconds) },
         };
         return await PatchRunAsync(runId, patchBody, "renew cluster", ct);
     }
@@ -2417,9 +2466,14 @@ public sealed class RunBroker
         LabRunResource resource, string displayName, CancellationToken ct)
     {
         var view = RunView.From(resource);
-        if (view.DrillMode == "ranked") return;
+        if (HasStartedClock(resource)) return;
         var attemptId = resource.Metadata.Annotations?
             .GetValueOrDefault(RankedLaunchOrchestrator.LaunchAttemptAnnotation);
+        if (string.IsNullOrEmpty(attemptId))
+        {
+            var active = await _ranked.ActiveForRunAsync(view.RunId, view.Owner, ct);
+            attemptId = active?.Id;
+        }
         if (string.IsNullOrEmpty(attemptId)) return;
 
         try
@@ -2436,6 +2490,26 @@ public sealed class RunBroker
         }
     }
 
+    internal static bool HasStartedClock(LabRunResource resource) =>
+        !string.IsNullOrWhiteSpace(resource.Spec.DrillStartedAt);
+
+    private async Task<bool> HasRatedMatchAsync(
+        LabRunResource resource, RunView view, CancellationToken ct)
+    {
+        if (view.DrillMode == "ranked") return true;
+        if (!HasStartedClock(resource)) return false;
+        return await _ranked.ActiveForRunAsync(view.RunId, view.Owner, ct) is not null;
+    }
+
+    private static long ProjectionSafeElapsedMs(LabRunResource resource, RunView view)
+    {
+        if (view.DrillElapsedMs > 0) return view.DrillElapsedMs;
+        var started = ParseAnnotationTime(resource.Spec.DrillStartedAt);
+        return started is null
+            ? 0
+            : (long)Math.Max(0, (DateTime.UtcNow - started.Value).TotalMilliseconds);
+    }
+
     // Owner-free teardown used by the TTL reaper (the platform, not a user, is acting).
     public async Task<bool> DeleteExpiredAsync(string runId, CancellationToken ct)
     {
@@ -2443,7 +2517,7 @@ public sealed class RunBroker
         if (resource is null) return false;
         var view = RunView.From(resource);
         await VoidUnactivatedLaunchAttemptAsync(resource, "", ct);
-        if (view.DrillMode == "ranked")
+        if (await HasRatedMatchAsync(resource, view, ct))
         {
             await PersistRankedActionsAsync(resource, view, ct);
             var frame = await GetFrameAsync(resource, ct);
@@ -2455,7 +2529,8 @@ public sealed class RunBroker
                     ? RankedOutcomes.Void
                     : TerminalOutcome(view, RankedOutcomes.Expired),
                 "",
-                ct);
+                ct,
+                elapsedMs: ProjectionSafeElapsedMs(resource, view));
         }
 
         try
@@ -2481,7 +2556,7 @@ public sealed class RunBroker
         if (resource is null) return false;
         var view = RunView.From(resource);
         await VoidUnactivatedLaunchAttemptAsync(resource, displayName, ct);
-        if (view.DrillMode == "ranked")
+        if (await HasRatedMatchAsync(resource, view, ct))
         {
             await PersistRankedActionsAsync(resource, view, ct);
             await FinalizeRankedAsync(
@@ -2489,7 +2564,8 @@ public sealed class RunBroker
                 view,
                 TerminalOutcome(view, RankedOutcomes.Forfeited),
                 displayName,
-                ct);
+                ct,
+                elapsedMs: ProjectionSafeElapsedMs(resource, view));
         }
 
         try

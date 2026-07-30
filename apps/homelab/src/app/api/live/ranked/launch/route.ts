@@ -4,18 +4,28 @@ import { liveFetch } from "@/shared/api/live-server";
 export const dynamic = "force-dynamic";
 
 async function forward(req: Request, method: "GET" | "POST" | "DELETE") {
+  const url = new URL(req.url);
+  const start = method === "POST" && url.searchParams.get("start") === "true";
   const g = await guard(req, {
-    kind: method === "GET" ? "read" : "action",
+    kind:
+      method === "GET"
+        ? "read"
+        : method === "DELETE"
+          ? "cancel"
+          : start
+            ? "provision"
+            : "launch",
   });
   if (!g.ok) return g.response;
 
-  const retry =
-    method === "POST" && new URL(req.url).searchParams.get("retry") === "true";
+  const retry = method === "POST" && url.searchParams.get("retry") === "true";
   const res = await liveFetch(
     "/v1/ranked/launch",
     {
       method,
-      ...(method === "POST" ? { body: JSON.stringify({ retry }) } : undefined),
+      ...(method === "POST"
+        ? { body: JSON.stringify({ retry, start }) }
+        : undefined),
     },
     g.caller.owner,
     g.caller.displayName,

@@ -112,6 +112,12 @@ export interface LiveRunView extends RunView {
   podCount: number | null;
   cpuMillicores: number | null;
   memoryMiB: number | null;
+  /** Raw visibility-preserving gauges. Null means the ranked rules intentionally withheld it. */
+  measuredTelemetry: {
+    requestsPerSec: number | null;
+    p95LatencyMs: number | null;
+    errorRatePct: number | null;
+  };
   releaseTrack: "stable" | "candidate";
   dataState: "healthy" | "degraded" | "recovered";
   targetPool: "apps" | "infra" | "unavailable";
@@ -251,6 +257,11 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     podCount: real.telemetry?.podCount ?? null,
     cpuMillicores: real.telemetry?.cpuMillicores ?? null,
     memoryMiB: real.telemetry?.memoryMiB ?? null,
+    measuredTelemetry: {
+      requestsPerSec: real.telemetry?.requestsPerSec ?? null,
+      p95LatencyMs: real.telemetry?.p95LatencyMs ?? null,
+      errorRatePct: real.telemetry?.errorRatePct ?? null,
+    },
     releaseTrack: real.releaseTrack ?? "stable",
     dataState: real.dataState ?? "healthy",
     targetPool: real.targetPool ?? "apps",

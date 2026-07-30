@@ -59,7 +59,12 @@ public static class RankedEndpoints
                     new { error = "Sign in to start a ranked match." }, statusCode: 401);
 
             var result = await Orchestrator(broker, ranked, options, loggers)
-                .LaunchAsync(owner, OwnerName(ctx), req?.Retry == true, ct);
+                .LaunchAsync(
+                    owner,
+                    OwnerName(ctx),
+                    req?.Retry == true,
+                    req?.Start == true,
+                    ct);
             return Project(result);
         }).RequireScope(ApiScopes.RunsWrite);
 
@@ -183,4 +188,4 @@ public static class RankedEndpoints
 
 /// <summary>The only input a launch takes. Bounded by construction: the caller names no run, no
 /// incident, and no cluster — everything else about the launch is decided server-side.</summary>
-public sealed record RankedLaunchRequest(bool? Retry);
+public sealed record RankedLaunchRequest(bool? Retry, bool? Start);

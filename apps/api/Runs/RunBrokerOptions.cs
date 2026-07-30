@@ -16,6 +16,12 @@ public sealed class RunBrokerOptions
 
     public int DefaultTtlSeconds { get; set; } = 900;
 
+    // Authoritative provisioning budget. The Next proxy applies the same shape as cheap edge
+    // throttling, but this database-backed budget is the cross-replica security boundary.
+    public int ProvisionLimit { get; set; } = 5;
+    public int ProvisionWindowSeconds { get; set; } = 3600;
+    public int ProvisionCooldownSeconds { get; set; } = 30;
+
     // How long each phase of a ranked launch may take before the launch is abandoned as failed.
     // Cumulative from the moment the launch opened, so a slow provision does not buy itself extra
     // time to start workloads in. Overrunning is never rated; it marks the launch failed. Defaults

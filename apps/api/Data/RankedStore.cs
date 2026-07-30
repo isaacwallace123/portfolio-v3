@@ -119,6 +119,52 @@ public sealed record RankedEvidenceView(
 /// </summary>
 public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
 {
+    /// <summary>
+    /// Spend one durable cluster-provisioning slot.
+    ///
+    /// The conditional upsert is a single database statement, so separate API replicas cannot both
+    /// pass a read-then-write check. The short cooldown also collapses simultaneous first requests
+    /// for one owner into one spend while the deterministic Kubernetes object is being created.
+    /// </summary>
+    public async Task<bool> TryConsumeProvisionAsync(
+        string owner,
+        DateTime nowUtc,
+        int maximum,
+        TimeSpan window,
+        TimeSpan cooldown,
+        CancellationToken ct)
+    {
+        if (maximum <= 0) return false;
+        var now = Utc(nowUtc);
+        var windowCutoff = now - window;
+        var cooldownCutoff = now - cooldown;
+
+        var affected = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "RunProvisionBudgets"
+                ("OwnerKey", "WindowStartedUtc", "LastProvisionedUtc", "Count")
+            VALUES ({owner}, {now}, {now}, 1)
+            ON CONFLICT ("OwnerKey") DO UPDATE SET
+                "WindowStartedUtc" = CASE
+                    WHEN "RunProvisionBudgets"."WindowStartedUtc" <= {windowCutoff}
+                    THEN excluded."WindowStartedUtc"
+                    ELSE "RunProvisionBudgets"."WindowStartedUtc"
+                END,
+                "LastProvisionedUtc" = excluded."LastProvisionedUtc",
+                "Count" = CASE
+                    WHEN "RunProvisionBudgets"."WindowStartedUtc" <= {windowCutoff}
+                    THEN 1
+                    ELSE "RunProvisionBudgets"."Count" + 1
+                END
+            WHERE
+                "RunProvisionBudgets"."LastProvisionedUtc" <= {cooldownCutoff}
+                AND (
+                    "RunProvisionBudgets"."WindowStartedUtc" <= {windowCutoff}
+                    OR "RunProvisionBudgets"."Count" < {maximum}
+                );
+            """, ct);
+        return affected == 1;
+    }
+
     public async Task<RankedAttemptView> BeginAsync(
         string runId,
         string drillId,

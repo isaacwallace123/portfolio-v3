@@ -175,7 +175,7 @@ export function RankedLaunchScreen({
               type="button"
               className={styles.launchCancel}
               onClick={onCancel}
-              disabled={busy || !launch || launch.active}
+              disabled={!launch || launch.active}
             >
               <X size={12} /> Cancel setup
             </button>

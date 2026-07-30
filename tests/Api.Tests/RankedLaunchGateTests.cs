@@ -1,4 +1,5 @@
 using IsaacWallace.Api.Ranked;
+using IsaacWallace.Api.Runs;
 using Xunit;
 
 namespace IsaacWallace.Api.Tests;
@@ -15,7 +16,8 @@ public sealed class RankedLaunchGateTests
         var created = new DateTime(2026, 7, 30, 12, 0, 0, DateTimeKind.Utc);
         var activated = created.AddMinutes(7).AddSeconds(4);
 
-        var ttl = RankedLaunchTtl.AtActivation(created, activated, 900, 900);
+        var ttl = RankedLaunchTtl.AtActivation(
+            created, activated, 900, 900, 1_800, alreadyRestored: false);
 
         Assert.Equal(1_324, ttl);
         Assert.Equal(900, ttl - (int)(activated - created).TotalSeconds);
@@ -27,9 +29,77 @@ public sealed class RankedLaunchGateTests
         var created = new DateTime(2026, 7, 30, 12, 0, 0, DateTimeKind.Utc);
 
         var ttl = RankedLaunchTtl.AtActivation(
-            created, created.AddMinutes(1), 1_800, 900);
+            created, created.AddMinutes(1), 1_800, 900, 1_800, alreadyRestored: false);
 
         Assert.Equal(1_800, ttl);
+    }
+
+    [Fact]
+    public void ASecondActivationCannotGrowTheClusterLifetime()
+    {
+        var launchStarted = new DateTime(2026, 7, 30, 12, 0, 0, DateTimeKind.Utc);
+        var first = RankedLaunchTtl.AtActivation(
+            launchStarted,
+            launchStarted.AddMinutes(7),
+            900,
+            900,
+            1_800,
+            alreadyRestored: false);
+
+        var second = RankedLaunchTtl.AtActivation(
+            launchStarted.AddMinutes(8),
+            launchStarted.AddMinutes(9),
+            first,
+            900,
+            1_800,
+            alreadyRestored: true);
+
+        Assert.Equal(1_320, first);
+        Assert.Equal(first, second);
+    }
+
+    [Fact]
+    public void ProvisioningRestorationCannotExceedTheSingleRenewalCeiling()
+    {
+        var launchStarted = new DateTime(2026, 7, 30, 12, 0, 0, DateTimeKind.Utc);
+
+        var ttl = RankedLaunchTtl.AtActivation(
+            launchStarted,
+            launchStarted.AddMinutes(20),
+            900,
+            900,
+            1_800,
+            alreadyRestored: false);
+
+        Assert.Equal(1_800, ttl);
+    }
+
+    [Fact]
+    public void ActivationRepairsAnExistingTtlAboveTheLifetimeCeiling()
+    {
+        var launchStarted = new DateTime(2026, 7, 30, 12, 0, 0, DateTimeKind.Utc);
+
+        var ttl = RankedLaunchTtl.AtActivation(
+            launchStarted,
+            launchStarted.AddMinutes(1),
+            currentTtlSeconds: 7_200,
+            matchWindowSeconds: 900,
+            maximumTtlSeconds: 1_800,
+            alreadyRestored: false);
+
+        Assert.Equal(1_800, ttl);
+    }
+
+    [Fact]
+    public void OwnerAddressedRunIdsAreStableAndDoNotExposeTheWholeOwnerKey()
+    {
+        const string owner = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+        var runId = RunBroker.RunIdForOwner(owner);
+
+        Assert.Equal("run-hl-0123456789abcdef0123456789abcdef", runId);
+        Assert.Equal(runId, RunBroker.RunIdForOwner(owner));
+        Assert.NotEqual($"run-hl-{owner}", runId);
     }
 
     [Fact]

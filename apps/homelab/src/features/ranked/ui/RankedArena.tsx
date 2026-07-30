@@ -16,7 +16,7 @@ import {
   Terminal,
   X,
 } from "lucide-react";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   rankedCommand,
   rankedInspect,
@@ -91,6 +91,9 @@ export function RankedArena({
   const [historyIndex, setHistoryIndex] = useState(-1);
   const nextId = useRef(1);
   const transcript = useRef<HTMLDivElement>(null);
+  const toolButtons = useRef<
+    Partial<Record<RankedTool, HTMLButtonElement | null>>
+  >({});
   const announcedStage = useRef(0);
 
   useEffect(() => {
@@ -114,14 +117,6 @@ export function RankedArena({
     const element = transcript.current;
     if (element) element.scrollTop = element.scrollHeight;
   }, [entries]);
-
-  useEffect(() => {
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setActiveTool(null);
-    };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, []);
 
   const append = (
     command: string | undefined,
@@ -198,6 +193,19 @@ export function RankedArena({
   const warningEvents = events.filter((event) => event.severity === "warning");
   const selectedService = selection?.split(":")[0] ?? null;
   const activeMeta = TOOLS.find((tool) => tool.id === activeTool);
+  const panelId = "ranked-workspace-panel";
+  const closeTool = () => {
+    const closing = activeTool;
+    setActiveTool(null);
+    if (closing)
+      window.requestAnimationFrame(() => toolButtons.current[closing]?.focus());
+  };
+  const closeOnEscape = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeTool();
+  };
 
   return (
     <div className={styles.arenaChrome}>
@@ -211,11 +219,16 @@ export function RankedArena({
         {TOOLS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
+            ref={(node) => {
+              toolButtons.current[id] = node;
+            }}
             type="button"
             data-label={label}
             className={activeTool === id ? styles.toolActive : ""}
             aria-label={label}
             aria-pressed={activeTool === id}
+            aria-expanded={activeTool === id}
+            aria-controls={panelId}
             onClick={() =>
               setActiveTool((current) => (current === id ? null : id))
             }
@@ -230,9 +243,11 @@ export function RankedArena({
 
       {activeTool && activeMeta && (
         <section
+          id={panelId}
           className={styles.floatingPanel}
           data-tool={activeTool}
           aria-label={`${activeMeta.label} panel`}
+          onKeyDown={closeOnEscape}
         >
           <header className={styles.floatingPanelHeader}>
             <div>
@@ -251,7 +266,7 @@ export function RankedArena({
             </div>
             <button
               type="button"
-              onClick={() => setActiveTool(null)}
+              onClick={closeTool}
               aria-label={`Close ${activeMeta.label}`}
             >
               <X size={15} />
@@ -451,17 +466,26 @@ export function RankedArena({
                 <div>
                   <span>Served / offered</span>
                   <b>
-                    {run.telemetry.requestsPerSec} / {run.offeredRequestsPerSec}
-                    /s
+                    {run.measuredTelemetry.requestsPerSec === null
+                      ? "withheld"
+                      : `${run.measuredTelemetry.requestsPerSec} / ${run.offeredRequestsPerSec}/s`}
                   </b>
                 </div>
                 <div>
                   <span>p95 latency</span>
-                  <b>{run.telemetry.p95LatencyMs}ms</b>
+                  <b>
+                    {run.measuredTelemetry.p95LatencyMs === null
+                      ? "withheld"
+                      : `${run.measuredTelemetry.p95LatencyMs}ms`}
+                  </b>
                 </div>
                 <div>
                   <span>Error rate</span>
-                  <b>{run.telemetry.errorRatePct.toFixed(2)}%</b>
+                  <b>
+                    {run.measuredTelemetry.errorRatePct === null
+                      ? "withheld"
+                      : `${run.measuredTelemetry.errorRatePct.toFixed(2)}%`}
+                  </b>
                 </div>
                 <div>
                   <span>Latest trace</span>

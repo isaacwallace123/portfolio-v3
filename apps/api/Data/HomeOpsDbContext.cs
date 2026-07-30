@@ -16,6 +16,7 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
     public DbSet<RankedPerformanceRecord> RankedPerformance => Set<RankedPerformanceRecord>();
     public DbSet<RankedScenarioRecord> RankedScenarios => Set<RankedScenarioRecord>();
     public DbSet<RankedCalibrationRecord> RankedCalibrations => Set<RankedCalibrationRecord>();
+    public DbSet<RunProvisionBudget> RunProvisionBudgets => Set<RunProvisionBudget>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -154,6 +155,13 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
             e.ToTable("RankedCalibrations");
             e.HasKey(calibration => calibration.Family);
             e.Property(calibration => calibration.Family).HasMaxLength(64);
+        });
+
+        builder.Entity<RunProvisionBudget>(e =>
+        {
+            e.ToTable("RunProvisionBudgets");
+            e.HasKey(budget => budget.OwnerKey);
+            e.Property(budget => budget.OwnerKey).HasMaxLength(64);
         });
     }
 
@@ -357,6 +365,14 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
                   "Completions" integer NOT NULL,
                   "UpdatedUtc" timestamp with time zone NOT NULL
               );
+
+              CREATE TABLE IF NOT EXISTS "RunProvisionBudgets" (
+                  "OwnerKey" character varying(64) NOT NULL
+                      CONSTRAINT "PK_RunProvisionBudgets" PRIMARY KEY,
+                  "WindowStartedUtc" timestamp with time zone NOT NULL,
+                  "LastProvisionedUtc" timestamp with time zone NOT NULL,
+                  "Count" integer NOT NULL
+              );
               """
             : """
               CREATE TABLE IF NOT EXISTS "DrillResults" (
@@ -541,6 +557,13 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
                   "RatedAttempts" INTEGER NOT NULL,
                   "Completions" INTEGER NOT NULL,
                   "UpdatedUtc" TEXT NOT NULL
+              );
+
+              CREATE TABLE IF NOT EXISTS "RunProvisionBudgets" (
+                  "OwnerKey" TEXT NOT NULL CONSTRAINT "PK_RunProvisionBudgets" PRIMARY KEY,
+                  "WindowStartedUtc" TEXT NOT NULL,
+                  "LastProvisionedUtc" TEXT NOT NULL,
+                  "Count" INTEGER NOT NULL
               );
               """, ct);
     }

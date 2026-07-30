@@ -130,7 +130,7 @@ public sealed class RankedLaunchEnvironment(
         await ranked.FinalizeAsync(
             attemptId, owner, RankedOutcomes.Void, 0, 0, "", displayName, ct);
 
-    private static RankedLaunchCluster Cluster(LabRunResource resource)
+    internal static RankedLaunchCluster Cluster(LabRunResource resource)
     {
         var view = RunView.From(resource);
         var annotations = resource.Metadata.Annotations;
