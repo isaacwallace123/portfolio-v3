@@ -1,2 +1,2 @@
-export { Leaderboard } from "./ui/Leaderboard";
-export { Leaderboard as default } from "./ui/Leaderboard";
+export { RankedHub } from "./ui/RankedHub";
+export { RankedHub as default } from "./ui/RankedHub";

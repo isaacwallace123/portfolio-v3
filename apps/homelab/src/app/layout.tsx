@@ -41,7 +41,6 @@ const NAV_LINKS = [
   { href: "/", label: "Overview" },
   { href: "/practice", label: "Practice" },
   { href: "/ranked", label: "Ranked" },
-  { href: "/leaderboard", label: "Leaderboard" },
   { href: "/topology", label: "Live topology" },
 ] as const;
 
