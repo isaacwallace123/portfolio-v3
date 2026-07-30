@@ -108,14 +108,12 @@ export function TopologyBoard() {
           <Workflow size={14} /> Sanitized live architecture
         </p>
         <h1>
-          The whole homelab, <em>grouped by layer.</em>
+          The whole homelab, <em>as one map.</em>
         </h1>
         <p className={s.lede}>
-          Every box is a real workload read from the Kubernetes API, sitting in
-          the layer it belongs to — compute, the platform controllers, the
-          network edge, storage, observability, and the applications they all
-          carry. Point at anything to trace what it depends on and what depends
-          on it.
+          Read live from the Kubernetes API — the machines on top, the network
+          edge beneath them, then everything they carry. Point at anything to
+          trace it.
         </p>
       </header>
 
@@ -127,7 +125,7 @@ export function TopologyBoard() {
             onQuery={setQuery}
             showAllLinks={showAllLinks}
             onToggleLinks={() => setShowAllLinks((v) => !v)}
-            shown={layout.members.length}
+            shown={layout.members.length + layout.servers.length}
             total={nodes.length}
           />
 
@@ -136,7 +134,7 @@ export function TopologyBoard() {
               <RefreshCw className={s.spin} size={22} />
               <span>{error ?? "Reading sanitized Kubernetes inventory…"}</span>
             </div>
-          ) : layout.members.length === 0 ? (
+          ) : layout.members.length + layout.servers.length === 0 ? (
             <div className={s.loading}>
               <span>Nothing matches that search.</span>
             </div>

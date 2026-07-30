@@ -30,6 +30,16 @@ const GROUP_PAD_X = 18;
 const GROUP_PAD_Y = 16;
 const GROUP_HEADER = 34;
 
+/** Servers are the machines everything else runs on, so they get a bigger card of their own. */
+const SERVER_W = 202;
+const SERVER_H = 74;
+const SERVER_GAP = 18;
+/** The "traffic arrives here" marker above the edge tier. */
+const ENTRY_W = 138;
+const ENTRY_H = 46;
+/** Space between one tier of the chain and the next. */
+const TIER_GAP = 46;
+
 /** Two containers abreast is the most that fits a panel without shrinking the labels away. */
 const GROUPS_PER_ROW = 2;
 const GROUP_GAP_X = 74;
@@ -74,7 +84,27 @@ export interface MapEdge {
   points: { x: number; y: number }[];
 }
 
+/** A physical machine: drawn above the workloads rather than beside them. */
+export interface ServerBox {
+  id: string;
+  node: TopologyNode;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Where traffic enters. Context rather than inventory, so it carries no status or counts. */
+export interface EntryBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface GroupedLayout {
+  entry: EntryBox | null;
+  servers: ServerBox[];
   groups: GroupBox[];
   members: MemberBox[];
   /** Layer-to-layer connectors: what the map shows at rest. */
@@ -88,7 +118,11 @@ export interface GroupedLayout {
 const groupIdOf = (layer: string) => `group:${layer}`;
 const RANKED_STATUS = ["unavailable", "degraded", "healthy"] as const;
 
+export const ENTRY_ID = "__entry";
+
 const EMPTY: GroupedLayout = {
+  entry: null,
+  servers: [],
   groups: [],
   members: [],
   groupEdges: [],
@@ -110,19 +144,27 @@ export function layoutGrouped(
     else byLayer.set(node.layer, [node]);
   }
 
-  const present = LAYERS.map((l) => l.id).filter(
-    (id) => (byLayer.get(id)?.length ?? 0) > 0,
+  // The chain reads as a stack of tiers rather than a grid of equal peers, because the layers are
+  // not peers: the machines carry the platform, the platform routes into the workloads. Compute sits
+  // on top as bare server cards and the network edge directly beneath it, which is the shape the v2
+  // homelab used and the reason its map was legible at a glance.
+  const serverNodes = byLayer.get("compute") ?? [];
+  const networkNodes = byLayer.get("network") ?? [];
+  const gridLayers = LAYERS.map((l) => l.id).filter(
+    (id) =>
+      id !== "compute" &&
+      id !== "network" &&
+      (byLayer.get(id)?.length ?? 0) > 0,
   );
 
-  // Container size follows its contents: a grid of members, plus a header and padding.
-  const sized = present.map((layer) => {
+  const sizeOf = (layer: string, perRowCap: number) => {
     const members = byLayer.get(layer)!;
-    const rows = Math.ceil(members.length / MEMBERS_PER_ROW);
-    const perRow = Math.min(members.length, MEMBERS_PER_ROW);
+    const perRow = Math.min(members.length, perRowCap);
+    const rows = Math.ceil(members.length / perRowCap);
     return {
       layer,
       members,
-      rows,
+      perRow: perRowCap,
       w: perRow * MEMBER_W + (perRow - 1) * MEMBER_GAP_X + GROUP_PAD_X * 2,
       h:
         GROUP_HEADER +
@@ -131,90 +173,114 @@ export function layoutGrouped(
         (rows - 1) * MEMBER_GAP_Y +
         GROUP_PAD_Y,
     };
-  });
+  };
 
-  const rank = rankLayers(present, nodes, edges);
+  // The edge tier is one wide row: it is a path, not a pile, and wrapping it hides that.
+  const networkSized =
+    networkNodes.length > 0
+      ? sizeOf("network", Math.min(networkNodes.length, 4))
+      : null;
+  const gridSized = gridLayers.map((l) => sizeOf(l, MEMBERS_PER_ROW));
 
-  // Containers are placed by dependency rank, wrapped so no row runs wider than the panel. Reading
-  // down is still reading the direction things flow; wrapping only stops a wide rank from forcing a
-  // canvas that has to be shrunk to fit.
-  const order = [...sized].sort(
-    (a, b) =>
-      (rank.get(a.layer) ?? 0) - (rank.get(b.layer) ?? 0) ||
-      present.indexOf(a.layer) - present.indexOf(b.layer),
+  const gridRows: (typeof gridSized)[] = [];
+  for (let i = 0; i < gridSized.length; i += GROUPS_PER_ROW)
+    gridRows.push(gridSized.slice(i, i + GROUPS_PER_ROW));
+  const gridRowWidths = gridRows.map(
+    (row) => row.reduce((n, g) => n + g.w, 0) + (row.length - 1) * GROUP_GAP_X,
   );
 
-  // Filled two abreast in rank order rather than one row per rank. Giving each rank its own row is
-  // the stricter reading, and it produced a 1122×1396 column that fits a panel at 0.44 — the labels
-  // lose more than the ordering gains. Reading is left to right then down, and dependency still
-  // decides the sequence.
-  const rows: (typeof sized)[] = [];
-  for (let i = 0; i < order.length; i += GROUPS_PER_ROW) {
-    rows.push(order.slice(i, i + GROUPS_PER_ROW));
-  }
-
-  const rowWidths = rows.map(
-    (row) =>
-      row.reduce((sum, g) => sum + g.w, 0) + (row.length - 1) * GROUP_GAP_X,
+  const serverRowW =
+    serverNodes.length * SERVER_W + (serverNodes.length - 1) * SERVER_GAP;
+  const contentW = Math.max(
+    serverRowW,
+    networkSized?.w ?? 0,
+    ...gridRowWidths,
+    ENTRY_W,
   );
-  const widest = Math.max(...rowWidths);
+  const centreX = PAD + contentW / 2;
 
   const groups: GroupBox[] = [];
   const members: MemberBox[] = [];
+  const servers: ServerBox[] = [];
   let y = PAD;
+  let entry: EntryBox | null = null;
 
-  rows.forEach((row, rowIndex) => {
-    // Centre each row against the widest one so the map reads as a column, not a ragged edge.
-    let x = PAD + (widest - rowWidths[rowIndex]) / 2;
-    const rowHeight = Math.max(...row.map((g) => g.h));
+  // Tier 0 — where traffic comes from.
+  if (networkNodes.length > 0) {
+    entry = { x: centreX - ENTRY_W / 2, y, w: ENTRY_W, h: ENTRY_H };
+    y += ENTRY_H + TIER_GAP;
+  }
 
-    for (const group of row) {
-      const status =
-        RANKED_STATUS.find((s) => group.members.some((m) => m.status === s)) ??
-        "healthy";
-
-      groups.push({
-        id: groupIdOf(group.layer),
-        layer: group.layer,
-        label: layerLabel(group.layer),
-        count: group.members.length,
-        status,
-        ready: group.members.reduce((sum, m) => sum + m.ready, 0),
-        desired: group.members.reduce((sum, m) => sum + m.desired, 0),
-        x,
-        y,
-        w: group.w,
-        h: group.h,
-      });
-
-      group.members.forEach((node, i) => {
-        const col = i % MEMBERS_PER_ROW;
-        const row_ = Math.floor(i / MEMBERS_PER_ROW);
-        // The last row of a container is centred, so a group of four does not leave a lone box
-        // hanging off the left edge.
-        const inRow = Math.min(
-          MEMBERS_PER_ROW,
-          group.members.length - row_ * MEMBERS_PER_ROW,
-        );
-        const rowW = inRow * MEMBER_W + (inRow - 1) * MEMBER_GAP_X;
-        const startX = x + (group.w - rowW) / 2;
-
-        members.push({
-          id: node.id,
-          node,
-          groupId: groupIdOf(group.layer),
-          layer: group.layer,
-          x: startX + col * (MEMBER_W + MEMBER_GAP_X),
-          y: y + GROUP_HEADER + GROUP_PAD_Y + row_ * (MEMBER_H + MEMBER_GAP_Y),
-          w: MEMBER_W,
-          h: MEMBER_H,
-        });
-      });
-
-      x += group.w + GROUP_GAP_X;
+  // Tier 1 — the machines.
+  if (serverNodes.length > 0) {
+    let sx = centreX - serverRowW / 2;
+    for (const node of serverNodes) {
+      servers.push({ id: node.id, node, x: sx, y, w: SERVER_W, h: SERVER_H });
+      sx += SERVER_W + SERVER_GAP;
     }
+    y += SERVER_H + TIER_GAP;
+  }
 
-    y += rowHeight + GROUP_GAP_Y;
+  const placeGroup = (
+    g: {
+      layer: string;
+      members: TopologyNode[];
+      perRow: number;
+      w: number;
+      h: number;
+    },
+    x: number,
+    top: number,
+  ) => {
+    const status =
+      RANKED_STATUS.find((s) => g.members.some((m) => m.status === s)) ??
+      "healthy";
+    groups.push({
+      id: groupIdOf(g.layer),
+      layer: g.layer,
+      label: layerLabel(g.layer),
+      count: g.members.length,
+      status,
+      ready: g.members.reduce((n, m) => n + m.ready, 0),
+      desired: g.members.reduce((n, m) => n + m.desired, 0),
+      x,
+      y: top,
+      w: g.w,
+      h: g.h,
+    });
+    g.members.forEach((node, i) => {
+      const col = i % g.perRow;
+      const row = Math.floor(i / g.perRow);
+      // The last row is centred, so a trailing box never hangs off the left edge alone.
+      const inRow = Math.min(g.perRow, g.members.length - row * g.perRow);
+      const rowW = inRow * MEMBER_W + (inRow - 1) * MEMBER_GAP_X;
+      members.push({
+        id: node.id,
+        node,
+        groupId: groupIdOf(g.layer),
+        layer: g.layer,
+        x: x + (g.w - rowW) / 2 + col * (MEMBER_W + MEMBER_GAP_X),
+        y: top + GROUP_HEADER + GROUP_PAD_Y + row * (MEMBER_H + MEMBER_GAP_Y),
+        w: MEMBER_W,
+        h: MEMBER_H,
+      });
+    });
+  };
+
+  // Tier 2 — the network edge, on its own row directly under the machines.
+  if (networkSized) {
+    placeGroup(networkSized, centreX - networkSized.w / 2, y);
+    y += networkSized.h + TIER_GAP;
+  }
+
+  // Tier 3+ — everything the platform carries, two containers abreast.
+  gridRows.forEach((row, i) => {
+    let x = centreX - gridRowWidths[i] / 2;
+    for (const g of row) {
+      placeGroup(g, x, y);
+      x += g.w + GROUP_GAP_X;
+    }
+    y += Math.max(...row.map((g) => g.h)) + GROUP_GAP_Y;
   });
 
   const boxOf = new Map<
@@ -223,75 +289,53 @@ export function layoutGrouped(
   >();
   for (const g of groups) boxOf.set(g.id, g);
   for (const m of members) boxOf.set(m.id, m);
+  for (const sv of servers) boxOf.set(sv.id, sv);
+  if (entry) boxOf.set(ENTRY_ID, entry);
 
   const layerOf = new Map(nodes.map((n) => [n.id, n.layer]));
-  const groupFor = new Map(nodes.map((n) => [n.id, groupIdOf(n.layer)]));
+  const groupFor = new Map(
+    nodes.map((n) => [n.id, n.layer === "compute" ? n.id : groupIdOf(n.layer)]),
+  );
+
+  // Traffic reaching the edge is real and worth drawing, but it is context rather than inventory, so
+  // it hangs off the marker rather than off a component that claims to have been measured.
+  const edgeTarget =
+    networkNodes.find((n) => n.id === "cloudflare") ?? networkNodes[0];
+  const entryEdges = edgeTarget
+    ? [{ source: ENTRY_ID, target: edgeTarget.id, kind: "traffic" }]
+    : [];
+
+  const coarse = aggregate(edges, groupFor, layerOf);
+  if (edgeTarget)
+    coarse.push({
+      id: `${ENTRY_ID} ${groupIdOf("network")}`,
+      source: ENTRY_ID,
+      target: groupIdOf("network"),
+      kind: "traffic",
+      layer: "network",
+      weight: 1,
+    });
 
   return {
+    entry,
+    servers,
     groups,
     members,
-    groupEdges: route(aggregate(edges, groupFor, layerOf), boxOf),
+    groupEdges: route(coarse, boxOf),
     memberEdges: route(
-      edges.map((e) => ({
+      [...edges, ...entryEdges].map((e) => ({
         id: `${e.source}->${e.target}`,
         source: e.source,
         target: e.target,
         kind: e.kind,
-        layer: layerOf.get(e.source) ?? "platform",
+        layer: layerOf.get(e.source) ?? "network",
         weight: 1,
       })),
       boxOf,
     ),
-    width: widest + PAD * 2,
+    width: contentW + PAD * 2,
     height: y - GROUP_GAP_Y + PAD,
   };
-}
-
-/** Ranks the layers against each other, so containers still read top to bottom by dependency. */
-function rankLayers(
-  present: string[],
-  nodes: TopologyNode[],
-  edges: { source: string; target: string }[],
-): Map<string, number> {
-  const layerOf = new Map(nodes.map((n) => [n.id, n.layer]));
-  const outgoing = new Map<string, Set<string>>(
-    present.map((l) => [l, new Set<string>()]),
-  );
-  const indegree = new Map<string, number>(present.map((l) => [l, 0]));
-
-  const seen = new Set<string>();
-  for (const e of edges) {
-    const from = layerOf.get(e.source);
-    const to = layerOf.get(e.target);
-    if (!from || !to || from === to) continue;
-    const key = `${from} ${to}`;
-    if (seen.has(key)) continue;
-    // A pair that feeds both ways would be a cycle; the first direction seen wins the ordering.
-    if (seen.has(`${to} ${from}`)) continue;
-    seen.add(key);
-    outgoing.get(from)!.add(to);
-    indegree.set(to, (indegree.get(to) ?? 0) + 1);
-  }
-
-  const rank = new Map(present.map((l) => [l, 0]));
-  const queue = present.filter((l) => indegree.get(l) === 0);
-  const pending = new Map(indegree);
-  const visited: string[] = [];
-  while (queue.length > 0) {
-    const l = queue.shift()!;
-    visited.push(l);
-    for (const next of outgoing.get(l) ?? []) {
-      const left = (pending.get(next) ?? 0) - 1;
-      pending.set(next, left);
-      if (left === 0) queue.push(next);
-    }
-  }
-  for (const l of present) if (!visited.includes(l)) visited.push(l);
-  for (const l of visited)
-    for (const next of outgoing.get(l) ?? [])
-      rank.set(next, Math.max(rank.get(next) ?? 0, (rank.get(l) ?? 0) + 1));
-
-  return rank;
 }
 
 /** Rolls component links up to their containers, merging duplicates and two-way pairs. */

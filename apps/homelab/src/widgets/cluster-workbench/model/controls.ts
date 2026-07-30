@@ -13,6 +13,16 @@ const withCache = (r: LiveRunView, on: boolean): LiveRunView => ({
   telemetry: { ...r.telemetry, cacheActive: on },
 });
 
+/**
+ * What one k6 generator offers, per second.
+ *
+ * Must match `LoadModel.RequestsPerSecondPerGenerator` in the API and `rate:` in the homelab repo's
+ * Composition — those two are the contract every capacity goal is written against. This was left at
+ * 500 when the platform dropped to 400, so the dial promised 2000/s at full tilt, the drill goals
+ * were scored against 1600/s, and the number in the panel snapped down a poll later.
+ */
+const OFFERED_PER_GENERATOR = 400;
+
 // Continuous dials. The action id carries the exact value ("scale-4"); the API bounds it to the same
 // range the XRD enforces, so a slider can never ask for something the platform would not allow.
 export const SLIDERS = [
@@ -52,7 +62,7 @@ export const SLIDERS = [
     // Offered load, not achieved load: the generators run an open-loop script at a fixed arrival
     // rate, so this dial is how much traffic ARRIVES. Whether it gets served is the exercise.
     label: "Offered load",
-    hint: "Each generator offers a fixed 500 requests a second whether or not the stack can serve them. The shortfall is what a capacity drill is scored on.",
+    hint: `Each generator offers a fixed ${OFFERED_PER_GENERATOR} requests a second whether or not the stack can serve them. The shortfall is what a capacity drill is scored on.`,
     min: 0,
     max: 4,
     prefix: "load-",
@@ -61,9 +71,10 @@ export const SLIDERS = [
       ...r,
       loadGenerators: n,
       loadEnabled: n > 0,
-      offeredRequestsPerSec: n * 500,
+      offeredRequestsPerSec: n * OFFERED_PER_GENERATOR,
     }),
-    unit: (n: number) => (n === 0 ? "no traffic" : `${n * 500}/s offered`),
+    unit: (n: number) =>
+      n === 0 ? "no traffic" : `${n * OFFERED_PER_GENERATOR}/s offered`,
   },
 ] as const;
 

@@ -44,3 +44,16 @@ export const SCALABLE: ServiceId[] = [
   "redis",
   "envoy",
 ];
+
+/**
+ * The tiers the Worker pool control actually schedules — the only ones whose placement is a fact
+ * about an operator decision.
+ *
+ * Nothing else in the run carries a nodeSelector, so the gateway, the generators, Postgres and Redis
+ * land wherever the scheduler puts them: a three-replica gateway routinely comes up with one pod on
+ * infra and two on apps. Labelling those pods with a pool read as a category the operator had chosen
+ * and could change, when there is no control that moves them and the migration drills say outright
+ * that the gateway does not move between pools. Where an unpinned tier happens to land is the
+ * scheduler's business, so the graph no longer reports it as a category.
+ */
+export const POOLED: readonly ServiceId[] = ["checkout", "checkout-canary"];
