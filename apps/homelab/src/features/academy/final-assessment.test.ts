@@ -73,6 +73,34 @@ describe("the assessment launch", () => {
   });
 });
 
+describe("the assessment's progress is the API's to record", () => {
+  it("records opening a cluster assignment against the account", () => {
+    // Without this the API only ever hears about a capstone that was solved, so an attempt someone
+    // walked away from leaves no trace and the overview's resume state is unreachable.
+    const source = read(CAPSTONE);
+    expect(source).toContain("markStarted(unitId)");
+  });
+
+  it("never completes a cluster unit from the browser", () => {
+    // A solved capstone is written by the run broker from measured telemetry. The page refreshes
+    // and reads back what the server recorded; it does not report the solve itself.
+    const source = read(CAPSTONE);
+    expect(source).toContain("onAssignmentResolved={academy.refresh}");
+    expect(source).not.toContain("markComplete");
+  });
+
+  it("reads the standing from recorded progress rather than from the run", () => {
+    const source = read(PAGE);
+    expect(source).toContain("useAcademyProgress(course)");
+    expect(source).toContain("assessmentStanding(course, progress, state)");
+    // Nothing on this page may read the cluster: it renders before one exists. Checked as code
+    // rather than as prose — the file's own comment says it renders no telemetry.
+    expect(source).not.toMatch(/from\s+["']@\/shared\/api\/live-client/);
+    expect(source).not.toMatch(/\brun\.\w+/);
+    expect(source).not.toMatch(/\btelemetry\./);
+  });
+});
+
 describe("the assessment stays practice", () => {
   const surfaces = [ROUTE, PAGE, MODEL, COURSE_PATH, CAPSTONE];
 

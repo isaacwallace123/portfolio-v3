@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { ArrowLeft, Loader2, Lock, TriangleAlert } from "lucide-react";
 import ClusterWorkbench from "@/widgets/cluster-workbench";
@@ -62,6 +63,30 @@ export function AcademyCapstone({
 }) {
   const academy = useAcademyProgress(course);
 
+  const open =
+    !academy.loading &&
+    (assessment
+      ? assessmentUnlocked(course, academy.progress)
+      : segment !== null &&
+        capstoneUnlocked(
+          segment,
+          academy.progress,
+          academy.unlocked.has(segment.id),
+        ));
+  const unitId = assessment
+    ? assessmentUnitId(drillId)
+    : drillUnitId(segment?.id ?? "", drillId);
+
+  // Opening a cluster assignment is recorded against the account, the same way opening a lesson is.
+  // Without it the API only ever hears about a capstone that was solved, so an attempt someone
+  // walked away from leaves no trace and "resume" has nothing to resume from. It records that the
+  // unit was opened and nothing else — completing it still belongs to the run broker, which is the
+  // only thing that has measured the cluster.
+  const { markStarted } = academy;
+  useEffect(() => {
+    if (open) markStarted(unitId);
+  }, [open, unitId, markStarted]);
+
   if (academy.loading)
     return (
       <div className={styles.shell}>
@@ -72,17 +97,6 @@ export function AcademyCapstone({
       </div>
     );
 
-  const open = assessment
-    ? assessmentUnlocked(course, academy.progress)
-    : segment !== null &&
-      capstoneUnlocked(
-        segment,
-        academy.progress,
-        academy.unlocked.has(segment.id),
-      );
-  const unitId = assessment
-    ? assessmentUnitId(drillId)
-    : drillUnitId(segment?.id ?? "", drillId);
   const title = assessment
     ? course.finalAssessmentTitle
     : segment?.capstoneDrillId === drillId
