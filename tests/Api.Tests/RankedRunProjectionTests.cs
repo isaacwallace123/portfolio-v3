@@ -41,6 +41,22 @@ public sealed class RankedRunProjectionTests
     }
 
     [Fact]
+    public void InfrastructureVoidStopsTheRunAndRevealsTheAuditWithoutClaimingASolve()
+    {
+        var plan = Plan();
+        var resource = Resource(plan);
+        resource.Metadata.Annotations![RunBroker.DrillVoidedAnnotation] =
+            DateTime.UtcNow.ToString("O");
+
+        var view = RunView.From(resource);
+
+        Assert.False(view.DrillSolved);
+        Assert.True(view.DrillFailed);
+        Assert.Equal(RunBroker.InfrastructureVoidMove, view.DrillFailedMove);
+        Assert.NotNull(view.RankedDebrief);
+    }
+
+    [Fact]
     public void PublicTelemetryUsesNullForWithheldLiveValues()
     {
         var visibility = new RankedTelemetryVisibility(

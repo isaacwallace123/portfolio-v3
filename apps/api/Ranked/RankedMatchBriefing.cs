@@ -167,6 +167,8 @@ public static class RankedMoveCommands
             ["evacuate"] = "drain apps",
             ["move-apps"] = "drain infra",
             ["restore"] = "recover catalogue",
+            ["db-pool-8"] = "set database connections 8",
+            ["network-normal"] = "restore database network",
         };
 
     public static string For(string moveId) => Commands.GetValueOrDefault(moveId, "");

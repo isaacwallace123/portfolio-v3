@@ -9,6 +9,7 @@ public sealed class RankedCommandTests
     [InlineData("scale checkout 4", "scale-4", "apiReplicas", 4)]
     [InlineData(" SCALE   GATEWAY 3 ", "gateway-3", "gatewayReplicas", 3)]
     [InlineData("shift canary 0", "canary-0", "canaryReplicas", 0)]
+    [InlineData("set database connections 8", "db-pool-8", "dbMaxConns", 8)]
     public void NumericCommandsAreCanonicalAndBounded(
         string text,
         string actionId,
@@ -27,6 +28,7 @@ public sealed class RankedCommandTests
     [InlineData("rollback checkout", "release-stable", "releaseTrack", "stable")]
     [InlineData("recover catalogue", "data-recover", "dataState", "recovered")]
     [InlineData("drain apps", "move-infra", "targetPool", "infra")]
+    [InlineData("restore database network", "network-normal", "networkMode", "normal")]
     public void OperationalCommandsMapToKnownSpecFields(
         string text,
         string actionId,
@@ -43,6 +45,7 @@ public sealed class RankedCommandTests
     [InlineData("")]
     [InlineData("scale checkout 99")]
     [InlineData("shift canary -1")]
+    [InlineData("set database connections 17")]
     [InlineData("kubectl delete namespace production")]
     [InlineData("cat /etc/passwd")]
     public void ArbitraryOrOutOfRangeInputNeverBecomesAClusterPatch(string text)

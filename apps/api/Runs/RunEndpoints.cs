@@ -196,6 +196,8 @@ public static class RunEndpoints
             // each of them re-fetched the LabRun to find the namespace and separately listed pods
             // and metrics — five GETs of a run already in hand, twice the listings, every 1.2s.
             var frame = await broker.GetFrameAsync(resource, ct);
+            resource = await broker.VoidRankedInfrastructureFailureAsync(
+                resource, frame, OwnerName(ctx), ct);
             var telemetry = frame.Telemetry;
 
             // Judging the drill needs the run and its telemetry together, which is exactly what a
@@ -274,6 +276,18 @@ public static class RunEndpoints
                 runId, req.Command ?? "", Owner(ctx), ct);
             return result.Run is not null
                 ? Results.Ok(result.Run)
+                : Results.Json(new { error = result.Error }, statusCode: result.Status);
+        }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
+
+        // Investigations are allowlisted and read-only against the cluster, but use the write scope
+        // because each accepted read appends immutable evidence to the ranked attempt.
+        app.MapPost("/v1/ranked/{runId}/inspect", async (
+            string runId, RankedInspectionRequest req, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
+        {
+            var result = await broker.InspectRankedAsync(
+                runId, req.Query ?? "", Owner(ctx), ct);
+            return result.Inspection is not null
+                ? Results.Ok(result.Inspection)
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
@@ -375,5 +389,6 @@ public static class RunEndpoints
 record CreateRunRequest(string? ScenarioId);
 record DecisionRequest(string? DecisionId);
 record RankedCommandRequest(string? Command);
+record RankedInspectionRequest(string? Query);
 record DrillRequest(string? DrillId, string? Mode, string? LearningUnitId);
 record PracticeActionRequest(string? ActionId);

@@ -52,6 +52,8 @@ public sealed class LabRunSpec
     [JsonPropertyName("cacheReplicas")] public int? CacheReplicas { get; set; }
     [JsonPropertyName("releaseTrack")] public string? ReleaseTrack { get; set; }
     [JsonPropertyName("dataState")] public string? DataState { get; set; }
+    [JsonPropertyName("dbMaxConns")] public int? DbMaxConns { get; set; }
+    [JsonPropertyName("networkMode")] public string? NetworkMode { get; set; }
     [JsonPropertyName("targetPool")] public string? TargetPool { get; set; }
     [JsonPropertyName("loadReplicas")] public int? LoadReplicas { get; set; }
     // The Envoy gateway is a scalable tier: past roughly 2000 rps it, rather than the checkout tier
@@ -312,11 +314,17 @@ public sealed record RunView(
             : null;
         var solved = solvedAt is not null;
 
+        var voidedAt = drillId.Length > 0
+            ? ParseTime(annotations?.GetValueOrDefault(RunBroker.DrillVoidedAnnotation))
+            : null;
         var failedAt = drillId.Length > 0
             ? ParseTime(annotations?.GetValueOrDefault(RunBroker.DrillFailedAnnotation))
+                ?? voidedAt
             : null;
         var failed = failedAt is not null;
-        var failedMove = failed
+        var failedMove = voidedAt is not null
+            ? RunBroker.InfrastructureVoidMove
+            : failed
             ? annotations?.GetValueOrDefault(RunBroker.DrillFailedMoveAnnotation) ?? ""
             : "";
 

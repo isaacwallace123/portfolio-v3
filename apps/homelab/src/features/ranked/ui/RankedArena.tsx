@@ -16,20 +16,11 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   endDrill,
   rankedCommand,
-  type ClusterEvent,
+  rankedInspect,
   type LiveRunView,
-  type LiveTrace,
-  type RunComponent,
 } from "@/shared/api/live-client";
 import { clock } from "@/shared/lib/format";
-import {
-  COMMAND_HELP,
-  eventsOutput,
-  metricsOutput,
-  parseConsoleCommand,
-  podsOutput,
-  traceOutput,
-} from "../model/console";
+import { COMMAND_HELP, parseConsoleCommand } from "../model/console";
 import styles from "../ranked.module.css";
 
 type Act = (key: string, fn: () => Promise<LiveRunView | void>) => void;
@@ -45,21 +36,17 @@ const QUICK_READS = [
   "inspect metrics",
   "inspect events --warnings",
   "inspect pods",
+  "inspect logs checkout",
+  "inspect deployments",
   "trace latest",
 ] as const;
 
 export function RankedArena({
   run,
-  components,
-  events,
-  trace,
   busy,
   act,
 }: {
   run: LiveRunView;
-  components: RunComponent[];
-  events: ClusterEvent[];
-  trace: LiveTrace | null;
   busy: string | null;
   act: Act;
 }) {
@@ -132,26 +119,12 @@ export function RankedArena({
       case "help":
         append(raw.trim() || "help", [...COMMAND_HELP]);
         return;
-      case "metrics":
-        append(normalized, metricsOutput(run, components, parsed.service));
-        return;
-      case "events":
-        append(normalized, eventsOutput(events, parsed.warningsOnly));
-        return;
-      case "pods":
-        append(normalized, podsOutput(components, parsed.service));
-        return;
-      case "trace":
-        append(normalized, traceOutput(trace));
-        return;
-      case "history": {
-        const lines = run.rankedActions.map(
-          (action) => `${clock(action.acceptedAtMs)}  ${action.command}`,
-        );
-        append(
-          normalized,
-          lines.length > 0 ? lines : ["No mutations accepted yet."],
-        );
+      case "inspect": {
+        append(parsed.query, ["Reading measured cluster evidence…"], "system");
+        act(`inspect:${parsed.query}`, async () => {
+          const evidence = await rankedInspect(run.runId, parsed.query);
+          append(undefined, evidence.lines);
+        });
         return;
       }
       case "remote":
@@ -358,7 +331,7 @@ export function RankedArena({
             disabled={busy !== null}
           />
           <button type="submit" disabled={busy !== null || !input.trim()}>
-            {busy?.startsWith("command:") ? (
+            {busy?.startsWith("command:") || busy?.startsWith("inspect:") ? (
               <Loader2 size={12} className={styles.spin} />
             ) : (
               "Run"

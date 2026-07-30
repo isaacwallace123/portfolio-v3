@@ -333,14 +333,7 @@ export default function ClusterWorkbench({
                 drill.phase.kind === "failed" ? (
                   <RankedResult run={run} busy={busy} act={act} />
                 ) : (
-                  <RankedArena
-                    run={run}
-                    components={components}
-                    events={events}
-                    trace={trace}
-                    busy={busy}
-                    act={act}
-                  />
+                  <RankedArena run={run} busy={busy} act={act} />
                 )
               ) : (
                 <>

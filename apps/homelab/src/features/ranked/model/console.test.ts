@@ -2,12 +2,19 @@ import { describe, expect, it } from "vitest";
 import { parseConsoleCommand } from "./console";
 
 describe("ranked console command routing", () => {
-  it("keeps investigations local to the real polled snapshot", () => {
+  it("routes investigations through the server evidence audit", () => {
     expect(parseConsoleCommand("inspect events --warnings")).toEqual({
-      kind: "events",
-      warningsOnly: true,
+      kind: "inspect",
+      query: "inspect events --warnings",
     });
-    expect(parseConsoleCommand("trace latest")).toEqual({ kind: "trace" });
+    expect(parseConsoleCommand("trace latest")).toEqual({
+      kind: "inspect",
+      query: "trace latest",
+    });
+    expect(parseConsoleCommand("inspect logs checkout")).toEqual({
+      kind: "inspect",
+      query: "inspect logs checkout",
+    });
   });
 
   it("normalizes whitespace before sending mutations to the server allowlist", () => {

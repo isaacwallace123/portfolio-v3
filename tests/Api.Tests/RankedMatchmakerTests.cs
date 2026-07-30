@@ -90,6 +90,32 @@ public sealed class RankedMatchmakerTests
         Assert.Null(draw);
     }
 
+    [Fact]
+    public void AggregateFamilyCalibrationChangesBothDifficultyAndEloValue()
+    {
+        var seed = Seed(77, 1200);
+        var adjustments = RankedFaultModules.All
+            .Select(module => module.Family)
+            .Distinct(StringComparer.Ordinal)
+            .ToDictionary(family => family, _ => 100, StringComparer.Ordinal);
+
+        var draw = RankedMatchmaker.Draw(
+            1200,
+            [],
+            new HashSet<string>(StringComparer.Ordinal),
+            () => seed,
+            adjustments);
+
+        Assert.NotNull(draw);
+        Assert.Equal(1300, draw.Plan.Seed.PlayerRating);
+        Assert.Equal(1300, draw.Plan.ScenarioRating);
+        Assert.Equal(1300, RankedScenarioSeed.TryParseToken(
+            draw.Plan.DrillId,
+            out var reconstructed)
+                ? reconstructed!.PlayerRating
+                : 0);
+    }
+
     private static RankedScenarioSeed Seed(int value, int rating = 1200) =>
         new(value.ToString("x32"), RankedScenarioSeed.CurrentVersion, rating);
 }

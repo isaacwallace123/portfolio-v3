@@ -11,9 +11,11 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
     public DbSet<OperatorRating> OperatorRatings => Set<OperatorRating>();
     public DbSet<RatingLedgerEntry> RatingLedger => Set<RatingLedgerEntry>();
     public DbSet<RankedActionEntry> RankedActions => Set<RankedActionEntry>();
+    public DbSet<RankedEvidenceEntry> RankedEvidence => Set<RankedEvidenceEntry>();
     public DbSet<RankedTelemetrySample> RankedTelemetry => Set<RankedTelemetrySample>();
     public DbSet<RankedPerformanceRecord> RankedPerformance => Set<RankedPerformanceRecord>();
     public DbSet<RankedScenarioRecord> RankedScenarios => Set<RankedScenarioRecord>();
+    public DbSet<RankedCalibrationRecord> RankedCalibrations => Set<RankedCalibrationRecord>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -62,6 +64,9 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
             e.HasOne(a => a.Scenario)
                 .WithOne()
                 .HasForeignKey<RankedScenarioRecord>(scenario => scenario.AttemptId);
+            e.HasMany(a => a.Evidence)
+                .WithOne()
+                .HasForeignKey(evidence => evidence.AttemptId);
         });
 
         builder.Entity<OperatorRating>(e =>
@@ -97,6 +102,20 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
             e.HasIndex(a => a.OwnerKey);
         });
 
+        builder.Entity<RankedEvidenceEntry>(e =>
+        {
+            e.ToTable("RankedEvidence");
+            e.Property(item => item.Id).HasMaxLength(64);
+            e.Property(item => item.AttemptId).HasMaxLength(64);
+            e.Property(item => item.RunId).HasMaxLength(64);
+            e.Property(item => item.OwnerKey).HasMaxLength(64);
+            e.Property(item => item.Query).HasMaxLength(128);
+            e.Property(item => item.Kind).HasMaxLength(32);
+            e.Property(item => item.Summary).HasMaxLength(512);
+            e.HasIndex(item => new { item.AttemptId, item.ObservedUtc });
+            e.HasIndex(item => item.OwnerKey);
+        });
+
         builder.Entity<RankedTelemetrySample>(e =>
         {
             e.ToTable("RankedTelemetry");
@@ -128,6 +147,13 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
             e.Property(scenario => scenario.SeedId).HasMaxLength(32);
             e.HasIndex(scenario => new { scenario.OwnerKey, scenario.CreatedUtc });
             e.HasIndex(scenario => new { scenario.OwnerKey, scenario.SeedId }).IsUnique();
+        });
+
+        builder.Entity<RankedCalibrationRecord>(e =>
+        {
+            e.ToTable("RankedCalibrations");
+            e.HasKey(calibration => calibration.Family);
+            e.Property(calibration => calibration.Family).HasMaxLength(64);
         });
     }
 
@@ -236,6 +262,25 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
               CREATE INDEX IF NOT EXISTS "IX_RankedActions_OwnerKey"
                   ON "RankedActions" ("OwnerKey");
 
+              CREATE TABLE IF NOT EXISTS "RankedEvidence" (
+                  "Id" character varying(64) NOT NULL
+                      CONSTRAINT "PK_RankedEvidence" PRIMARY KEY,
+                  "AttemptId" character varying(64) NOT NULL,
+                  "RunId" character varying(64) NOT NULL,
+                  "OwnerKey" character varying(64) NOT NULL,
+                  "Query" character varying(128) NOT NULL,
+                  "Kind" character varying(32) NOT NULL,
+                  "Summary" character varying(512) NOT NULL,
+                  "Stage" integer NOT NULL,
+                  "ObservedUtc" timestamp with time zone NOT NULL,
+                  CONSTRAINT "FK_RankedEvidence_RankedAttempts_AttemptId"
+                      FOREIGN KEY ("AttemptId") REFERENCES "RankedAttempts" ("Id") ON DELETE CASCADE
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedEvidence_Attempt_Observed"
+                  ON "RankedEvidence" ("AttemptId", "ObservedUtc");
+              CREATE INDEX IF NOT EXISTS "IX_RankedEvidence_OwnerKey"
+                  ON "RankedEvidence" ("OwnerKey");
+
               CREATE TABLE IF NOT EXISTS "RankedTelemetry" (
                   "Id" character varying(64) NOT NULL CONSTRAINT "PK_RankedTelemetry" PRIMARY KEY,
                   "AttemptId" character varying(64) NOT NULL,
@@ -304,6 +349,14 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
                   ON "RankedScenarios" ("OwnerKey", "CreatedUtc");
               CREATE UNIQUE INDEX IF NOT EXISTS "IX_RankedScenarios_Owner_Seed"
                   ON "RankedScenarios" ("OwnerKey", "SeedId");
+
+              CREATE TABLE IF NOT EXISTS "RankedCalibrations" (
+                  "Family" character varying(64) NOT NULL
+                      CONSTRAINT "PK_RankedCalibrations" PRIMARY KEY,
+                  "RatedAttempts" integer NOT NULL,
+                  "Completions" integer NOT NULL,
+                  "UpdatedUtc" timestamp with time zone NOT NULL
+              );
               """
             : """
               CREATE TABLE IF NOT EXISTS "DrillResults" (
@@ -398,6 +451,24 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
               CREATE INDEX IF NOT EXISTS "IX_RankedActions_OwnerKey"
                   ON "RankedActions" ("OwnerKey");
 
+              CREATE TABLE IF NOT EXISTS "RankedEvidence" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_RankedEvidence" PRIMARY KEY,
+                  "AttemptId" TEXT NOT NULL,
+                  "RunId" TEXT NOT NULL,
+                  "OwnerKey" TEXT NOT NULL,
+                  "Query" TEXT NOT NULL,
+                  "Kind" TEXT NOT NULL,
+                  "Summary" TEXT NOT NULL,
+                  "Stage" INTEGER NOT NULL,
+                  "ObservedUtc" TEXT NOT NULL,
+                  CONSTRAINT "FK_RankedEvidence_RankedAttempts_AttemptId"
+                      FOREIGN KEY ("AttemptId") REFERENCES "RankedAttempts" ("Id") ON DELETE CASCADE
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedEvidence_Attempt_Observed"
+                  ON "RankedEvidence" ("AttemptId", "ObservedUtc");
+              CREATE INDEX IF NOT EXISTS "IX_RankedEvidence_OwnerKey"
+                  ON "RankedEvidence" ("OwnerKey");
+
               CREATE TABLE IF NOT EXISTS "RankedTelemetry" (
                   "Id" TEXT NOT NULL CONSTRAINT "PK_RankedTelemetry" PRIMARY KEY,
                   "AttemptId" TEXT NOT NULL,
@@ -464,6 +535,13 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
                   ON "RankedScenarios" ("OwnerKey", "CreatedUtc");
               CREATE UNIQUE INDEX IF NOT EXISTS "IX_RankedScenarios_Owner_Seed"
                   ON "RankedScenarios" ("OwnerKey", "SeedId");
+
+              CREATE TABLE IF NOT EXISTS "RankedCalibrations" (
+                  "Family" TEXT NOT NULL CONSTRAINT "PK_RankedCalibrations" PRIMARY KEY,
+                  "RatedAttempts" INTEGER NOT NULL,
+                  "Completions" INTEGER NOT NULL,
+                  "UpdatedUtc" TEXT NOT NULL
+              );
               """, ct);
     }
 }

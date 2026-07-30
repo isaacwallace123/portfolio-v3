@@ -25,6 +25,7 @@ public sealed class RankedAttempt
     public int PostRating { get; set; }
     public RankedPerformanceRecord? Performance { get; set; }
     public RankedScenarioRecord? Scenario { get; set; }
+    public List<RankedEvidenceEntry> Evidence { get; set; } = [];
 }
 
 public sealed class OperatorRating
@@ -69,4 +70,18 @@ public sealed class RankedActionEntry
     public string ActionId { get; set; } = "";
     public int Stage { get; set; }
     public DateTime AcceptedUtc { get; set; }
+}
+
+/// <summary>Append-only evidence audit for investigations performed during a rated attempt.</summary>
+public sealed class RankedEvidenceEntry
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string AttemptId { get; set; } = "";
+    public string RunId { get; set; } = "";
+    public string OwnerKey { get; set; } = "";
+    public string Query { get; set; } = "";
+    public string Kind { get; set; } = "";
+    public string Summary { get; set; } = "";
+    public int Stage { get; set; }
+    public DateTime ObservedUtc { get; set; }
 }

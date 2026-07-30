@@ -208,6 +208,27 @@ export async function rankedCommand(
   return asJson(res);
 }
 
+export interface RankedInspectionResult {
+  id: string;
+  query: string;
+  kind: string;
+  stage: number;
+  observedUtc: string;
+  lines: string[];
+}
+
+export async function rankedInspect(
+  runId: string,
+  query: string,
+): Promise<RankedInspectionResult> {
+  const res = await fetch(`/api/live/ranked/${runId}/inspect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  return asJson(res);
+}
+
 /** One drill in the catalog, with what the field has actually done on it. */
 export interface DrillCatalogEntry {
   id: string;
@@ -343,6 +364,8 @@ export interface RankedMatchDebrief {
     cacheEnabled: boolean;
     releaseTrack: string;
     dataState: string;
+    dbMaxConns: number;
+    networkMode: string;
     targetPool: string;
     loadGenerators: number;
   };
@@ -370,6 +393,16 @@ export interface RankedAttempt {
   performance: RankedPerformance | null;
   briefing: RankedMatchBriefing | null;
   debrief: RankedMatchDebrief | null;
+  evidence: RankedEvidence[];
+}
+
+export interface RankedEvidence {
+  id: string;
+  query: string;
+  kind: string;
+  summary: string;
+  stage: number;
+  observedUtc: string;
 }
 
 export interface RankedProfile {

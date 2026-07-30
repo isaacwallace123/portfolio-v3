@@ -104,4 +104,16 @@ public sealed class RankedRulesTests
         Assert.True(controlled.Delta > reckless.Delta);
         Assert.True(reckless.Delta > 0);
     }
+
+    [Fact]
+    public void AggregateCalibrationIsSmoothedBoundedAndDirectional()
+    {
+        Assert.Equal(0, RankedRules.CalibrationAdjustment(0, 0));
+        Assert.Equal(-180, RankedRules.CalibrationAdjustment(100, 100));
+        Assert.Equal(180, RankedRules.CalibrationAdjustment(100, 0));
+        Assert.InRange(
+            RankedRules.CalibrationAdjustment(10_000, 10_000),
+            -RankedRules.MaximumCalibrationAdjustment,
+            RankedRules.MaximumCalibrationAdjustment);
+    }
 }

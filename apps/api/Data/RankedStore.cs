@@ -24,7 +24,8 @@ public sealed record RankedAttemptView(
     int PostRating,
     RankedPerformanceView? Performance,
     RankedMatchBriefing? Briefing,
-    RankedMatchDebrief? Debrief);
+    RankedMatchDebrief? Debrief,
+    IReadOnlyList<RankedEvidenceView> Evidence);
 
 public sealed record RankedPerformanceView(
     int QualityScore,
@@ -64,7 +65,8 @@ public sealed record RankedTelemetryObservation(
 public sealed record RankedDrawContext(
     int Rating,
     IReadOnlySet<string> PlayedSeedIds,
-    IReadOnlyList<string> RecentFamilies);
+    IReadOnlyList<string> RecentFamilies,
+    IReadOnlyDictionary<string, int> FamilyAdjustments);
 
 public sealed record RankedProfileView(
     int Rating,
@@ -102,6 +104,14 @@ public sealed record RankedActionView(
     string ActionId,
     int Stage,
     DateTime AcceptedUtc);
+
+public sealed record RankedEvidenceView(
+    string Id,
+    string Query,
+    string Kind,
+    string Summary,
+    int Stage,
+    DateTime ObservedUtc);
 
 /// <summary>
 /// The transactional boundary for competitive results. A final attempt, its rating mutation, and
@@ -190,6 +200,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             var attempt = await db.RankedAttempts
                 .Include(candidate => candidate.Performance)
                 .Include(candidate => candidate.Scenario)
+                .Include(candidate => candidate.Evidence)
                 .SingleOrDefaultAsync(a => a.Id == attemptId && a.OwnerKey == owner, ct);
             if (attempt is null) return null;
             if (attempt.Outcome != RankedOutcomes.Active) return View(attempt);
@@ -286,6 +297,25 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
                     AfterRating = result.After,
                     CreatedUtc = now,
                 });
+
+                if (attempt.Scenario is not null)
+                {
+                    var families =
+                        JsonSerializer.Deserialize<string[]>(attempt.Scenario.FamiliesJson) ?? [];
+                    foreach (var family in families.Distinct(StringComparer.Ordinal))
+                    {
+                        var calibration = await db.RankedCalibrations
+                            .SingleOrDefaultAsync(candidate => candidate.Family == family, ct);
+                        if (calibration is null)
+                        {
+                            calibration = new RankedCalibrationRecord { Family = family };
+                            db.RankedCalibrations.Add(calibration);
+                        }
+                        calibration.RatedAttempts += 1;
+                        if (outcome == RankedOutcomes.Completed) calibration.Completions += 1;
+                        calibration.UpdatedUtc = now;
+                    }
+                }
             }
             else
             {
@@ -316,6 +346,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             .AsNoTracking()
             .Include(candidate => candidate.Performance)
             .Include(candidate => candidate.Scenario)
+            .Include(candidate => candidate.Evidence)
             .SingleOrDefaultAsync(a => a.Id == attemptId && a.OwnerKey == owner, ct);
         return attempt is null ? null : View(attempt);
     }
@@ -329,6 +360,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             .AsNoTracking()
             .Include(candidate => candidate.Performance)
             .Include(candidate => candidate.Scenario)
+            .Include(candidate => candidate.Evidence)
             .Where(a =>
                 a.RunId == runId &&
                 a.OwnerKey == owner &&
@@ -346,6 +378,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             .AsNoTracking()
             .Include(candidate => candidate.Performance)
             .Include(candidate => candidate.Scenario)
+            .Include(candidate => candidate.Evidence)
             .Where(a => a.OwnerKey == owner && a.Outcome == RankedOutcomes.Active)
             .OrderByDescending(a => a.StartedUtc)
             .FirstOrDefaultAsync(ct);
@@ -468,6 +501,68 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
         }
     }
 
+    public async Task<RankedEvidenceView?> RecordEvidenceAsync(
+        string id,
+        string attemptId,
+        string runId,
+        string owner,
+        string query,
+        string kind,
+        string summary,
+        int stage,
+        DateTime observedUtc,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(id) ||
+            string.IsNullOrWhiteSpace(attemptId) ||
+            string.IsNullOrWhiteSpace(owner))
+            return null;
+
+        var attemptExists = await db.RankedAttempts
+            .AsNoTracking()
+            .AnyAsync(
+                attempt =>
+                    attempt.Id == attemptId &&
+                    attempt.RunId == runId &&
+                    attempt.OwnerKey == owner &&
+                    attempt.Outcome == RankedOutcomes.Active,
+                ct);
+        if (!attemptExists) return null;
+
+        var existing = await db.RankedEvidence
+            .AsNoTracking()
+            .SingleOrDefaultAsync(evidence => evidence.Id == id, ct);
+        if (existing is not null) return View(existing);
+
+        var item = new RankedEvidenceEntry
+        {
+            Id = id[..Math.Min(id.Length, 64)],
+            AttemptId = attemptId,
+            RunId = runId,
+            OwnerKey = owner,
+            Query = query[..Math.Min(query.Length, 128)],
+            Kind = kind[..Math.Min(kind.Length, 32)],
+            Summary = summary[..Math.Min(summary.Length, 512)],
+            Stage = Math.Max(1, stage),
+            ObservedUtc = Utc(observedUtc),
+        };
+        db.RankedEvidence.Add(item);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return View(item);
+        }
+        catch (DbUpdateException ex)
+        {
+            log.LogDebug(ex, "Ranked evidence {EvidenceId} was already recorded.", id);
+            db.ChangeTracker.Clear();
+            existing = await db.RankedEvidence
+                .AsNoTracking()
+                .SingleOrDefaultAsync(evidence => evidence.Id == item.Id, ct);
+            return existing is null ? null : View(existing);
+        }
+    }
+
     public async Task<IReadOnlyList<RankedActionView>> ActionsForAttemptAsync(
         string attemptId,
         string owner,
@@ -507,6 +602,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             .AsNoTracking()
             .Include(attempt => attempt.Performance)
             .Include(attempt => attempt.Scenario)
+            .Include(attempt => attempt.Evidence)
             .Where(a => a.OwnerKey == owner)
             .OrderByDescending(a => a.StartedUtc)
             .Take(12)
@@ -548,11 +644,21 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
                 JsonSerializer.Deserialize<string[]>(scenario.FamiliesJson) ?? [])
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+        var calibrations = await db.RankedCalibrations
+            .AsNoTracking()
+            .ToDictionaryAsync(
+                calibration => calibration.Family,
+                calibration => RankedRules.CalibrationAdjustment(
+                    calibration.RatedAttempts,
+                    calibration.Completions),
+                StringComparer.Ordinal,
+                ct);
 
         return new RankedDrawContext(
             rating?.Rating ?? RankedRules.InitialRating,
             scenarios.Select(scenario => scenario.SeedId).ToHashSet(StringComparer.Ordinal),
-            recentFamilies);
+            recentFamilies,
+            calibrations);
     }
 
     public async Task<IReadOnlyList<RankedStandingView>> LeaderboardAsync(
@@ -623,7 +729,20 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
                 : null,
             attempt.Outcome != RankedOutcomes.Active && ReadPlan(attempt) is { } debriefPlan
                 ? RankedMatchDebrief.From(debriefPlan)
-                : null);
+                : null,
+            attempt.Evidence
+                .OrderBy(evidence => evidence.ObservedUtc)
+                .Select(View)
+                .ToArray());
+
+    private static RankedEvidenceView View(RankedEvidenceEntry evidence) =>
+        new(
+            evidence.Id,
+            evidence.Query,
+            evidence.Kind,
+            evidence.Summary,
+            evidence.Stage,
+            evidence.ObservedUtc);
 
     private static RankedPerformanceView View(RankedPerformanceRecord performance) =>
         new(

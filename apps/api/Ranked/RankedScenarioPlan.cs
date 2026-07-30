@@ -100,6 +100,8 @@ public sealed record RankedInitialState(
     bool CacheEnabled,
     string ReleaseTrack,
     string DataState,
+    int DbMaxConns,
+    string NetworkMode,
     string TargetPool,
     int LoadGenerators);
 

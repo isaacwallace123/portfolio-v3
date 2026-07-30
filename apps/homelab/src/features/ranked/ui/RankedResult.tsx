@@ -8,6 +8,7 @@ import {
   Gauge,
   Loader2,
   RotateCcw,
+  Search,
   ShieldX,
   Timer,
   Trophy,
@@ -91,11 +92,15 @@ export function RankedResult({
   }, [run.drillId]);
 
   const settled = attempt && attempt.outcome !== "active";
+  const voided =
+    attempt?.outcome === "void" ||
+    run.drillFailedMove === "infrastructure-void";
   const delta = settled ? attempt.ratingDelta : null;
   const failed = run.drillOptions.find(
     (option) => option.id === run.drillFailedMove,
   );
   const debrief = attempt?.debrief ?? run.rankedDebrief;
+  const evidence = attempt?.evidence ?? [];
 
   return (
     <div className={`${styles.result} ${won ? "" : styles.lost}`}>
@@ -103,9 +108,15 @@ export function RankedResult({
         {won ? <Trophy size={27} /> : <ShieldX size={27} />}
       </span>
       <p className={styles.resultEyebrow}>
-        {won ? "Incident contained" : "Attempt ended"}
+        {won
+          ? "Incident contained"
+          : voided
+            ? "Platform fault"
+            : "Attempt ended"}
       </p>
-      <h2>{won ? "Verified recovery" : "Attempt failed"}</h2>
+      <h2>
+        {won ? "Verified recovery" : voided ? "Match voided" : "Attempt failed"}
+      </h2>
       <p className={styles.resultScenario}>{run.drillTitle}</p>
 
       <div className={styles.ratingChange} aria-live="polite">
@@ -267,6 +278,26 @@ export function RankedResult({
         </section>
       )}
 
+      <section className={styles.evidenceCard}>
+        <header>
+          <span>
+            <Search size={11} /> Evidence consulted
+          </span>
+          <b>{evidence.length}</b>
+        </header>
+        {evidence.length === 0 ? (
+          <p>No audited investigation was recorded for this attempt.</p>
+        ) : (
+          evidence.map((item) => (
+            <div key={item.id}>
+              <span>Phase {item.stage}</span>
+              <code>{item.query}</code>
+              <p>{item.summary}</p>
+            </div>
+          ))
+        )}
+      </section>
+
       <div className={styles.actionLog}>
         <header>
           <span>Operational timeline</span>
@@ -322,7 +353,9 @@ export function RankedResult({
       <p className={styles.resultNote}>
         {won
           ? "The measured objective held through verification. Rating rewards that result; official time stays a separate speed record."
-          : "The cluster stayed measurable after every action, so the timeline remains available for review before resetting."}
+          : voided
+            ? "Required cluster substrate stayed unavailable beyond the platform grace window. The match is preserved for audit and your ELO is unchanged."
+            : "The cluster stayed measurable after every action, so the timeline remains available for review before resetting."}
       </p>
 
       <button

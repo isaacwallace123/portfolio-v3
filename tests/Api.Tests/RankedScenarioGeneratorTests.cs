@@ -38,6 +38,29 @@ public sealed class RankedScenarioGeneratorTests
     }
 
     [Fact]
+    public void EveryAuditedModuleIsReachableAndColdStartRollsTheRealWorkload()
+    {
+        var plans = Enumerable.Range(1, 512)
+            .Select(index => RankedScenarioGenerator.Generate(Seed(index, 1000)))
+            .ToArray();
+        var reached = plans
+            .SelectMany(plan => plan.Faults)
+            .Select(fault => fault.ModuleId)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Subset(
+            reached,
+            RankedFaultModules.All.Select(module => module.Id).ToHashSet(StringComparer.Ordinal));
+        var coldStart = RankedFaultModules.Module("cold-start-storm");
+        Assert.Equal(1, coldStart.Setup["apiReplicas"]);
+        Assert.Equal(
+            ScenarioDefinitions.FreshRestartToken,
+            coldStart.Setup["restartToken"]);
+        Assert.Contains(coldStart.Correct, move => move.Id == "scale");
+        Assert.Contains(coldStart.Correct, move => move.Id == "cache");
+    }
+
+    [Fact]
     public void DifficultyNeverFallsAsRatingRisesForTheSameSeed()
     {
         var scores = new[] { 800, 1000, 1100, 1300, 1400, 1600, 1800 }

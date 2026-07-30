@@ -79,6 +79,27 @@ public sealed record RankedCommand(
             return true;
         }
 
+        if (words is ["set", "database", "connections", var connections] &&
+            Bounded(connections, 1, 16, out var dbMaxConns))
+        {
+            command = Change(
+                $"set database connections {dbMaxConns}",
+                $"db-pool-{dbMaxConns}",
+                "dbMaxConns",
+                dbMaxConns);
+            return true;
+        }
+
+        if (words is ["restore", "database", "network"])
+        {
+            command = Change(
+                "restore database network",
+                "network-normal",
+                "networkMode",
+                "normal");
+            return true;
+        }
+
         if (words is ["drain", "apps"])
         {
             command = Change("drain apps", "move-infra", "targetPool", "infra");
@@ -104,6 +125,8 @@ public sealed record RankedCommand(
             ["scale", "checkout", _] => "Checkout replicas must be between 1 and 6.",
             ["scale", "gateway", _] => "Gateway replicas must be between 1 and 3.",
             ["shift", "canary", _] => "Canary replicas must be between 0 and 3.",
+            ["set", "database", "connections", _] =>
+                "Database connections must be between 1 and 16.",
             _ => "Command is not in the ranked operator allowlist.",
         };
         return false;

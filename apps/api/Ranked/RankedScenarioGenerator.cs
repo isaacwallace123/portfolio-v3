@@ -110,6 +110,8 @@ public static class RankedScenarioGenerator
             CacheEnabled: cacheOn,
             ReleaseTrack: "stable",
             DataState: "healthy",
+            DbMaxConns: 8,
+            NetworkMode: "normal",
             TargetPool: "apps",
             LoadGenerators: primaryLoad.Generators);
 
@@ -188,6 +190,8 @@ public static class RankedScenarioGenerator
             ["cacheReplicas"] = initial.CacheEnabled ? 1 : 0,
             ["releaseTrack"] = initial.ReleaseTrack,
             ["dataState"] = initial.DataState,
+            ["dbMaxConns"] = initial.DbMaxConns,
+            ["networkMode"] = initial.NetworkMode,
             ["targetPool"] = initial.TargetPool,
             ["loadReplicas"] = load.Generators,
         };
@@ -376,6 +380,7 @@ public static class RankedScenarioGenerator
             $"{initial.CheckoutReplicas} checkout replica(s) behind {initial.GatewayReplicas} " +
             $"gateway replica(s), response cache {(initial.CacheEnabled ? "on" : "off")}, " +
             $"{initial.ReleaseTrack} release, catalogue {initial.DataState}, " +
+            $"database pool {initial.DbMaxConns}, network {initial.NetworkMode}, " +
             $"{initial.TargetPool} worker pool, {initial.LoadGenerators} load generator(s) offering " +
             $"{LoadModel.Offered(initial.LoadGenerators)} requests a second.");
 

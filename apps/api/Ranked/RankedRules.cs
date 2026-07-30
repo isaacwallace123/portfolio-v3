@@ -40,6 +40,8 @@ public static class RankedRules
     public const int PlacementGames = 5;
     public const int ScenarioVersion = 1;
     public const int MinimumAbandonmentLoss = 12;
+    public const int CalibrationPriorAttempts = 10;
+    public const int MaximumCalibrationAdjustment = 200;
 
     private static readonly IReadOnlyDictionary<string, int> ScenarioRatings =
         new Dictionary<string, int>(StringComparer.Ordinal)
@@ -68,6 +70,27 @@ public static class RankedRules
         // A very large rating gap should never make a game literally worthless or maximally
         // destructive. The clamp also ensures a decided match always moves the visible rating.
         return Math.Clamp(raw, 0.05, 0.95);
+    }
+
+    /// <summary>
+    /// Converts aggregate completion rate into a bounded difficulty correction. A ten-match
+    /// even-money prior prevents one early result from swinging the queue; every ten rating points
+    /// are then encoded in the generated seed, so the incident and its ELO value stay reproducible.
+    /// Easy families move below the operator's rating and pay less, while hard families move above.
+    /// </summary>
+    public static int CalibrationAdjustment(int ratedAttempts, int completions)
+    {
+        ratedAttempts = Math.Max(0, ratedAttempts);
+        completions = Math.Clamp(completions, 0, ratedAttempts);
+        var smoothedCompletion =
+            (completions + CalibrationPriorAttempts / 2.0) /
+            (ratedAttempts + CalibrationPriorAttempts);
+        var raw = (0.5 - smoothedCompletion) * 400;
+        var bounded = Math.Clamp(
+            raw,
+            -MaximumCalibrationAdjustment,
+            MaximumCalibrationAdjustment);
+        return (int)Math.Round(bounded / 10, MidpointRounding.AwayFromZero) * 10;
     }
 
     public static RatingResult Calculate(

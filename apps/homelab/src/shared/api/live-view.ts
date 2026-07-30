@@ -35,7 +35,7 @@ export interface RealRun {
   cacheEnabled: boolean;
   releaseTrack?: "stable" | "candidate";
   dataState?: "healthy" | "degraded" | "recovered";
-  targetPool?: "apps" | "infra";
+  targetPool?: "apps" | "infra" | "unavailable";
   loadEnabled?: boolean;
   loadGenerators?: number;
   canaryReplicas?: number;
@@ -114,7 +114,7 @@ export interface LiveRunView extends RunView {
   memoryMiB: number | null;
   releaseTrack: "stable" | "candidate";
   dataState: "healthy" | "degraded" | "recovered";
-  targetPool: "apps" | "infra";
+  targetPool: "apps" | "infra" | "unavailable";
   loadEnabled: boolean;
   /** How many k6 generators are running — the load-intensity dial. */
   loadGenerators: number;

@@ -10,6 +10,66 @@ namespace IsaacWallace.Api.Tests;
 public sealed class RankedStoreTests
 {
     [Fact]
+    public async Task EvidenceIsAppendOnlyOwnerScopedAndIncludedInTheAttempt()
+    {
+        await using var fixture = await RankedFixture.CreateAsync();
+        var attempt = await fixture.Store.BeginAsync(
+            "run-hl-evidence1",
+            "cascade-scale-release",
+            "owner-evidence",
+            "Ada",
+            DateTime.UtcNow,
+            CancellationToken.None);
+        var observed = new DateTime(2026, 7, 30, 2, 0, 0, DateTimeKind.Utc);
+
+        var rejected = await fixture.Store.RecordEvidenceAsync(
+            "evidence-wrong-owner",
+            attempt.Id,
+            attempt.RunId,
+            "owner-other",
+            "inspect pods",
+            "pods",
+            "checkout/checkout-1 ready",
+            1,
+            observed,
+            CancellationToken.None);
+        var saved = await fixture.Store.RecordEvidenceAsync(
+            "evidence-1",
+            attempt.Id,
+            attempt.RunId,
+            "owner-evidence",
+            "inspect pods checkout",
+            "pods",
+            "checkout/checkout-1 ready",
+            1,
+            observed,
+            CancellationToken.None);
+        var duplicate = await fixture.Store.RecordEvidenceAsync(
+            "evidence-1",
+            attempt.Id,
+            attempt.RunId,
+            "owner-evidence",
+            "inspect metrics",
+            "metrics",
+            "this duplicate must not overwrite the original",
+            2,
+            observed.AddMinutes(1),
+            CancellationToken.None);
+
+        Assert.Null(rejected);
+        Assert.NotNull(saved);
+        Assert.Equal(saved, duplicate);
+
+        var profile = await fixture.Store.ProfileAsync(
+            "owner-evidence", CancellationToken.None);
+        var evidence = Assert.Single(profile.RecentAttempts.Single().Evidence);
+        Assert.Equal("inspect pods checkout", evidence.Query);
+        Assert.Equal("pods", evidence.Kind);
+        Assert.Equal("checkout/checkout-1 ready", evidence.Summary);
+        Assert.Equal(1, await fixture.Db.RankedEvidence.CountAsync());
+    }
+
+    [Fact]
     public async Task FinalizationMutatesRatingAndLedgerExactlyOnce()
     {
         await using var fixture = await RankedFixture.CreateAsync();
@@ -384,6 +444,61 @@ public sealed class RankedStoreTests
         Assert.Equal(
             plan.Faults.Select(fault => fault.ModuleId).OrderBy(id => id),
             settled.Debrief.Faults.Select(fault => fault.ModuleId).OrderBy(id => id));
+    }
+
+    [Fact]
+    public async Task RatedGeneratedResultsRecalibrateFamiliesExactlyOnce()
+    {
+        await using var fixture = await RankedFixture.CreateAsync();
+        var started = DateTime.UtcNow.AddMinutes(-1);
+        var plan = RankedScenarioGenerator.Generate(
+            new RankedScenarioSeed(
+                1618.ToString("x32"),
+                RankedScenarioSeed.CurrentVersion,
+                RankedRules.InitialRating));
+        var attempt = await fixture.Store.BeginAsync(
+            "run-hl-calibrate1",
+            plan.DrillId,
+            "owner-calibrate",
+            "Katherine",
+            started,
+            CancellationToken.None);
+        await RecordControlledRecoveryAsync(
+            fixture.Store, attempt, "owner-calibrate", started);
+
+        await fixture.Store.FinalizeAsync(
+            attempt.Id,
+            "owner-calibrate",
+            RankedOutcomes.Completed,
+            30_000,
+            plan.Phases.Count,
+            "",
+            "Katherine",
+            CancellationToken.None);
+        await fixture.Store.FinalizeAsync(
+            attempt.Id,
+            "owner-calibrate",
+            RankedOutcomes.Completed,
+            30_000,
+            plan.Phases.Count,
+            "",
+            "Katherine",
+            CancellationToken.None);
+
+        var rows = await fixture.Db.RankedCalibrations
+            .OrderBy(row => row.Family)
+            .ToListAsync();
+        Assert.Equal(plan.FamilyList.Count, rows.Count);
+        Assert.All(rows, row =>
+        {
+            Assert.Equal(1, row.RatedAttempts);
+            Assert.Equal(1, row.Completions);
+        });
+        var context = await fixture.Store.DrawContextAsync(
+            "owner-calibrate", CancellationToken.None);
+        Assert.All(
+            plan.FamilyList,
+            family => Assert.True(context.FamilyAdjustments[family] < 0));
     }
 
     [Fact]

@@ -16,3 +16,15 @@ public sealed class RankedScenarioRecord
     public string FamiliesJson { get; set; } = "[]";
     public DateTime CreatedUtc { get; set; }
 }
+
+/// <summary>
+/// Aggregate live calibration for one generated fault family. It contains no operator identity:
+/// matchmaking learns only whether the field is beating this family, never who supplied a result.
+/// </summary>
+public sealed class RankedCalibrationRecord
+{
+    public string Family { get; set; } = "";
+    public int RatedAttempts { get; set; }
+    public int Completions { get; set; }
+    public DateTime UpdatedUtc { get; set; }
+}

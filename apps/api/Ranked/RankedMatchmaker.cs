@@ -18,7 +18,8 @@ public static class RankedMatchmaker
         int playerRating,
         IEnumerable<string> recentFamilies,
         IReadOnlySet<string> playedSeedIds,
-        Func<RankedScenarioSeed>? seedSource = null)
+        Func<RankedScenarioSeed>? seedSource = null,
+        IReadOnlyDictionary<string, int>? calibrationAdjustments = null)
     {
         var excluded = recentFamilies
             .Where(family => !string.IsNullOrWhiteSpace(family))
@@ -37,15 +38,27 @@ public static class RankedMatchmaker
                 considered++;
                 if (playedSeedIds.Contains(seed.SeedId)) continue;
 
-                RankedScenarioPlan plan;
+                RankedScenarioPlan baseline;
                 try
                 {
-                    plan = RankedScenarioGenerator.Generate(seed);
+                    baseline = RankedScenarioGenerator.Generate(seed);
                 }
                 catch (ArgumentException)
                 {
                     continue;
                 }
+
+                var adjustment = baseline.FamilyList
+                    .Select(family =>
+                        calibrationAdjustments?.GetValueOrDefault(family) ?? 0)
+                    .DefaultIfEmpty(0)
+                    .Average();
+                var calibratedRating = RankedScenarioSeed.Quantize(
+                    (int)Math.Round(playerRating + adjustment));
+                var calibratedSeed = seed with { PlayerRating = calibratedRating };
+                var plan = calibratedRating == seed.PlayerRating
+                    ? baseline
+                    : RankedScenarioGenerator.Generate(calibratedSeed);
 
                 if (relaxed == 0 && plan.Families.Any(excluded.Contains)) continue;
                 return new RankedDraw(plan, considered, relaxed > 0);

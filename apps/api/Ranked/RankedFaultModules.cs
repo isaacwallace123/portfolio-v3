@@ -61,12 +61,14 @@ public static class RankedFaultModules
     public const string CanaryFamily = "canary";
     public const string DataFamily = "data";
     public const string PlacementFamily = "placement";
+    public const string StartupFamily = "startup";
+    public const string NetworkFamily = "network";
 
     private static IReadOnlyDictionary<string, object> Spec(params (string Key, object Value)[] pairs) =>
         pairs.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
 
     /// <summary>
-    /// The audited catalog. Seven modules over seven families, which is what the platform can
+    /// The audited catalog. Eleven modules over nine families, which is what the platform can
     /// currently produce honestly — the ladder's variety comes from how they are combined, timed,
     /// instrumented, and scored, not from a longer list of prose.
     /// </summary>
@@ -91,6 +93,25 @@ public static class RankedFaultModules
             MinGenerators: 2, MaxGenerators: 4,
             RequiresCache: null,
             IncompatibleWith: []),
+
+        // ── A rollout that removes warm capacity while demand is already arriving ───────────────
+        new RankedFaultModule(
+            "cold-start-storm",
+            StartupFamily,
+            "Cold-start storm",
+            "Checkout pods are rolling while the live queue grows faster than the warm fleet.",
+            "The checkout tier was restarted with only one replica under peak demand. Kubernetes is "
+            + "really replacing the pod, while the remaining warm capacity cannot drain the arriving "
+            + "queue. Adding replicas or making requests cheaper restores headroom as the rollout converges.",
+            Spec(Checkout(1), Restart),
+            [],
+            [ScaleOut, CacheOn],
+            [Shrink],
+            MinCheckout: 1, MaxCheckout: 6,
+            MinGenerators: 3, MaxGenerators: 4,
+            RequiresCache: null,
+            // A one-replica rollout removes the backend headroom a gateway-only incident depends on.
+            IncompatibleWith: ["gateway-saturation"]),
 
         // ── Saturation of the front door ─────────────────────────────────────────────────────
         new RankedFaultModule(
@@ -193,6 +214,23 @@ public static class RankedFaultModules
             RequiresCache: null,
             IncompatibleWith: []),
 
+        new RankedFaultModule(
+            "scheduling-failure",
+            PlacementFamily,
+            "Checkout pods cannot schedule",
+            "The desired checkout fleet exists, but its pods remain Pending with no eligible node.",
+            "The checkout Deployment targets a deliberately unavailable worker label. Kubernetes "
+            + "really refuses to schedule those pods; moving the workload to the infra pool gives "
+            + "the scheduler an eligible node and restores the request path.",
+            Spec(Pool("unavailable")),
+            [OnPool("infra")],
+            [Evacuate],
+            [Shrink],
+            MinCheckout: 2, MaxCheckout: 5,
+            MinGenerators: 1, MaxGenerators: 4,
+            RequiresCache: null,
+            IncompatibleWith: []),
+
         // ── The data tier ────────────────────────────────────────────────────────────────────
         // Postgres is the only stateful dependency the platform exposes a fault dial for, and
         // `dataState` is that dial: the catalogue rows the workload reads become unreadable, and
@@ -214,6 +252,40 @@ public static class RankedFaultModules
             MinCheckout: 2, MaxCheckout: 6,
             MinGenerators: 1, MaxGenerators: 3,
             RequiresCache: null,
+            IncompatibleWith: []),
+
+        new RankedFaultModule(
+            "database-connection-exhaustion",
+            DataFamily,
+            "Database connection pool exhausted",
+            "Postgres spans are queuing while application CPU and the database remain available.",
+            "Each checkout pod was constrained to one real pgx connection. Concurrent requests are "
+            + "serialized waiting for a lease before their query can run, so restoring the bounded "
+            + "eight-connection pool removes the queue without inventing application capacity.",
+            Spec(DatabaseConnections(1)),
+            [DatabaseConnectionsAtLeast(8)],
+            [RestoreDatabasePool],
+            [],
+            MinCheckout: 2, MaxCheckout: 6,
+            MinGenerators: 2, MaxGenerators: 4,
+            RequiresCache: false,
+            IncompatibleWith: []),
+
+        new RankedFaultModule(
+            "database-network-policy",
+            NetworkFamily,
+            "Database egress policy removed",
+            "Checkout is ready but its Postgres calls cannot reach the database service.",
+            "The scenario's real NetworkPolicy no longer allows checkout pods to send traffic to "
+            + "Postgres. The workloads remain present and measurable; restoring the allowlisted "
+            + "database path removes the transport failure.",
+            Spec(Network("db-blocked")),
+            [NetworkIs("normal")],
+            [RestoreDatabaseNetwork],
+            [],
+            MinCheckout: 2, MaxCheckout: 6,
+            MinGenerators: 1, MaxGenerators: 4,
+            RequiresCache: false,
             IncompatibleWith: []),
     ];
 
