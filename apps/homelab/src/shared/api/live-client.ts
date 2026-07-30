@@ -196,6 +196,39 @@ export async function practiceAction(
   return asJson(res);
 }
 
+export async function rankedCommand(
+  runId: string,
+  command: string,
+): Promise<LiveRunView> {
+  const res = await fetch(`/api/live/ranked/${runId}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command }),
+  });
+  return asJson(res);
+}
+
+export interface RankedInspectionResult {
+  id: string;
+  query: string;
+  kind: string;
+  stage: number;
+  observedUtc: string;
+  lines: string[];
+}
+
+export async function rankedInspect(
+  runId: string,
+  query: string,
+): Promise<RankedInspectionResult> {
+  const res = await fetch(`/api/live/ranked/${runId}/inspect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  return asJson(res);
+}
+
 /** One drill in the catalog, with what the field has actually done on it. */
 export interface DrillCatalogEntry {
   id: string;
@@ -237,12 +270,109 @@ export interface LeaderboardEntry {
 }
 
 export interface LeaderboardView {
-  overall: LeaderboardEntry[];
-  byDrill: { drillId: string; title: string; entries: LeaderboardEntry[] }[];
+  entries: LeaderboardEntry[];
 }
 
 export type RankedOutcome =
   "active" | "completed" | "failed" | "forfeited" | "expired" | "void";
+
+export interface RankedPerformance {
+  qualityScore: number;
+  ratingScore: number;
+  sloHealthScore: number;
+  objectiveHealthScore: number;
+  actionScore: number;
+  containmentScore: number;
+  targetedActions: number;
+  harmfulActions: number;
+  unnecessaryActions: number;
+  redundantActions: number;
+  convergenceViolations: number;
+  sampleCount: number;
+  peakP95LatencyMs: number;
+  peakErrorRatePct: number;
+  minimumServedRatioPct: number;
+  verificationSeconds: number;
+  band: string;
+}
+
+export interface RankedTelemetryVisibility {
+  throughput: boolean;
+  latency: boolean;
+  errors: boolean;
+  state: boolean;
+}
+
+export interface RankedMatchBriefing {
+  seedCommitment: string;
+  generatorVersion: number;
+  scenarioRating: number;
+  difficulty: string;
+  environment: string;
+  objective: string;
+  openingObjective: string;
+  constraints: string[];
+  offeredRequestsPerSec: number;
+  parSeconds: number;
+  verificationHoldSeconds: number;
+  telemetryNotice: string;
+  telemetry: RankedTelemetryVisibility;
+}
+
+export interface RankedFaultReveal {
+  moduleId: string;
+  family: string;
+  label: string;
+  diagnosis: string;
+  phase: number;
+  activationDelaySeconds: number;
+  wasHidden: boolean;
+  resolvedBy: string[];
+}
+
+export interface RankedDebriefPhase {
+  number: number;
+  id: string;
+  title: string;
+  objective: string;
+  handoff: string;
+  offeredRequestsPerSec: number;
+  objectives: {
+    p95CeilingMs: number;
+    errorCeilingPct: number;
+    servedShare: number;
+    holdSeconds: number;
+  };
+  activationDelaySeconds: number;
+  wasHidden: boolean;
+}
+
+export interface RankedMatchDebrief {
+  seedId: string;
+  generatorVersion: number;
+  scenarioRating: number;
+  difficulty: string;
+  difficultyScore: number;
+  environment: string;
+  objective: string;
+  parSeconds: number;
+  verificationHoldSeconds: number;
+  initial: {
+    checkoutReplicas: number;
+    canaryReplicas: number;
+    gatewayReplicas: number;
+    cacheEnabled: boolean;
+    releaseTrack: string;
+    dataState: string;
+    dbMaxConns: number;
+    networkMode: string;
+    targetPool: string;
+    loadGenerators: number;
+  };
+  telemetry: RankedTelemetryVisibility;
+  faults: RankedFaultReveal[];
+  phases: RankedDebriefPhase[];
+}
 
 export interface RankedAttempt {
   id: string;
@@ -260,6 +390,19 @@ export interface RankedAttempt {
   expectedScore: number;
   ratingDelta: number;
   postRating: number;
+  performance: RankedPerformance | null;
+  briefing: RankedMatchBriefing | null;
+  debrief: RankedMatchDebrief | null;
+  evidence: RankedEvidence[];
+}
+
+export interface RankedEvidence {
+  id: string;
+  query: string;
+  kind: string;
+  summary: string;
+  stage: number;
+  observedUtc: string;
 }
 
 export interface RankedProfile {
@@ -292,12 +435,22 @@ export interface RankedStanding {
   currentStreak: number;
 }
 
+export interface RankedActionAudit {
+  id: string;
+  attemptId: string;
+  runId: string;
+  command: string;
+  actionId: string;
+  stage: number;
+  acceptedUtc: string;
+}
+
 export async function fetchDrills(): Promise<DrillCatalog> {
   const res = await fetch("/api/live/drills", { cache: "no-store" });
   return asJson(res);
 }
 
-export async function fetchLeaderboard(): Promise<LeaderboardView> {
+export async function fetchTimeStandings(): Promise<LeaderboardView> {
   const res = await fetch("/api/live/leaderboard", { cache: "no-store" });
   return asJson(res);
 }
@@ -313,6 +466,19 @@ export async function fetchRankedStandings(): Promise<RankedStanding[]> {
   });
   const body = await asJson<{ standings: RankedStanding[] }>(res);
   return body.standings;
+}
+
+export async function fetchRankedActions(
+  attemptId: string,
+): Promise<RankedActionAudit[]> {
+  const res = await fetch(`/api/live/ranked/attempts/${attemptId}/actions`, {
+    cache: "no-store",
+  });
+  const body = await asJson<{
+    attemptId: string;
+    actions: RankedActionAudit[];
+  }>(res);
+  return body.actions;
 }
 
 // A drill runs ON the provisioned cluster: it sets an objective and clock and unlocks decisions

@@ -69,6 +69,27 @@ export {
   unlockedSegments,
 } from "./model/unlocks";
 
+export type {
+  AssessmentRule,
+  AssessmentStage,
+  AssessmentStanding,
+  BlueprintRow,
+  CertificateStanding,
+  OutstandingSegment,
+} from "./model/assessment";
+export {
+  ASSESSMENT_HREF,
+  ASSESSMENT_RULES,
+  assessmentBlueprint,
+  assessmentDrillHref,
+  assessmentSkills,
+  assessmentStanding,
+  BLUEPRINT_CAVEAT,
+  certificateStanding,
+  outstandingWork,
+  standingAnnouncement,
+} from "./model/assessment";
+
 export {
   allAnswered,
   checkProblems,
@@ -86,6 +107,7 @@ export { Certificate, CertificateView } from "./ui/CertificateView";
 export { CertificateVerify } from "./ui/CertificateVerify";
 export { CourseMap } from "./ui/CourseMap";
 export { CoursePath } from "./ui/CoursePath";
+export { FinalAssessment } from "./ui/FinalAssessment";
 export { LessonView } from "./ui/LessonView";
 export { SegmentOverview } from "./ui/SegmentOverview";
 export { SkillProfile } from "./ui/SkillProfile";

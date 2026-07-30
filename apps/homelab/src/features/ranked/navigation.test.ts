@@ -24,6 +24,9 @@ describe("the unified Ranked destination", () => {
     const result = read("features/ranked/ui/RankedResult.tsx");
     expect(result).toContain('href="/ranked#standings"');
     expect(result).not.toContain('href="/leaderboard"');
+    expect(result).toContain("Operational quality");
+    expect(result).toContain("SLO health");
+    expect(result).toContain("Official time is excluded from this score.");
   });
 
   it("uses the lobby until a ranked incident becomes active", () => {
@@ -32,5 +35,17 @@ describe("the unified Ranked destination", () => {
       'surface === "ranked" && (!run || run.drillId.length === 0)',
     );
     expect(workbench).toContain("<RankedHub");
+  });
+
+  it("defaults to one ELO ladder with a secondary time switch", () => {
+    const hub = read("widgets/leaderboard/ui/RankedHub.tsx");
+    expect(hub).toContain('useState<BoardMode>("elo")');
+    expect(hub).toContain("> ELO");
+    expect(hub).toContain("> Time");
+    expect(hub).toContain("<RatingBoard");
+    expect(hub).toContain("<TimeBoard");
+    expect(hub).not.toContain("<Podium");
+    expect(hub).not.toContain("<BoardTable");
+    expect(hub).not.toContain("byDrill");
   });
 });

@@ -1,10 +1,12 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { ArrowLeft, Loader2, Lock, TriangleAlert } from "lucide-react";
 import ClusterWorkbench from "@/widgets/cluster-workbench";
 import type { LearningCourse, LearningSegment } from "../model/course";
 import { assessmentUnitId, drillUnitId, SKILL_LABELS } from "../model/course";
+import { ASSESSMENT_HREF, assessmentSkills } from "../model/assessment";
 import {
   assessmentLockReason,
   assessmentUnlocked,
@@ -61,6 +63,30 @@ export function AcademyCapstone({
 }) {
   const academy = useAcademyProgress(course);
 
+  const open =
+    !academy.loading &&
+    (assessment
+      ? assessmentUnlocked(course, academy.progress)
+      : segment !== null &&
+        capstoneUnlocked(
+          segment,
+          academy.progress,
+          academy.unlocked.has(segment.id),
+        ));
+  const unitId = assessment
+    ? assessmentUnitId(drillId)
+    : drillUnitId(segment?.id ?? "", drillId);
+
+  // Opening a cluster assignment is recorded against the account, the same way opening a lesson is.
+  // Without it the API only ever hears about a capstone that was solved, so an attempt someone
+  // walked away from leaves no trace and "resume" has nothing to resume from. It records that the
+  // unit was opened and nothing else — completing it still belongs to the run broker, which is the
+  // only thing that has measured the cluster.
+  const { markStarted } = academy;
+  useEffect(() => {
+    if (open) markStarted(unitId);
+  }, [open, unitId, markStarted]);
+
   if (academy.loading)
     return (
       <div className={styles.shell}>
@@ -71,17 +97,6 @@ export function AcademyCapstone({
       </div>
     );
 
-  const open = assessment
-    ? assessmentUnlocked(course, academy.progress)
-    : segment !== null &&
-      capstoneUnlocked(
-        segment,
-        academy.progress,
-        academy.unlocked.has(segment.id),
-      );
-  const unitId = assessment
-    ? assessmentUnitId(drillId)
-    : drillUnitId(segment?.id ?? "", drillId);
   const title = assessment
     ? course.finalAssessmentTitle
     : segment?.capstoneDrillId === drillId
@@ -111,12 +126,12 @@ export function AcademyCapstone({
             className={styles.secondary}
             href={
               assessment
-                ? `/practice/path/${course.id}`
+                ? ASSESSMENT_HREF
                 : `/practice/segment/${segment?.id ?? ""}`
             }
           >
             <ArrowLeft size={14} aria-hidden />
-            Return to coursework
+            {assessment ? "What the assessment needs" : "Return to coursework"}
           </Link>
         </div>
       </div>
@@ -142,9 +157,16 @@ export function AcademyCapstone({
           // callouts because it is what the certificate rests on; it is still the same cluster,
           // a wrong action still continues, and the full explanation still arrives afterwards.
           presentation: assessment ? "assessment" : "guided",
-          skills: segment ? [SKILL_LABELS[segment.domain]] : [],
+          // A segment drill assesses one domain. The final assessment belongs to no segment and
+          // draws on all seven — it used to pass an empty list, which read as "this assesses
+          // nothing" on the one unit that assesses everything.
+          skills: assessment
+            ? assessmentSkills(course)
+            : segment
+              ? [SKILL_LABELS[segment.domain]]
+              : [],
           returnHref: assessment
-            ? `/practice/path/${course.id}`
+            ? ASSESSMENT_HREF
             : `/practice/segment/${segment?.id ?? ""}`,
           nextUp: nextUpFor(course, segment, assessment),
         }}

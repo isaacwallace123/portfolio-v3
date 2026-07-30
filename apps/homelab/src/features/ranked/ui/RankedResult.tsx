@@ -8,6 +8,7 @@ import {
   Gauge,
   Loader2,
   RotateCcw,
+  Search,
   ShieldX,
   Timer,
   Trophy,
@@ -91,10 +92,15 @@ export function RankedResult({
   }, [run.drillId]);
 
   const settled = attempt && attempt.outcome !== "active";
+  const voided =
+    attempt?.outcome === "void" ||
+    run.drillFailedMove === "infrastructure-void";
   const delta = settled ? attempt.ratingDelta : null;
   const failed = run.drillOptions.find(
     (option) => option.id === run.drillFailedMove,
   );
+  const debrief = attempt?.debrief ?? run.rankedDebrief;
+  const evidence = attempt?.evidence ?? [];
 
   return (
     <div className={`${styles.result} ${won ? "" : styles.lost}`}>
@@ -102,9 +108,15 @@ export function RankedResult({
         {won ? <Trophy size={27} /> : <ShieldX size={27} />}
       </span>
       <p className={styles.resultEyebrow}>
-        {won ? "Incident contained" : "Attempt ended"}
+        {won
+          ? "Incident contained"
+          : voided
+            ? "Platform fault"
+            : "Attempt ended"}
       </p>
-      <h2>{won ? "Clean recovery" : "Wrong call"}</h2>
+      <h2>
+        {won ? "Verified recovery" : voided ? "Match voided" : "Attempt failed"}
+      </h2>
       <p className={styles.resultScenario}>{run.drillTitle}</p>
 
       <div className={styles.ratingChange} aria-live="polite">
@@ -174,17 +186,150 @@ export function RankedResult({
         </div>
       </div>
 
-      {won && scenario && (
+      {settled && attempt.performance && (
+        <section className={styles.performanceCard}>
+          <header>
+            <span>Operational quality</span>
+            <b>
+              {attempt.performance.qualityScore}/100 ·{" "}
+              {attempt.performance.band}
+            </b>
+          </header>
+          <div className={styles.performanceGrid}>
+            <div>
+              <span>SLO health</span>
+              <b>{attempt.performance.sloHealthScore}%</b>
+            </div>
+            <div>
+              <span>Objective control</span>
+              <b>{attempt.performance.objectiveHealthScore}%</b>
+            </div>
+            <div>
+              <span>Action discipline</span>
+              <b>{attempt.performance.actionScore}%</b>
+            </div>
+            <div>
+              <span>Containment</span>
+              <b>{attempt.performance.containmentScore}%</b>
+            </div>
+          </div>
+          <div className={styles.performanceAudit}>
+            <span>
+              <b>{attempt.performance.targetedActions}</b> targeted
+            </span>
+            <span>
+              <b>{attempt.performance.harmfulActions}</b> harmful
+            </span>
+            <span>
+              <b>{attempt.performance.unnecessaryActions}</b> unnecessary
+            </span>
+            <span>
+              <b>{attempt.performance.redundantActions}</b> repeated
+            </span>
+            <span>
+              <b>{attempt.performance.convergenceViolations}</b> before converge
+            </span>
+          </div>
+          <p>
+            Peak {Math.round(attempt.performance.peakP95LatencyMs)}ms p95 ·{" "}
+            {attempt.performance.peakErrorRatePct.toFixed(1)}% errors ·{" "}
+            {attempt.performance.sampleCount} measured windows
+          </p>
+          <small>
+            Rating result {Math.round(attempt.performance.ratingScore * 100)}%.
+            Official time is excluded from this score.
+          </small>
+        </section>
+      )}
+
+      {debrief && (
+        <section className={styles.debriefCard}>
+          <header>
+            <div>
+              <span>Generated incident debrief</span>
+              <b>
+                Seed {debrief.seedId.slice(0, 12)} · generator v
+                {debrief.generatorVersion}
+              </b>
+            </div>
+            <strong>{debrief.difficultyScore.toFixed(1)} difficulty</strong>
+          </header>
+          <div className={styles.faultGrid}>
+            {debrief.faults.map((fault) => (
+              <article key={`${fault.phase}-${fault.moduleId}`}>
+                <span>
+                  Phase {fault.phase}
+                  {fault.wasHidden ? " · hidden escalation" : ""}
+                  {fault.activationDelaySeconds > 0
+                    ? ` · +${fault.activationDelaySeconds}s`
+                    : ""}
+                </span>
+                <h3>{fault.label}</h3>
+                <p>{fault.diagnosis}</p>
+                <small>
+                  Resolved by{" "}
+                  {fault.resolvedBy.length > 0
+                    ? fault.resolvedBy.join(" or ")
+                    : "measured state convergence"}
+                </small>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className={styles.evidenceCard}>
+        <header>
+          <span>
+            <Search size={11} /> Evidence consulted
+          </span>
+          <b>{evidence.length}</b>
+        </header>
+        {evidence.length === 0 ? (
+          <p>No audited investigation was recorded for this attempt.</p>
+        ) : (
+          evidence.map((item) => (
+            <div key={item.id}>
+              <span>Phase {item.stage}</span>
+              <code>{item.query}</code>
+              <p>{item.summary}</p>
+            </div>
+          ))
+        )}
+      </section>
+
+      <div className={styles.actionLog}>
+        <header>
+          <span>Operational timeline</span>
+          <b>{run.rankedActions.length}</b>
+        </header>
+        {run.rankedActions.length === 0 ? (
+          <p>No operator mutations were recorded.</p>
+        ) : (
+          run.rankedActions.map((action) => (
+            <div key={action.id}>
+              <time>{clock(action.acceptedAtMs)}</time>
+              <code>{action.command}</code>
+            </div>
+          ))
+        )}
+      </div>
+
+      {won && (scenario || run.rankedBriefing) && (
         <div className={styles.speedCompare}>
           <span>
-            <Timer size={10} /> par {clock(scenario.parSeconds * 1000)}
+            <Timer size={10} /> par{" "}
+            {clock(
+              (scenario?.parSeconds ?? run.rankedBriefing?.parSeconds ?? 0) *
+                1000,
+            )}
           </span>
-          {scenario.averageMs > 0 && (
+          {(scenario?.averageMs ?? 0) > 0 && (
             <span>
-              <Gauge size={10} /> field {clock(scenario.averageMs)}
+              <Gauge size={10} /> field {clock(scenario?.averageMs ?? 0)}
             </span>
           )}
-          {scenario.yourBestMs && (
+          {scenario?.yourBestMs && (
             <span
               className={
                 attempt?.elapsedMs === scenario.yourBestMs
@@ -207,8 +352,10 @@ export function RankedResult({
 
       <p className={styles.resultNote}>
         {won
-          ? "Your rating rewards the result. Your time records how efficiently you got there."
-          : "The action was applied to the live cluster, so you can still inspect its impact before resetting."}
+          ? "The measured objective held through verification. Rating rewards that result; official time stays a separate speed record."
+          : voided
+            ? "Required cluster substrate stayed unavailable beyond the platform grace window. The match is preserved for audit and your ELO is unchanged."
+            : "The cluster stayed measurable after every action, so the timeline remains available for review before resetting."}
       </p>
 
       <button

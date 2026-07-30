@@ -29,6 +29,25 @@ public static class LearningEndpoints
     private static readonly Regex CertificateIdPattern = new(
         @"^hoc-[0-9a-f]{32}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    /// <summary>
+    /// Whether a client may report this unit as complete.
+    ///
+    /// Lessons and checkpoints are the learner's own work and the browser is the only thing that
+    /// knows they finished. A capstone and the final assessment are not: they become complete
+    /// because the run broker judged a real cluster from measured telemetry and wrote the row
+    /// itself. Accepting a client's word for either would make the certificate an assertion the
+    /// browser makes about itself, so it is refused outright rather than merely disbelieved.
+    ///
+    /// Named and public so the rule can be asserted directly — it is the single line standing
+    /// between "solved a cluster" and "said it solved a cluster".
+    /// </summary>
+    public static bool IsClientReportable(string unitId) =>
+        !unitId.StartsWith("drill:", StringComparison.Ordinal) &&
+        !unitId.StartsWith("assessment:", StringComparison.Ordinal);
+
+    public const string ClusterUnitRefusal =
+        "Cluster units are completed by the run broker after a measured solve.";
+
     private static string Owner(HttpContext ctx) =>
         ctx.Request.Headers[OwnerHeader].ToString().Trim();
 
@@ -126,11 +145,8 @@ public static class LearningEndpoints
             if (course is null) return Results.NotFound(new { error = "No such course." });
             if (!UnitIdPattern.IsMatch(unitId) || !course.Contains(unitId))
                 return Results.NotFound(new { error = "No such unit." });
-            if (unitId.StartsWith("drill:", StringComparison.Ordinal) ||
-                unitId.StartsWith("assessment:", StringComparison.Ordinal))
-                return Results.Json(
-                    new { error = "Cluster units are completed by the run broker after a measured solve." },
-                    statusCode: 409);
+            if (!IsClientReportable(unitId))
+                return Results.Json(new { error = ClusterUnitRefusal }, statusCode: 409);
 
             var presentation = req.Presentation is "guided" or "assisted" or "assessment"
                 ? req.Presentation

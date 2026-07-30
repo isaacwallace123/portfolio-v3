@@ -13,8 +13,7 @@ public sealed record DrillStat(
     long? YourBestMs,
     long? YourAverageMs);
 
-/// <summary>One operator's standing. On a per-drill board this is their best run of that drill; on
-/// the overall board it is their record across every ranked drill they have solved.</summary>
+/// <summary>One operator's time standing across successful ranked recoveries.</summary>
 public sealed record LeaderboardEntry(
     int Rank,
     string DisplayName,
@@ -25,14 +24,8 @@ public sealed record LeaderboardEntry(
     int Missteps,
     DateTime AchievedUtc);
 
-public sealed record DrillLeaderboard(
-    string DrillId,
-    string Title,
-    IReadOnlyList<LeaderboardEntry> Entries);
-
 public sealed record LeaderboardView(
-    IReadOnlyList<LeaderboardEntry> Overall,
-    IReadOnlyList<DrillLeaderboard> ByDrill);
+    IReadOnlyList<LeaderboardEntry> Entries);
 
 // Reads and writes drill results. The only component that knows how a time becomes a standing.
 public sealed class DrillResultStore(HomeOpsDbContext db, ILogger<DrillResultStore> log)
@@ -113,27 +106,21 @@ public sealed class DrillResultStore(HomeOpsDbContext db, ILogger<DrillResultSto
         }).ToArray();
     }
 
-    /// <summary>The board. Ranked drills only — a cascade cannot be finished by guessing, so a time
-    /// on one says something about the operator rather than about which drill they drew.
-    ///
-    /// An operator's standing on a drill is their BEST run of it, so practising a drill can only
-    /// improve a standing and never dilute it. The overall board ranks by how many different ranked
-    /// drills someone has solved first and by the average of those best times second: breadth beats
-    /// one memorised cascade, which is the behaviour worth rewarding on a site that exists to teach.</summary>
+    /// <summary>
+    /// The single time ladder. Each operator contributes their fastest verified recovery across the
+    /// rated pool; average personal-best time and scenario breadth remain supporting context.
+    /// </summary>
     public async Task<LeaderboardView> LeaderboardAsync(
         string owner,
-        IReadOnlyDictionary<string, string> rankedTitles,
         int limit,
         CancellationToken ct)
     {
-        var ids = rankedTitles.Keys.ToArray();
-
         // Materialised and aggregated in memory: picking each operator's best row per drill AND
         // carrying that row's own missteps and date is two levels of grouping, which is where LINQ
         // translation gets provider-specific. Ranked solves are a small set, and this keeps the
         // ranking rules readable — which matters more here than shaving a query.
         var rows = await db.DrillResults
-            .Where(r => r.Mode == "ranked" && ids.Contains(r.DrillId))
+            .Where(r => r.Mode == "ranked")
             .Select(r => new
             {
                 r.OwnerKey,
@@ -158,27 +145,7 @@ public sealed class DrillResultStore(HomeOpsDbContext db, ILogger<DrillResultSto
             .Select(g => g.OrderBy(r => r.ElapsedMs).ThenBy(r => r.Missteps).First())
             .ToArray();
 
-        var byDrill = rankedTitles.Select(pair => new DrillLeaderboard(
-            pair.Key,
-            pair.Value,
-            bests
-                .Where(b => b.DrillId == pair.Key)
-                .OrderBy(b => b.ElapsedMs)
-                .ThenBy(b => b.Missteps)
-                .Take(limit)
-                .Select((b, i) => new LeaderboardEntry(
-                    i + 1,
-                    names.GetValueOrDefault(b.OwnerKey, "operator"),
-                    b.OwnerKey == owner && owner.Length > 0,
-                    1,
-                    b.ElapsedMs,
-                    b.ElapsedMs,
-                    b.Missteps,
-                    b.CompletedUtc))
-                .ToArray()))
-            .ToArray();
-
-        var overall = bests
+        var entries = bests
             .GroupBy(b => b.OwnerKey, StringComparer.Ordinal)
             .Select(g => new
             {
@@ -189,8 +156,9 @@ public sealed class DrillResultStore(HomeOpsDbContext db, ILogger<DrillResultSto
                 Missteps = g.Sum(b => b.Missteps),
                 AchievedUtc = g.Max(b => b.CompletedUtc),
             })
-            .OrderByDescending(x => x.DrillsSolved)
+            .OrderBy(x => x.BestMs)
             .ThenBy(x => x.AverageMs)
+            .ThenByDescending(x => x.DrillsSolved)
             .Take(limit)
             .Select((x, i) => new LeaderboardEntry(
                 i + 1,
@@ -203,6 +171,6 @@ public sealed class DrillResultStore(HomeOpsDbContext db, ILogger<DrillResultSto
                 x.AchievedUtc))
             .ToArray();
 
-        return new LeaderboardView(overall, byDrill);
+        return new LeaderboardView(entries);
     }
 }

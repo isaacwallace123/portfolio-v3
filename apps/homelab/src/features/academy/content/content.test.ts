@@ -234,6 +234,42 @@ describe("the server's course manifest", () => {
     expect(source).toContain(`"assessment:${course.finalAssessmentDrillId}"`);
   });
 
+  it("lists every optional drill the course points at", () => {
+    // Not cosmetic. The run broker refuses to start a drill whose Academy unit the manifest does
+    // not contain, so a mastery or supporting drill missing from this list is one a learner cannot
+    // launch at all — and the failure is a 409 at provisioning time, long after the page rendered
+    // a working-looking button.
+    for (const segment of course.segments) {
+      const optional = [
+        ...(segment.masteryDrillId ? [segment.masteryDrillId] : []),
+        ...segment.supportingDrillIds,
+      ];
+      for (const drillId of optional)
+        expect(source, `${segment.id} · ${drillId}`).toContain(
+          `"drill:${segment.id}:${drillId}"`,
+        );
+    }
+  });
+
+  it("names no optional drill the course does not point at", () => {
+    const declared = [
+      ...source.matchAll(/"drill:([a-z0-9-]+):([a-z0-9-]+)"/g),
+    ].map(([, segmentId, drillId]) => ({ segmentId, drillId }));
+    const known = new Set(
+      course.segments.flatMap((s) =>
+        [
+          ...(s.masteryDrillId ? [s.masteryDrillId] : []),
+          ...s.supportingDrillIds,
+        ].map((d) => `${s.id}:${d}`),
+      ),
+    );
+    for (const { segmentId, drillId } of declared)
+      expect(
+        known,
+        `manifest names unreachable drill ${segmentId}:${drillId}`,
+      ).toContain(`${segmentId}:${drillId}`);
+  });
+
   it("lists no lesson the course does not have", () => {
     const declared = [...source.matchAll(/^\s+"([a-z0-9-]+)",?$/gm)].map(
       (m) => m[1],

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
+using IsaacWallace.Api.Ranked;
 
 namespace IsaacWallace.Api.Runs;
 
@@ -51,6 +52,8 @@ public sealed class LabRunSpec
     [JsonPropertyName("cacheReplicas")] public int? CacheReplicas { get; set; }
     [JsonPropertyName("releaseTrack")] public string? ReleaseTrack { get; set; }
     [JsonPropertyName("dataState")] public string? DataState { get; set; }
+    [JsonPropertyName("dbMaxConns")] public int? DbMaxConns { get; set; }
+    [JsonPropertyName("networkMode")] public string? NetworkMode { get; set; }
     [JsonPropertyName("targetPool")] public string? TargetPool { get; set; }
     [JsonPropertyName("loadReplicas")] public int? LoadReplicas { get; set; }
     // The Envoy gateway is a scalable tier: past roughly 2000 rps it, rather than the checkout tier
@@ -92,6 +95,35 @@ public sealed record RunTelemetry(
     int RequestsPerSec,
     double P95LatencyMs,
     double ErrorRatePct);
+
+// The public shape can withhold selected live gauges for a generated ranked match. Null means the
+// platform measured the value and used it for judging, but this match's instrument panel does not
+// reveal it. Resource/state signals stay numeric because current generator cuts always expose state.
+public sealed record PublicRunTelemetry(
+    int PodCount,
+    int CpuMillicores,
+    int MemoryMiB,
+    int PostgresCpuPct,
+    int ApiReplicas,
+    bool CacheEnabled,
+    int? RequestsPerSec,
+    double? P95LatencyMs,
+    double? ErrorRatePct)
+{
+    public static PublicRunTelemetry From(
+        RunTelemetry telemetry,
+        RankedTelemetryVisibility? visibility = null) =>
+        new(
+            telemetry.PodCount,
+            telemetry.CpuMillicores,
+            telemetry.MemoryMiB,
+            telemetry.PostgresCpuPct,
+            telemetry.ApiReplicas,
+            telemetry.CacheEnabled,
+            visibility?.Throughput == false ? null : telemetry.RequestsPerSec,
+            visibility?.Latency == false ? null : telemetry.P95LatencyMs,
+            visibility?.Errors == false ? null : telemetry.ErrorRatePct);
+}
 
 // One pod of a cluster component, with its measured resource usage.
 public sealed record RunPod(
@@ -173,6 +205,7 @@ public sealed record RunView(
     string RestartToken,
     IReadOnlyList<AcceptedDecision> AcceptedDecisions,
     IReadOnlyList<string> AvailableDecisions,
+    IReadOnlyList<RankedAction> RankedActions,
     // Active drill layered on this cluster ("" when the cluster is an open sandbox).
     string DrillId,
     string DrillTitle,
@@ -219,8 +252,24 @@ public sealed record RunView(
     // How long the objective has held so far, and how long it must, so the page can explain the
     // wait instead of looking stuck once every condition is green.
     int DrillHeldSeconds,
-    int DrillHoldSeconds)
+    int DrillHoldSeconds,
+    RankedMatchBriefing? RankedBriefing,
+    RankedMatchDebrief? RankedDebrief)
 {
+    /// <summary>
+    /// Remove authorization material and deterministic generator input before a run crosses the
+    /// API boundary. The full token remains available internally for evaluation and is revealed
+    /// only after the match is sealed.
+    /// </summary>
+    public RunView ForPublic() =>
+        this with
+        {
+            Owner = "",
+            DrillId = RankedBriefing is not null && RankedDebrief is null
+                ? RankedScenarioSeed.PublicDrillId
+                : DrillId,
+        };
+
     // Map the LabRun's Crossplane conditions to a small, public lifecycle vocabulary, and surface the
     // decision-driven state (replica count, cache tier) so a caller can see the effect of a decision.
     public static RunView From(LabRunResource r)
@@ -254,8 +303,12 @@ public sealed record RunView(
         }
 
         var definition = drillId.Length > 0
-            ? ScenarioDefinitions.All.GetValueOrDefault(drillId)
+            ? ScenarioDefinitions.Find(drillId)
             : null;
+        var drillMode = annotations?.GetValueOrDefault(RunBroker.DrillModeAnnotation)
+            ?? definition?.Mode
+            ?? "";
+        var isRanked = string.Equals(drillMode, "ranked", StringComparison.Ordinal);
 
         // Which stage of the cascade is live. Clamped rather than trusted: an annotation left behind
         // by a longer drill must not index past a shorter one's stage list.
@@ -275,11 +328,17 @@ public sealed record RunView(
             : null;
         var solved = solvedAt is not null;
 
+        var voidedAt = drillId.Length > 0
+            ? ParseTime(annotations?.GetValueOrDefault(RunBroker.DrillVoidedAnnotation))
+            : null;
         var failedAt = drillId.Length > 0
             ? ParseTime(annotations?.GetValueOrDefault(RunBroker.DrillFailedAnnotation))
+                ?? voidedAt
             : null;
         var failed = failedAt is not null;
-        var failedMove = failed
+        var failedMove = voidedAt is not null
+            ? RunBroker.InfrastructureVoidMove
+            : failed
             ? annotations?.GetValueOrDefault(RunBroker.DrillFailedMoveAnnotation) ?? ""
             : "";
 
@@ -298,7 +357,10 @@ public sealed record RunView(
             ? 0
             : Math.Max(0, ((solvedAt ?? failedAt ?? DateTime.UtcNow) - stageStart.Value).TotalSeconds);
 
-        var accepted = ReadAcceptedDecisions(r, definition, stageStart ?? drillStart ?? createdAt);
+        IReadOnlyList<AcceptedDecision> accepted = isRanked
+            ? []
+            : ReadAcceptedDecisions(r, definition, stageStart ?? drillStart ?? createdAt);
+        var rankedActions = ReadRankedActions(r, drillStart ?? createdAt);
         // Decisions are recorded per stage, so the same id can appear in more than one stage of a
         // cascade without one stage's answer pre-filling another's.
         var chosenHere = accepted
@@ -306,19 +368,19 @@ public sealed record RunView(
             .Select(d => d.Id)
             .ToHashSet(StringComparer.Ordinal);
 
-        var available = stage?.Decisions
+        var available = !isRanked ? stage?.Decisions
             .Where(d => stageElapsed >= d.AvailableAfterSeconds && !chosenHere.Contains(d.Id))
             .Select(d => d.Id)
-            .ToArray() ?? [];
+            .ToArray() ?? [] : [];
 
-        var correctTotal = stage?.Decisions.Count(d => d.IsCorrect) ?? 0;
-        var correctChosen = stage?.Decisions.Count(d => d.IsCorrect && chosenHere.Contains(d.Id)) ?? 0;
+        var correctTotal = isRanked ? 0 : stage?.Decisions.Count(d => d.IsCorrect) ?? 0;
+        var correctChosen = isRanked ? 0 : stage?.Decisions.Count(d => d.IsCorrect && chosenHere.Contains(d.Id)) ?? 0;
 
         // Across the whole cascade: what the summary at the end is about.
         var correctTotalAll = 0;
         var correctChosenAll = 0;
         var wrongChosen = 0;
-        if (definition is not null)
+        if (definition is not null && !isRanked)
         {
             for (var i = 0; i <= stageIndex && i < definition.Stages.Count; i++)
             {
@@ -342,7 +404,7 @@ public sealed record RunView(
         if (heldFrom is not null)
             heldSeconds = Math.Max(0, (int)(DateTime.UtcNow - heldFrom.Value).TotalSeconds);
 
-        var options = stage?.Decisions.Select(d =>
+        var options = !isRanked ? stage?.Decisions.Select(d =>
         {
             var chosen = chosenHere.Contains(d.Id);
             return new DrillOption(
@@ -361,7 +423,9 @@ public sealed record RunView(
         // button out from under the cursor. Seeded on the run, the drill, and the stage, so it is the
         // same list on every replica and every reload of the same attempt.
         .OrderBy(o => ShuffleKey(r.Spec.RunId, drillId, stageIndex, o.Id))
-        .ToArray() ?? [];
+        .ToArray() ?? [] : [];
+
+        var generatedPlan = RankedScenarioCatalog.TryPlan(drillId);
 
         var loadGenerators = r.Spec.LoadReplicas ?? 1;
         var ttl = r.Spec.TtlSeconds;
@@ -388,10 +452,11 @@ public sealed record RunView(
             r.Spec.RestartToken ?? "baseline",
             accepted,
             available,
+            rankedActions,
             definition is null ? "" : drillId,
             definition?.Title ?? "",
             definition?.Objective ?? "",
-            definition?.Mode ?? "",
+            definition is null ? "" : drillMode,
             stage is null ? 0 : stageIndex + 1,
             definition?.Stages.Count ?? 0,
             stage?.Title ?? "",
@@ -415,7 +480,11 @@ public sealed record RunView(
             options,
             [],
             heldSeconds,
-            (int)RunBroker.GoalHold.TotalSeconds);
+            stage?.HoldSeconds ?? (int)RunBroker.GoalHold.TotalSeconds,
+            generatedPlan is null ? null : RankedMatchBriefing.From(generatedPlan),
+            generatedPlan is not null && (solved || failed)
+                ? RankedMatchDebrief.From(generatedPlan)
+                : null);
     }
 
     /// <summary>Stable, process-independent ordering key. String.GetHashCode is seeded per process,
@@ -474,6 +543,52 @@ public sealed record RunView(
             .OrderBy(decision => decision.AcceptedAtMs)
             .ToArray();
     }
+
+    private static IReadOnlyList<RankedAction> ReadRankedActions(
+        LabRunResource resource,
+        DateTime? since)
+    {
+        if (resource.Metadata.Annotations is null) return [];
+
+        return resource.Metadata.Annotations
+            .Where(pair => pair.Key.StartsWith(
+                RunBroker.RankedActionAnnotationPrefix,
+                StringComparison.Ordinal))
+            .Select(pair =>
+            {
+                var parts = pair.Value.Split('|', 4);
+                var acceptedAt = parts.Length > 0 && DateTime.TryParse(
+                    parts[0],
+                    null,
+                    System.Globalization.DateTimeStyles.AdjustToUniversal |
+                    System.Globalization.DateTimeStyles.AssumeUniversal,
+                    out var parsed)
+                    ? parsed
+                    : since ?? DateTime.UtcNow;
+                var offset = since is null
+                    ? 0
+                    : Math.Max(0, (int)(acceptedAt - since.Value).TotalMilliseconds);
+                var stage = parts.Length > 3 && int.TryParse(parts[3], out var parsedStage)
+                    ? Math.Max(1, parsedStage)
+                    : 1;
+                return new RankedAction(
+                    pair.Key[RunBroker.RankedActionAnnotationPrefix.Length..],
+                    parts.Length > 1 ? parts[1] : "operator command",
+                    parts.Length > 2 ? parts[2] : "",
+                    offset,
+                    stage,
+                    acceptedAt);
+            })
+            .OrderBy(action => action.AcceptedAtMs)
+            .ToArray();
+    }
 }
 
 public sealed record AcceptedDecision(string Id, string Label, int AcceptedAtMs, int Stage);
+public sealed record RankedAction(
+    string Id,
+    string Command,
+    string ActionId,
+    int AcceptedAtMs,
+    int Stage,
+    DateTime AcceptedUtc);

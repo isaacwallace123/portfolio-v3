@@ -41,6 +41,25 @@ public static class RankedEndpoints
                 : Results.Ok(attempt);
         }).RequireScope(ApiScopes.RunsRead);
 
+        app.MapGet("/v1/ranked/attempts/{attemptId}/actions", async (
+            string attemptId,
+            HttpContext ctx,
+            RankedStore ranked,
+            CancellationToken ct) =>
+        {
+            var owner = Owner(ctx);
+            if (owner.Length == 0 || !AttemptId.IsMatch(attemptId))
+                return Results.NotFound(new { error = "No such ranked attempt." });
+            var attempt = await ranked.GetAttemptAsync(attemptId, owner, ct);
+            return attempt is null
+                ? Results.NotFound(new { error = "No such ranked attempt." })
+                : Results.Ok(new
+                {
+                    attemptId,
+                    actions = await ranked.ActionsForAttemptAsync(attemptId, owner, ct),
+                });
+        }).RequireScope(ApiScopes.RunsRead);
+
         app.MapGet("/v1/ranked/leaderboard", async (
             HttpContext ctx,
             RankedStore ranked,

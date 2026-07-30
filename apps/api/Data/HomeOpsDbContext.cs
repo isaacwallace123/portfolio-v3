@@ -10,6 +10,12 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
     public DbSet<RankedAttempt> RankedAttempts => Set<RankedAttempt>();
     public DbSet<OperatorRating> OperatorRatings => Set<OperatorRating>();
     public DbSet<RatingLedgerEntry> RatingLedger => Set<RatingLedgerEntry>();
+    public DbSet<RankedActionEntry> RankedActions => Set<RankedActionEntry>();
+    public DbSet<RankedEvidenceEntry> RankedEvidence => Set<RankedEvidenceEntry>();
+    public DbSet<RankedTelemetrySample> RankedTelemetry => Set<RankedTelemetrySample>();
+    public DbSet<RankedPerformanceRecord> RankedPerformance => Set<RankedPerformanceRecord>();
+    public DbSet<RankedScenarioRecord> RankedScenarios => Set<RankedScenarioRecord>();
+    public DbSet<RankedCalibrationRecord> RankedCalibrations => Set<RankedCalibrationRecord>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -52,6 +58,15 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
             e.HasIndex(a => a.OwnerKey)
                 .IsUnique()
                 .HasFilter("\"Outcome\" = 'active'");
+            e.HasOne(a => a.Performance)
+                .WithOne()
+                .HasForeignKey<RankedPerformanceRecord>(p => p.AttemptId);
+            e.HasOne(a => a.Scenario)
+                .WithOne()
+                .HasForeignKey<RankedScenarioRecord>(scenario => scenario.AttemptId);
+            e.HasMany(a => a.Evidence)
+                .WithOne()
+                .HasForeignKey(evidence => evidence.AttemptId);
         });
 
         builder.Entity<OperatorRating>(e =>
@@ -72,6 +87,73 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
             e.Property(r => r.Outcome).HasMaxLength(24);
             e.HasIndex(r => r.AttemptId).IsUnique();
             e.HasIndex(r => r.OwnerKey);
+        });
+
+        builder.Entity<RankedActionEntry>(e =>
+        {
+            e.ToTable("RankedActions");
+            e.Property(a => a.Id).HasMaxLength(64);
+            e.Property(a => a.AttemptId).HasMaxLength(64);
+            e.Property(a => a.RunId).HasMaxLength(64);
+            e.Property(a => a.OwnerKey).HasMaxLength(64);
+            e.Property(a => a.Command).HasMaxLength(128);
+            e.Property(a => a.ActionId).HasMaxLength(64);
+            e.HasIndex(a => new { a.AttemptId, a.AcceptedUtc });
+            e.HasIndex(a => a.OwnerKey);
+        });
+
+        builder.Entity<RankedEvidenceEntry>(e =>
+        {
+            e.ToTable("RankedEvidence");
+            e.Property(item => item.Id).HasMaxLength(64);
+            e.Property(item => item.AttemptId).HasMaxLength(64);
+            e.Property(item => item.RunId).HasMaxLength(64);
+            e.Property(item => item.OwnerKey).HasMaxLength(64);
+            e.Property(item => item.Query).HasMaxLength(128);
+            e.Property(item => item.Kind).HasMaxLength(32);
+            e.Property(item => item.Summary).HasMaxLength(512);
+            e.HasIndex(item => new { item.AttemptId, item.ObservedUtc });
+            e.HasIndex(item => item.OwnerKey);
+        });
+
+        builder.Entity<RankedTelemetrySample>(e =>
+        {
+            e.ToTable("RankedTelemetry");
+            e.Property(sample => sample.Id).HasMaxLength(64);
+            e.Property(sample => sample.AttemptId).HasMaxLength(64);
+            e.Property(sample => sample.RunId).HasMaxLength(64);
+            e.Property(sample => sample.OwnerKey).HasMaxLength(64);
+            e.HasIndex(sample => new { sample.AttemptId, sample.RecordedUtc });
+            e.HasIndex(sample => sample.OwnerKey);
+        });
+
+        builder.Entity<RankedPerformanceRecord>(e =>
+        {
+            e.ToTable("RankedPerformance");
+            e.HasKey(performance => performance.AttemptId);
+            e.Property(performance => performance.AttemptId).HasMaxLength(64);
+            e.Property(performance => performance.OwnerKey).HasMaxLength(64);
+            e.Property(performance => performance.Band).HasMaxLength(24);
+            e.HasIndex(performance => performance.OwnerKey);
+        });
+
+        builder.Entity<RankedScenarioRecord>(e =>
+        {
+            e.ToTable("RankedScenarios");
+            e.HasKey(scenario => scenario.AttemptId);
+            e.Property(scenario => scenario.AttemptId).HasMaxLength(64);
+            e.Property(scenario => scenario.OwnerKey).HasMaxLength(64);
+            e.Property(scenario => scenario.DrillId).HasMaxLength(64);
+            e.Property(scenario => scenario.SeedId).HasMaxLength(32);
+            e.HasIndex(scenario => new { scenario.OwnerKey, scenario.CreatedUtc });
+            e.HasIndex(scenario => new { scenario.OwnerKey, scenario.SeedId }).IsUnique();
+        });
+
+        builder.Entity<RankedCalibrationRecord>(e =>
+        {
+            e.ToTable("RankedCalibrations");
+            e.HasKey(calibration => calibration.Family);
+            e.Property(calibration => calibration.Family).HasMaxLength(64);
         });
     }
 
@@ -164,6 +246,117 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
               CREATE UNIQUE INDEX IF NOT EXISTS "IX_RatingLedger_AttemptId"
                   ON "RatingLedger" ("AttemptId");
               CREATE INDEX IF NOT EXISTS "IX_RatingLedger_OwnerKey" ON "RatingLedger" ("OwnerKey");
+
+              CREATE TABLE IF NOT EXISTS "RankedActions" (
+                  "Id" character varying(64) NOT NULL CONSTRAINT "PK_RankedActions" PRIMARY KEY,
+                  "AttemptId" character varying(64) NOT NULL,
+                  "RunId" character varying(64) NOT NULL,
+                  "OwnerKey" character varying(64) NOT NULL,
+                  "Command" character varying(128) NOT NULL,
+                  "ActionId" character varying(64) NOT NULL,
+                  "Stage" integer NOT NULL,
+                  "AcceptedUtc" timestamp with time zone NOT NULL
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedActions_Attempt_Accepted"
+                  ON "RankedActions" ("AttemptId", "AcceptedUtc");
+              CREATE INDEX IF NOT EXISTS "IX_RankedActions_OwnerKey"
+                  ON "RankedActions" ("OwnerKey");
+
+              CREATE TABLE IF NOT EXISTS "RankedEvidence" (
+                  "Id" character varying(64) NOT NULL
+                      CONSTRAINT "PK_RankedEvidence" PRIMARY KEY,
+                  "AttemptId" character varying(64) NOT NULL,
+                  "RunId" character varying(64) NOT NULL,
+                  "OwnerKey" character varying(64) NOT NULL,
+                  "Query" character varying(128) NOT NULL,
+                  "Kind" character varying(32) NOT NULL,
+                  "Summary" character varying(512) NOT NULL,
+                  "Stage" integer NOT NULL,
+                  "ObservedUtc" timestamp with time zone NOT NULL,
+                  CONSTRAINT "FK_RankedEvidence_RankedAttempts_AttemptId"
+                      FOREIGN KEY ("AttemptId") REFERENCES "RankedAttempts" ("Id") ON DELETE CASCADE
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedEvidence_Attempt_Observed"
+                  ON "RankedEvidence" ("AttemptId", "ObservedUtc");
+              CREATE INDEX IF NOT EXISTS "IX_RankedEvidence_OwnerKey"
+                  ON "RankedEvidence" ("OwnerKey");
+
+              CREATE TABLE IF NOT EXISTS "RankedTelemetry" (
+                  "Id" character varying(64) NOT NULL CONSTRAINT "PK_RankedTelemetry" PRIMARY KEY,
+                  "AttemptId" character varying(64) NOT NULL,
+                  "RunId" character varying(64) NOT NULL,
+                  "OwnerKey" character varying(64) NOT NULL,
+                  "RecordedUtc" timestamp with time zone NOT NULL,
+                  "Stage" integer NOT NULL,
+                  "OfferedRequestsPerSec" integer NOT NULL,
+                  "ServedRequestsPerSec" integer NOT NULL,
+                  "P95LatencyMs" double precision NOT NULL,
+                  "ErrorRatePct" double precision NOT NULL,
+                  "ObjectiveGoalsMet" integer NOT NULL,
+                  "ObjectiveGoalsTotal" integer NOT NULL,
+                  "SloGoalsMet" integer NOT NULL,
+                  "SloGoalsTotal" integer NOT NULL,
+                  "HeldSeconds" integer NOT NULL
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedTelemetry_Attempt_Recorded"
+                  ON "RankedTelemetry" ("AttemptId", "RecordedUtc");
+              CREATE INDEX IF NOT EXISTS "IX_RankedTelemetry_OwnerKey"
+                  ON "RankedTelemetry" ("OwnerKey");
+
+              CREATE TABLE IF NOT EXISTS "RankedPerformance" (
+                  "AttemptId" character varying(64) NOT NULL
+                      CONSTRAINT "PK_RankedPerformance" PRIMARY KEY,
+                  "OwnerKey" character varying(64) NOT NULL,
+                  "QualityScore" integer NOT NULL,
+                  "RatingScore" double precision NOT NULL,
+                  "SloHealthScore" integer NOT NULL,
+                  "ObjectiveHealthScore" integer NOT NULL,
+                  "ActionScore" integer NOT NULL,
+                  "ContainmentScore" integer NOT NULL,
+                  "TargetedActions" integer NOT NULL,
+                  "HarmfulActions" integer NOT NULL,
+                  "UnnecessaryActions" integer NOT NULL,
+                  "RedundantActions" integer NOT NULL,
+                  "ConvergenceViolations" integer NOT NULL,
+                  "SampleCount" integer NOT NULL,
+                  "PeakP95LatencyMs" double precision NOT NULL,
+                  "PeakErrorRatePct" double precision NOT NULL,
+                  "MinimumServedRatioPct" integer NOT NULL,
+                  "VerificationSeconds" integer NOT NULL,
+                  "Band" character varying(24) NOT NULL,
+                  "CreatedUtc" timestamp with time zone NOT NULL,
+                  CONSTRAINT "FK_RankedPerformance_RankedAttempts_AttemptId"
+                      FOREIGN KEY ("AttemptId") REFERENCES "RankedAttempts" ("Id") ON DELETE CASCADE
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedPerformance_OwnerKey"
+                  ON "RankedPerformance" ("OwnerKey");
+
+              CREATE TABLE IF NOT EXISTS "RankedScenarios" (
+                  "AttemptId" character varying(64) NOT NULL
+                      CONSTRAINT "PK_RankedScenarios" PRIMARY KEY,
+                  "OwnerKey" character varying(64) NOT NULL,
+                  "DrillId" character varying(64) NOT NULL,
+                  "SeedId" character varying(32) NOT NULL,
+                  "GeneratorVersion" integer NOT NULL,
+                  "PlayerRating" integer NOT NULL,
+                  "PlanJson" text NOT NULL,
+                  "FamiliesJson" text NOT NULL,
+                  "CreatedUtc" timestamp with time zone NOT NULL,
+                  CONSTRAINT "FK_RankedScenarios_RankedAttempts_AttemptId"
+                      FOREIGN KEY ("AttemptId") REFERENCES "RankedAttempts" ("Id") ON DELETE CASCADE
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedScenarios_Owner_Created"
+                  ON "RankedScenarios" ("OwnerKey", "CreatedUtc");
+              CREATE UNIQUE INDEX IF NOT EXISTS "IX_RankedScenarios_Owner_Seed"
+                  ON "RankedScenarios" ("OwnerKey", "SeedId");
+
+              CREATE TABLE IF NOT EXISTS "RankedCalibrations" (
+                  "Family" character varying(64) NOT NULL
+                      CONSTRAINT "PK_RankedCalibrations" PRIMARY KEY,
+                  "RatedAttempts" integer NOT NULL,
+                  "Completions" integer NOT NULL,
+                  "UpdatedUtc" timestamp with time zone NOT NULL
+              );
               """
             : """
               CREATE TABLE IF NOT EXISTS "DrillResults" (
@@ -242,6 +435,113 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
               CREATE UNIQUE INDEX IF NOT EXISTS "IX_RatingLedger_AttemptId"
                   ON "RatingLedger" ("AttemptId");
               CREATE INDEX IF NOT EXISTS "IX_RatingLedger_OwnerKey" ON "RatingLedger" ("OwnerKey");
+
+              CREATE TABLE IF NOT EXISTS "RankedActions" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_RankedActions" PRIMARY KEY,
+                  "AttemptId" TEXT NOT NULL,
+                  "RunId" TEXT NOT NULL,
+                  "OwnerKey" TEXT NOT NULL,
+                  "Command" TEXT NOT NULL,
+                  "ActionId" TEXT NOT NULL,
+                  "Stage" INTEGER NOT NULL,
+                  "AcceptedUtc" TEXT NOT NULL
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedActions_Attempt_Accepted"
+                  ON "RankedActions" ("AttemptId", "AcceptedUtc");
+              CREATE INDEX IF NOT EXISTS "IX_RankedActions_OwnerKey"
+                  ON "RankedActions" ("OwnerKey");
+
+              CREATE TABLE IF NOT EXISTS "RankedEvidence" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_RankedEvidence" PRIMARY KEY,
+                  "AttemptId" TEXT NOT NULL,
+                  "RunId" TEXT NOT NULL,
+                  "OwnerKey" TEXT NOT NULL,
+                  "Query" TEXT NOT NULL,
+                  "Kind" TEXT NOT NULL,
+                  "Summary" TEXT NOT NULL,
+                  "Stage" INTEGER NOT NULL,
+                  "ObservedUtc" TEXT NOT NULL,
+                  CONSTRAINT "FK_RankedEvidence_RankedAttempts_AttemptId"
+                      FOREIGN KEY ("AttemptId") REFERENCES "RankedAttempts" ("Id") ON DELETE CASCADE
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedEvidence_Attempt_Observed"
+                  ON "RankedEvidence" ("AttemptId", "ObservedUtc");
+              CREATE INDEX IF NOT EXISTS "IX_RankedEvidence_OwnerKey"
+                  ON "RankedEvidence" ("OwnerKey");
+
+              CREATE TABLE IF NOT EXISTS "RankedTelemetry" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_RankedTelemetry" PRIMARY KEY,
+                  "AttemptId" TEXT NOT NULL,
+                  "RunId" TEXT NOT NULL,
+                  "OwnerKey" TEXT NOT NULL,
+                  "RecordedUtc" TEXT NOT NULL,
+                  "Stage" INTEGER NOT NULL,
+                  "OfferedRequestsPerSec" INTEGER NOT NULL,
+                  "ServedRequestsPerSec" INTEGER NOT NULL,
+                  "P95LatencyMs" REAL NOT NULL,
+                  "ErrorRatePct" REAL NOT NULL,
+                  "ObjectiveGoalsMet" INTEGER NOT NULL,
+                  "ObjectiveGoalsTotal" INTEGER NOT NULL,
+                  "SloGoalsMet" INTEGER NOT NULL,
+                  "SloGoalsTotal" INTEGER NOT NULL,
+                  "HeldSeconds" INTEGER NOT NULL
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedTelemetry_Attempt_Recorded"
+                  ON "RankedTelemetry" ("AttemptId", "RecordedUtc");
+              CREATE INDEX IF NOT EXISTS "IX_RankedTelemetry_OwnerKey"
+                  ON "RankedTelemetry" ("OwnerKey");
+
+              CREATE TABLE IF NOT EXISTS "RankedPerformance" (
+                  "AttemptId" TEXT NOT NULL CONSTRAINT "PK_RankedPerformance" PRIMARY KEY,
+                  "OwnerKey" TEXT NOT NULL,
+                  "QualityScore" INTEGER NOT NULL,
+                  "RatingScore" REAL NOT NULL,
+                  "SloHealthScore" INTEGER NOT NULL,
+                  "ObjectiveHealthScore" INTEGER NOT NULL,
+                  "ActionScore" INTEGER NOT NULL,
+                  "ContainmentScore" INTEGER NOT NULL,
+                  "TargetedActions" INTEGER NOT NULL,
+                  "HarmfulActions" INTEGER NOT NULL,
+                  "UnnecessaryActions" INTEGER NOT NULL,
+                  "RedundantActions" INTEGER NOT NULL,
+                  "ConvergenceViolations" INTEGER NOT NULL,
+                  "SampleCount" INTEGER NOT NULL,
+                  "PeakP95LatencyMs" REAL NOT NULL,
+                  "PeakErrorRatePct" REAL NOT NULL,
+                  "MinimumServedRatioPct" INTEGER NOT NULL,
+                  "VerificationSeconds" INTEGER NOT NULL,
+                  "Band" TEXT NOT NULL,
+                  "CreatedUtc" TEXT NOT NULL,
+                  CONSTRAINT "FK_RankedPerformance_RankedAttempts_AttemptId"
+                      FOREIGN KEY ("AttemptId") REFERENCES "RankedAttempts" ("Id") ON DELETE CASCADE
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedPerformance_OwnerKey"
+                  ON "RankedPerformance" ("OwnerKey");
+
+              CREATE TABLE IF NOT EXISTS "RankedScenarios" (
+                  "AttemptId" TEXT NOT NULL CONSTRAINT "PK_RankedScenarios" PRIMARY KEY,
+                  "OwnerKey" TEXT NOT NULL,
+                  "DrillId" TEXT NOT NULL,
+                  "SeedId" TEXT NOT NULL,
+                  "GeneratorVersion" INTEGER NOT NULL,
+                  "PlayerRating" INTEGER NOT NULL,
+                  "PlanJson" TEXT NOT NULL,
+                  "FamiliesJson" TEXT NOT NULL,
+                  "CreatedUtc" TEXT NOT NULL,
+                  CONSTRAINT "FK_RankedScenarios_RankedAttempts_AttemptId"
+                      FOREIGN KEY ("AttemptId") REFERENCES "RankedAttempts" ("Id") ON DELETE CASCADE
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedScenarios_Owner_Created"
+                  ON "RankedScenarios" ("OwnerKey", "CreatedUtc");
+              CREATE UNIQUE INDEX IF NOT EXISTS "IX_RankedScenarios_Owner_Seed"
+                  ON "RankedScenarios" ("OwnerKey", "SeedId");
+
+              CREATE TABLE IF NOT EXISTS "RankedCalibrations" (
+                  "Family" TEXT NOT NULL CONSTRAINT "PK_RankedCalibrations" PRIMARY KEY,
+                  "RatedAttempts" INTEGER NOT NULL,
+                  "Completions" INTEGER NOT NULL,
+                  "UpdatedUtc" TEXT NOT NULL
+              );
               """, ct);
     }
 }

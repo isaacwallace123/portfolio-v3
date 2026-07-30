@@ -23,6 +23,9 @@ public sealed class RankedAttempt
     public double ExpectedScore { get; set; }
     public int RatingDelta { get; set; }
     public int PostRating { get; set; }
+    public RankedPerformanceRecord? Performance { get; set; }
+    public RankedScenarioRecord? Scenario { get; set; }
+    public List<RankedEvidenceEntry> Evidence { get; set; } = [];
 }
 
 public sealed class OperatorRating
@@ -50,4 +53,35 @@ public sealed class RatingLedgerEntry
     public int Delta { get; set; }
     public int AfterRating { get; set; }
     public DateTime CreatedUtc { get; set; }
+}
+
+/// <summary>
+/// Append-only competitive operator audit. The same id is first stamped onto the LabRun annotation
+/// and then copied here, so a transient database failure can be retried from later snapshots without
+/// duplicating an action.
+/// </summary>
+public sealed class RankedActionEntry
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string AttemptId { get; set; } = "";
+    public string RunId { get; set; } = "";
+    public string OwnerKey { get; set; } = "";
+    public string Command { get; set; } = "";
+    public string ActionId { get; set; } = "";
+    public int Stage { get; set; }
+    public DateTime AcceptedUtc { get; set; }
+}
+
+/// <summary>Append-only evidence audit for investigations performed during a rated attempt.</summary>
+public sealed class RankedEvidenceEntry
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string AttemptId { get; set; } = "";
+    public string RunId { get; set; } = "";
+    public string OwnerKey { get; set; } = "";
+    public string Query { get; set; } = "";
+    public string Kind { get; set; } = "";
+    public string Summary { get; set; } = "";
+    public int Stage { get; set; }
+    public DateTime ObservedUtc { get; set; }
 }

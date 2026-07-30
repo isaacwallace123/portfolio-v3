@@ -19,6 +19,7 @@ import { liveEnabled } from "@/shared/api/live-server";
 const LIMITS = {
   provision: { max: 5, windowMs: 60 * 60_000 }, // 5 clusters per hour
   action: { max: 120, windowMs: 60_000 }, // 120 control actions per minute
+  inspect: { max: 30, windowMs: 60_000 }, // cluster read plus an evidence write
   read: { max: 60, windowMs: 60_000 }, // 60 public reads per minute
   // Inventory reads look cheap from here and are not: each one fans out upstream into a
   // cluster-wide Kubernetes sweep (nodes, every workload in every namespace, pod and node metrics,
@@ -62,6 +63,73 @@ const NO_STORE = { "Cache-Control": "no-store", "X-Robots-Tag": "noindex" };
 
 function deny(status: number, error: string): NextResponse {
   return NextResponse.json({ error }, { status, headers: NO_STORE });
+}
+
+const MAX_CONTROL_BODY_BYTES = 1024;
+
+export async function readBoundedStringBody(
+  req: Request,
+  field: string,
+  maxLength: number,
+): Promise<
+  { ok: true; value: string } | { ok: false; response: NextResponse }
+> {
+  const declared = Number(req.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_CONTROL_BODY_BYTES)
+    return { ok: false, response: deny(413, "Request body is too large.") };
+
+  const reader = req.body?.getReader();
+  if (!reader)
+    return {
+      ok: false,
+      response: deny(400, "A JSON request body is required."),
+    };
+
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > MAX_CONTROL_BODY_BYTES) {
+        await reader.cancel();
+        return { ok: false, response: deny(413, "Request body is too large.") };
+      }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    text += decoder.decode();
+  } catch {
+    return {
+      ok: false,
+      response: deny(400, "Request body could not be read."),
+    };
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return {
+      ok: false,
+      response: deny(400, "Request body must be valid JSON."),
+    };
+  }
+  if (body === null || typeof body !== "object" || Array.isArray(body))
+    return {
+      ok: false,
+      response: deny(400, "Request body must be a JSON object."),
+    };
+  const value = (body as Record<string, unknown>)[field];
+  if (typeof value !== "string")
+    return { ok: false, response: deny(400, `${field} must be a string.`) };
+  if (value.length > maxLength)
+    return {
+      ok: false,
+      response: deny(413, `${field} must be ${maxLength} characters or fewer.`),
+    };
+  return { ok: true, value };
 }
 
 export async function guard(

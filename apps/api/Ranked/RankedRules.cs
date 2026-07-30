@@ -31,8 +31,8 @@ public sealed record RankedDivision(
 
 /// <summary>
 /// Seasonless solo ELO. The incident is the opponent: its calibrated rating determines how much a
-/// clean solve is worth and how costly a failed call is. Time deliberately does not enter this
-/// calculation; it remains an independent per-scenario record.
+/// controlled recovery is worth and how costly a failed call is. Time deliberately does not enter
+/// this calculation; it remains an independent, global recovery-time ladder.
 /// </summary>
 public static class RankedRules
 {
@@ -40,6 +40,10 @@ public static class RankedRules
     public const int PlacementGames = 5;
     public const int ScenarioVersion = 1;
     public const int MinimumAbandonmentLoss = 12;
+    public const int CalibrationPriorAttempts = 10;
+    public const int MaximumCalibrationAdjustment = 200;
+    public const int MaxActionsPerAttempt = 64;
+    public const int MaxEvidencePerAttempt = 128;
 
     private static readonly IReadOnlyDictionary<string, int> ScenarioRatings =
         new Dictionary<string, int>(StringComparer.Ordinal)
@@ -70,20 +74,60 @@ public static class RankedRules
         return Math.Clamp(raw, 0.05, 0.95);
     }
 
+    /// <summary>
+    /// Converts aggregate completion rate into a bounded difficulty correction. A ten-match
+    /// even-money prior prevents one early result from swinging the queue; every ten rating points
+    /// are then encoded in the generated seed, so the incident and its ELO value stay reproducible.
+    /// Easy families move below the operator's rating and pay less, while hard families move above.
+    /// </summary>
+    public static int CalibrationAdjustment(int ratedAttempts, int completions)
+    {
+        ratedAttempts = Math.Max(0, ratedAttempts);
+        completions = Math.Clamp(completions, 0, ratedAttempts);
+        var smoothedCompletion =
+            (completions + CalibrationPriorAttempts / 2.0) /
+            (ratedAttempts + CalibrationPriorAttempts);
+        var raw = (0.5 - smoothedCompletion) * 400;
+        var bounded = Math.Clamp(
+            raw,
+            -MaximumCalibrationAdjustment,
+            MaximumCalibrationAdjustment);
+        return (int)Math.Round(bounded / 10, MidpointRounding.AwayFromZero) * 10;
+    }
+
     public static RatingResult Calculate(
         int playerRating,
         int gamesPlayed,
         int scenarioRating,
         bool completed,
         bool abandoned = false)
+        => Calculate(
+            playerRating,
+            gamesPlayed,
+            scenarioRating,
+            completed ? 1.0 : 0.0,
+            abandoned);
+
+    public static RatingResult Calculate(
+        int playerRating,
+        int gamesPlayed,
+        int scenarioRating,
+        double score,
+        bool abandoned = false)
     {
         var expected = ExpectedScore(playerRating, scenarioRating);
         var k = gamesPlayed < 10 ? 40 : 24;
-        var score = completed ? 1.0 : 0.0;
+        score = Math.Clamp(score, 0, 1);
         var rawDelta = (int)Math.Round(k * (score - expected), MidpointRounding.AwayFromZero);
-        if (!completed && abandoned)
+        if (score == 0 && abandoned)
             rawDelta = Math.Min(rawDelta, -MinimumAbandonmentLoss);
-        var delta = rawDelta == 0 ? (completed ? 1 : -1) : rawDelta;
+        var delta = rawDelta != 0
+            ? rawDelta
+            : score > expected
+                ? 1
+                : score < expected
+                    ? -1
+                    : 0;
         var after = Math.Max(100, playerRating + delta);
         return new RatingResult(playerRating, after - playerRating, after, expected, k);
     }

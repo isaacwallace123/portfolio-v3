@@ -21,6 +21,9 @@ using Scalar.AspNetCore;
 var builder = WebApplication.CreateBuilder(args);
 var config = builder.Configuration;
 
+builder.WebHost.ConfigureKestrel(options =>
+    options.Limits.MaxRequestBodySize = 16 * 1024);
+
 var corsOrigins = config.GetSection("Cors:Origins").Get<string[]>() ?? [];
 
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p

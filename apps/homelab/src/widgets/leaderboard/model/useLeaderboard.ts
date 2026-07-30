@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from "react";
 import {
-  fetchLeaderboard,
   fetchRankedStandings,
+  fetchTimeStandings,
   type LeaderboardView,
   type RankedStanding,
 } from "@/shared/api/live-client";
 
 export interface LeaderboardState {
-  board: LeaderboardView | null;
+  times: LeaderboardView | null;
   standings: RankedStanding[] | null;
   error: string | null;
   loading: boolean;
@@ -21,16 +21,16 @@ export interface LeaderboardState {
  * with a navigation.
  */
 export function useLeaderboard(): LeaderboardState {
-  const [board, setBoard] = useState<LeaderboardView | null>(null);
+  const [times, setTimes] = useState<LeaderboardView | null>(null);
   const [standings, setStandings] = useState<RankedStanding[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    Promise.all([fetchLeaderboard(), fetchRankedStandings()])
+    Promise.all([fetchTimeStandings(), fetchRankedStandings()])
       .then(([speedBoard, ratingBoard]) => {
         if (!alive) return;
-        setBoard(speedBoard);
+        setTimes(speedBoard);
         setStandings(ratingBoard);
       })
       .catch(
@@ -45,5 +45,10 @@ export function useLeaderboard(): LeaderboardState {
     };
   }, []);
 
-  return { board, standings, error, loading: (!board || !standings) && !error };
+  return {
+    times,
+    standings,
+    error,
+    loading: (!times || !standings) && !error,
+  };
 }

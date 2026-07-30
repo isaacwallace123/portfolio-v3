@@ -95,6 +95,8 @@ public sealed class RunBroker
                 CacheReplicas = SetupInt(setup, "cacheReplicas", 0),
                 ReleaseTrack = SetupString(setup, "releaseTrack", "stable"),
                 DataState = SetupString(setup, "dataState", "healthy"),
+                DbMaxConns = SetupInt(setup, "dbMaxConns", 8),
+                NetworkMode = SetupString(setup, "networkMode", "normal"),
                 TargetPool = SetupString(setup, "targetPool", "apps"),
                 LoadReplicas = SetupInt(setup, "loadReplicas", 0),
                 GatewayReplicas = SetupInt(setup, "gatewayReplicas", 1),
@@ -160,7 +162,12 @@ public sealed class RunBroker
             return BrokerResult.Fail(409, "This drill is already resolved.");
         if (view.DrillFailed)
             return BrokerResult.Fail(409, "This ranked attempt is over.");
-        if (!ScenarioDefinitions.All.TryGetValue(view.DrillId, out var scenario))
+        if (view.DrillMode == "ranked")
+            return BrokerResult.Fail(
+                409,
+                "Ranked incidents accept only audited operator commands.");
+        var scenario = ScenarioDefinitions.Find(view.DrillId);
+        if (scenario is null)
             return BrokerResult.Fail(404, "The scenario definition is not available.");
 
         var stageIndex = Math.Max(0, view.DrillStage - 1);
@@ -210,7 +217,7 @@ public sealed class RunBroker
             var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
                 patch, LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
             var updatedResource = Parse(updated);
-            await WriteThroughReplicasAsync(runId, decision.SpecPatch, ct);
+            await WriteThroughSpecAsync(runId, decision.SpecPatch, ct);
             if (ranked && !decision.IsCorrect)
                 await TryFinalizeRankedAsync(
                     updatedResource,
@@ -250,21 +257,39 @@ public sealed class RunBroker
             return BrokerResult.Fail(409, "End the current incident before starting another.");
 
         var ranked = string.Equals(mode, "ranked", StringComparison.OrdinalIgnoreCase);
+        if (ranked && drillId.Length > 0)
+            return BrokerResult.Fail(
+                409,
+                "Ranked incidents are drawn by the server and cannot be selected.");
+        if (!ranked && RankedScenarioSeed.IsToken(drillId))
+            return BrokerResult.Fail(404, $"Unknown drill '{drillId}'.");
         if (ranked && drillId.Length == 0)
         {
-            var pool = ScenarioDefinitions.RankedDrills
-                // Never redraw the drill this cluster just ran: the point of a draw is that you do
-                // not know what is coming, and back-to-back repeats are the one outcome that
-                // reliably ruins that.
-                .Where(d => d.Id != resource.Metadata.Annotations?
-                    .GetValueOrDefault(LastRankedDrillAnnotation))
-                .ToArray();
-            if (pool.Length == 0) return BrokerResult.Fail(409, "No ranked drills are available.");
-            drillId = pool[RandomNumberGenerator.GetInt32(pool.Length)].Id;
+            RankedDrawContext context;
+            try
+            {
+                context = await _ranked.DrawContextAsync(owner, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Could not read ranked matchmaking profile for {RunId}.", runId);
+                return BrokerResult.Fail(503, "Ranked matchmaking is unavailable right now.");
+            }
+
+            var draw = RankedMatchmaker.Draw(
+                context.Rating,
+                context.RecentFamilies,
+                context.PlayedSeedIds,
+                calibrationAdjustments: context.FamilyAdjustments);
+            if (draw is null)
+                return BrokerResult.Fail(
+                    503,
+                    "A unique ranked incident could not be generated safely. Try again.");
+            drillId = draw.Plan.DrillId;
         }
 
-        if (!ScenarioDefinitions.IsDrill(drillId) ||
-            !ScenarioDefinitions.All.TryGetValue(drillId, out var drill))
+        var drill = ScenarioDefinitions.Find(drillId);
+        if (!ScenarioDefinitions.IsDrill(drillId) || drill is null)
             return BrokerResult.Fail(404, $"Unknown drill '{drillId}'.");
         if (ranked && !drill.IsRanked)
             return BrokerResult.Fail(409, "Only multi-stage drills can be run ranked.");
@@ -333,6 +358,9 @@ public sealed class RunBroker
             [DrillSolvedAnnotation] = null, // null removes the annotation in a merge patch
             [DrillFailedAnnotation] = null,
             [DrillFailedMoveAnnotation] = null,
+            [DrillVoidedAnnotation] = null,
+            [InfrastructureUnhealthySinceAnnotation] = null,
+            [InfrastructureUnhealthyReasonAnnotation] = null,
             [DrillGoalsMetSinceAnnotation] = null,
             [DrillRecordedAnnotation] = null,
             [RankedAttemptIdAnnotation] = rankedAttempt?.Id,
@@ -343,13 +371,16 @@ public sealed class RunBroker
         if (ranked)
             annotations[LastRankedDrillAnnotation] = drill.Id;
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
-            if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal))
+            if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal) ||
+                key.StartsWith(RankedActionAnnotationPrefix, StringComparison.Ordinal) ||
+                key.StartsWith(DelayedStageAppliedAnnotationPrefix, StringComparison.Ordinal))
                 annotations[key] = null; // null removes the annotation in a merge patch
 
         // The first stage's Setup is the opening fault. A drill always needs live traffic to measure
         // against, so a stage that forgets to ask for load still gets some.
         var setup = new Dictionary<string, object>(drill.Stages[0].Setup, StringComparer.Ordinal);
         if (!setup.ContainsKey("loadReplicas")) setup["loadReplicas"] = 1;
+        FreshenRestartToken(setup);
         var spec = new Dictionary<string, object>(setup, StringComparer.Ordinal)
         {
             ["drillId"] = drillId,
@@ -361,7 +392,7 @@ public sealed class RunBroker
         // Do not void on an ambiguous Kubernetes response: the patch may have landed before the
         // connection failed. If it did, snapshots will finalize this attempt normally; if it did
         // not, the next ranked start performs the orphan cleanup above.
-        await WriteThroughReplicasAsync(runId, setup, ct);
+        await WriteThroughSpecAsync(runId, setup, ct);
         return started;
     }
 
@@ -380,6 +411,7 @@ public sealed class RunBroker
         {
             try
             {
+                await PersistRankedActionsAsync(resource, view, ct);
                 await FinalizeRankedAsync(
                     resource,
                     view,
@@ -400,6 +432,9 @@ public sealed class RunBroker
             [DrillSolvedAnnotation] = null,
             [DrillFailedAnnotation] = null,
             [DrillFailedMoveAnnotation] = null,
+            [DrillVoidedAnnotation] = null,
+            [InfrastructureUnhealthySinceAnnotation] = null,
+            [InfrastructureUnhealthyReasonAnnotation] = null,
             [DrillGoalsMetSinceAnnotation] = null,
             [DrillStageAnnotation] = null,
             [DrillStageStartedAnnotation] = null,
@@ -411,7 +446,9 @@ public sealed class RunBroker
             [LearningUnitAnnotation] = null,
         };
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
-            if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal))
+            if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal) ||
+                key.StartsWith(RankedActionAnnotationPrefix, StringComparison.Ordinal) ||
+                key.StartsWith(DelayedStageAppliedAnnotationPrefix, StringComparison.Ordinal))
                 annotations[key] = null;
 
         var patchBody = new
@@ -426,6 +463,9 @@ public sealed class RunBroker
                 drillStartedAt = "",
                 releaseTrack = "stable",
                 dataState = "healthy",
+                dbMaxConns = 8,
+                networkMode = "normal",
+                targetPool = "apps",
                 apiReplicas = 1,
                 canaryReplicas = 0,
                 cacheReplicas = 0,
@@ -434,8 +474,10 @@ public sealed class RunBroker
             },
         };
         var ended = await PatchRunAsync(runId, patchBody, "end drill", ct);
-        await WriteThroughReplicasAsync(runId, Patch(
+        await WriteThroughSpecAsync(runId, Patch(
             ("apiReplicas", 1), ("canaryReplicas", 0), ("cacheReplicas", 0),
+            ("releaseTrack", "stable"), ("dataState", "healthy"), ("dbMaxConns", 8),
+            ("networkMode", "normal"), ("targetPool", "apps"),
             ("loadReplicas", 0), ("gatewayReplicas", 1)), ct);
         return ended;
     }
@@ -693,6 +735,94 @@ public sealed class RunBroker
             await traceTask);
     }
 
+    /// <summary>
+    /// Protects rating from failures outside the generated incident. A single failed Kubernetes
+    /// read is treated as transient; the same missing substrate must persist for a full grace
+    /// window before the attempt is sealed void with no ELO mutation.
+    /// </summary>
+    public async Task<LabRunResource> VoidRankedInfrastructureFailureAsync(
+        LabRunResource resource,
+        RunFrame frame,
+        string displayName,
+        CancellationToken ct)
+    {
+        var view = RunView.From(resource);
+        if (view.DrillMode != "ranked" || view.DrillSolved || view.DrillFailed)
+            return resource;
+
+        var reason = InfrastructureProblem(resource, frame);
+        var annotations = resource.Metadata.Annotations;
+        var sinceText = annotations?.GetValueOrDefault(
+            InfrastructureUnhealthySinceAnnotation);
+        if (reason is null)
+        {
+            if (string.IsNullOrEmpty(sinceText)) return resource;
+            return await SetAnnotationsAsync(
+                view.RunId,
+                new()
+                {
+                    [InfrastructureUnhealthySinceAnnotation] = null,
+                    [InfrastructureUnhealthyReasonAnnotation] = null,
+                },
+                ct) ?? resource;
+        }
+
+        var now = DateTime.UtcNow;
+        var since = ParseAnnotationTime(sinceText);
+        if (since is null)
+        {
+            return await SetAnnotationsAsync(
+                view.RunId,
+                new()
+                {
+                    [InfrastructureUnhealthySinceAnnotation] = now.ToString("O"),
+                    [InfrastructureUnhealthyReasonAnnotation] = reason,
+                },
+                ct) ?? resource;
+        }
+        if (now - since.Value < InfrastructureFailureGrace) return resource;
+
+        var voided = await SetAnnotationsAsync(
+            view.RunId,
+            new()
+            {
+                [DrillVoidedAnnotation] = now.ToString("O"),
+                [InfrastructureUnhealthyReasonAnnotation] = reason,
+                [DrillGoalsMetSinceAnnotation] = null,
+            },
+            ct) ?? resource;
+        var voidedView = RunView.From(voided);
+        await TryFinalizeRankedAsync(
+            voided,
+            voidedView,
+            RankedOutcomes.Void,
+            displayName,
+            ct);
+        return voided;
+    }
+
+    private static string? InfrastructureProblem(
+        LabRunResource resource,
+        RunFrame? frame)
+    {
+        var synced = resource.Status?.Conditions?.FirstOrDefault(condition =>
+            condition.Type == "Synced");
+        if (synced is { Status: not "True" })
+            return "The platform could not reconcile the disposable cluster.";
+        if (string.IsNullOrWhiteSpace(resource.Status?.Namespace))
+            return "The disposable namespace was not assigned.";
+        if (frame is null) return null;
+
+        string[] required = ["checkout", "envoy", "k6", "postgres", "redis"];
+        var present = frame.Components
+            .Select(component => component.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var missing = required.Where(component => !present.Contains(component)).ToArray();
+        return missing.Length == 0
+            ? null
+            : $"Required platform substrate is unavailable: {string.Join(", ", missing)}.";
+    }
+
     // Namespace listings, each tolerant of a namespace that is still being composed. Returning null
     // rather than throwing keeps one missing piece from blanking the whole frame.
     private async Task<k8s.Models.V1PodList?> ListPodsAsync(string ns, CancellationToken ct)
@@ -836,24 +966,25 @@ public sealed class RunBroker
             : TryRangedAction(actionId, "canary-", 0, 3, out var canaries)
                 ? Patch(("canaryReplicas", canaries))
             : actionId switch
-        {
-            "cache-on" => Patch(("cacheReplicas", 1)),
-            "cache-off" => Patch(("cacheReplicas", 0)),
-            "release-candidate" => Patch(("releaseTrack", "candidate")),
-            "release-stable" => Patch(("releaseTrack", "stable")),
-            "move-apps" => Patch(("targetPool", "apps")),
-            "move-infra" => Patch(("targetPool", "infra")),
-            "traffic-on" => Patch(("loadReplicas", 1)),
-            "cache-scale" => Patch(("cacheReplicas", 1)),
-            "traffic-off" => Patch(("loadReplicas", 0)),
-            "restart" => Patch(("restartToken", Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)))),
-            "reset" => Patch(
-                ("apiReplicas", 1), ("canaryReplicas", 0), ("cacheReplicas", 0),
-                ("releaseTrack", "stable"), ("dataState", "healthy"), ("targetPool", "apps"),
-                ("loadReplicas", 0), ("gatewayReplicas", 1),
-                ("restartToken", Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)))),
-            _ => new Dictionary<string, object>(),
-        };
+            {
+                "cache-on" => Patch(("cacheReplicas", 1)),
+                "cache-off" => Patch(("cacheReplicas", 0)),
+                "release-candidate" => Patch(("releaseTrack", "candidate")),
+                "release-stable" => Patch(("releaseTrack", "stable")),
+                "move-apps" => Patch(("targetPool", "apps")),
+                "move-infra" => Patch(("targetPool", "infra")),
+                "traffic-on" => Patch(("loadReplicas", 1)),
+                "cache-scale" => Patch(("cacheReplicas", 1)),
+                "traffic-off" => Patch(("loadReplicas", 0)),
+                "restart" => Patch(("restartToken", Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)))),
+                "reset" => Patch(
+                    ("apiReplicas", 1), ("canaryReplicas", 0), ("cacheReplicas", 0),
+                    ("releaseTrack", "stable"), ("dataState", "healthy"), ("dbMaxConns", 8),
+                    ("networkMode", "normal"), ("targetPool", "apps"),
+                    ("loadReplicas", 0), ("gatewayReplicas", 1),
+                    ("restartToken", Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)))),
+                _ => new Dictionary<string, object>(),
+            };
         if (spec.Count == 0)
             return BrokerResult.Fail(404, $"Unknown practice action '{actionId}'.");
 
@@ -874,7 +1005,7 @@ public sealed class RunBroker
         {
             var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
                 patch, LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
-            await WriteThroughReplicasAsync(runId, spec, ct);
+            await WriteThroughSpecAsync(runId, spec, ct);
             return BrokerResult.Accepted(RunView.From(Parse(updated)));
         }
         catch (HttpOperationException ex)
@@ -882,6 +1013,364 @@ public sealed class RunBroker
             _log.LogError(ex, "Failed practice action {Action} on {RunId}.", actionId, runId);
             return BrokerResult.Fail(502, "The practice controller rejected the action.");
         }
+    }
+
+    /// <summary>
+    /// Apply one command from the competitive operator allowlist. The caller supplies operator
+    /// vocabulary, never a patch; RankedCommand is the complete translation boundary. Unlike the
+    /// old decision endpoint, an ineffective action does not end the match. The measured stage
+    /// objective remains the only path to progression.
+    /// </summary>
+    public async Task<BrokerResult> SubmitRankedCommandAsync(
+        string runId, string input, string owner, CancellationToken ct)
+    {
+        var resource = await GetOwnedResourceAsync(runId, owner, ct);
+        if (resource is null)
+            return BrokerResult.Fail(404, "No such ranked arena.");
+
+        var view = RunView.From(resource);
+        if (view.DrillMode != "ranked" || view.DrillId.Length == 0)
+            return BrokerResult.Fail(409, "No ranked match is active on this cluster.");
+        if (view.DrillSolved || view.DrillFailed)
+            return BrokerResult.Fail(409, "This ranked match is already sealed.");
+        if (view.RankedActions.Count >= RankedRules.MaxActionsPerAttempt)
+            return BrokerResult.Fail(429, "The action limit for this ranked match was reached.");
+
+        if (!RankedCommand.TryParse(input, out var command, out var error) || command is null)
+            return BrokerResult.Fail(400, error);
+
+        var acceptedAt = DateTime.UtcNow;
+        var entryId = Guid.NewGuid().ToString("n");
+        var actionKey = $"{RankedActionAnnotationPrefix}{entryId}";
+        var actionValue =
+            $"{acceptedAt:O}|{command.Canonical}|{command.ActionId}|{view.DrillStage}";
+        var patchBody = new
+        {
+            metadata = new
+            {
+                annotations = new Dictionary<string, string>
+                {
+                    [actionKey] = actionValue,
+                },
+            },
+            spec = command.SpecPatch,
+        };
+
+        var patch = new k8s.Models.V1Patch(
+            patchBody,
+            k8s.Models.V1Patch.PatchType.MergePatch);
+        try
+        {
+            var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+                patch, LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
+            await WriteThroughSpecAsync(runId, command.SpecPatch, ct);
+            var updatedView = RunView.From(Parse(updated));
+            var attemptId = resource.Metadata.Annotations?
+                .GetValueOrDefault(RankedAttemptIdAnnotation) ?? "";
+            try
+            {
+                await _ranked.RecordActionAsync(
+                    entryId,
+                    attemptId,
+                    runId,
+                    owner,
+                    command.Canonical,
+                    command.ActionId,
+                    view.DrillStage,
+                    acceptedAt,
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                // The LabRun annotation is the retry source. Snapshot evaluation copies it into the
+                // database later, so a brief store outage never turns an applied action into a lie.
+                _log.LogError(
+                    ex,
+                    "Could not persist ranked action {ActionEntryId} for {RunId}.",
+                    entryId,
+                    runId);
+            }
+            return BrokerResult.Accepted(updatedView);
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogError(
+                ex,
+                "Failed ranked command {Command} on {RunId}.",
+                command.Canonical,
+                runId);
+            return BrokerResult.Fail(502, "The ranked controller rejected the command.");
+        }
+    }
+
+    /// <summary>
+    /// Executes one read-only investigation from the ranked allowlist and records that evidence
+    /// before returning it. Unlike the old client-only console, the post-match debrief can now prove
+    /// which signals the operator actually consulted.
+    /// </summary>
+    public async Task<RankedInspectionBrokerResult> InspectRankedAsync(
+        string runId,
+        string input,
+        string owner,
+        CancellationToken ct)
+    {
+        var resource = await GetOwnedResourceAsync(runId, owner, ct);
+        if (resource is null)
+            return RankedInspectionBrokerResult.Fail(404, "No such ranked arena.");
+        var view = RunView.From(resource);
+        if (view.DrillMode != "ranked" || view.DrillId.Length == 0)
+            return RankedInspectionBrokerResult.Fail(
+                409, "No ranked match is active on this cluster.");
+        if (view.DrillSolved || view.DrillFailed)
+            return RankedInspectionBrokerResult.Fail(
+                409, "This ranked match is already sealed.");
+        if (!RankedInspection.TryParse(input, out var inspection, out var error) ||
+            inspection is null)
+            return RankedInspectionBrokerResult.Fail(400, error);
+
+        IReadOnlyList<string> lines;
+        try
+        {
+            lines = inspection.Kind switch
+            {
+                "metrics" => await InspectMetricsAsync(resource, view, inspection, ct),
+                "events" => InspectEvents(
+                    await GetEventsAsync(runId, owner, ct) ?? [],
+                    inspection.WarningsOnly),
+                "pods" => InspectPods(
+                    await GetComponentsAsync(runId, owner, ct) ?? [],
+                    inspection.Service),
+                "logs" => await InspectLogsAsync(resource, inspection.Service, ct),
+                "deployments" => await InspectDeploymentsAsync(resource, ct),
+                "trace" => InspectTrace(await GetTraceAsync(runId, owner, ct)),
+                "history" => InspectHistory(view),
+                _ => [],
+            };
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogDebug(
+                ex,
+                "Ranked inspection {Inspection} failed for {RunId}.",
+                inspection.Canonical,
+                runId);
+            return RankedInspectionBrokerResult.Fail(
+                503, "That cluster evidence is temporarily unavailable.");
+        }
+
+        if (lines.Count == 0) lines = ["No matching evidence is available yet."];
+        var observedUtc = DateTime.UtcNow;
+        var evidenceId = Guid.NewGuid().ToString("n");
+        var attemptId = resource.Metadata.Annotations?
+            .GetValueOrDefault(RankedAttemptIdAnnotation) ?? "";
+        RankedEvidenceView? saved;
+        try
+        {
+            saved = await _ranked.RecordEvidenceAsync(
+                evidenceId,
+                attemptId,
+                runId,
+                owner,
+                inspection.Canonical,
+                inspection.Kind,
+                string.Join(" | ", lines.Take(3)),
+                view.DrillStage,
+                observedUtc,
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Could not persist ranked evidence for {RunId}.", runId);
+            return RankedInspectionBrokerResult.Fail(
+                503, "The evidence audit is temporarily unavailable.");
+        }
+        if (saved is null)
+            return RankedInspectionBrokerResult.Fail(
+                429, "The evidence limit for this ranked match was reached.");
+
+        return RankedInspectionBrokerResult.Accepted(
+            new RankedInspectionResult(
+                evidenceId,
+                inspection.Canonical,
+                inspection.Kind,
+                view.DrillStage,
+                observedUtc,
+                lines));
+    }
+
+    private async Task<IReadOnlyList<string>> InspectMetricsAsync(
+        LabRunResource resource,
+        RunView view,
+        RankedInspection inspection,
+        CancellationToken ct)
+    {
+        if (inspection.Service is not null)
+        {
+            var components = await GetComponentsAsync(view.RunId, view.Owner, ct) ?? [];
+            var component = components.FirstOrDefault(candidate =>
+                candidate.Name == inspection.Service);
+            if (component is null)
+                return [$"No measured service matches '{inspection.Service}'."];
+            var limit = component.CpuLimitMillicoresPerPod <= 0
+                ? ""
+                : $" / {component.CpuLimitMillicoresPerPod * Math.Max(1, component.Desired)}m limit";
+            return
+            [
+                $"{component.Name}: {component.Ready}/{component.Desired} ready",
+                $"cpu {component.CpuMillicores}m{limit} · memory {component.MemoryMiB}Mi",
+                $"restarts {component.Pods.Sum(pod => pod.Restarts)}",
+            ];
+        }
+
+        var telemetry = await GetTelemetryAsync(view.RunId, view.Owner, ct);
+        if (telemetry is null) return ["No request telemetry is available yet."];
+        var visibility = RankedScenarioCatalog.TryPlan(view.DrillId)?.Telemetry;
+        var served = visibility?.Throughput == false
+            ? "served [withheld]"
+            : $"served {telemetry.RequestsPerSec}/s";
+        var latency = visibility?.Latency == false
+            ? "p95 [withheld]"
+            : $"p95 {telemetry.P95LatencyMs:0.#}ms";
+        var errors = visibility?.Errors == false
+            ? "errors [withheld]"
+            : $"errors {telemetry.ErrorRatePct:0.00}%";
+        return
+        [
+            $"{served} · offered {view.OfferedRequestsPerSec}/s",
+            $"{latency} · objective is judged server-side",
+            $"{errors} · live gauges follow match visibility",
+            $"checkout {view.ApiReplicas} · gateway {view.GatewayReplicas} · canary {view.CanaryReplicas}",
+        ];
+    }
+
+    private static IReadOnlyList<string> InspectEvents(
+        IReadOnlyList<RunEventView> events,
+        bool warningsOnly)
+    {
+        var visible = (warningsOnly
+                ? events.Where(item => item.Severity == "warning")
+                : events)
+            .TakeLast(8)
+            .Select(item =>
+                $"{(item.Severity == "warning" ? "WARN" : "INFO")} {item.Reason} · {item.Message}")
+            .ToArray();
+        return visible.Length == 0
+            ? [warningsOnly
+                ? "No Kubernetes warnings in the current event window."
+                : "No Kubernetes events are available yet."]
+            : visible;
+    }
+
+    private static IReadOnlyList<string> InspectPods(
+        IReadOnlyList<RunComponent> components,
+        string? service)
+    {
+        var selected = service is null
+            ? components
+            : components.Where(component => component.Name == service).ToArray();
+        if (service is not null && selected.Count == 0)
+            return [$"No measured service matches '{service}'."];
+        var lines = selected
+            .SelectMany(component => component.Pods.Select(pod =>
+                $"{component.Name}/{pod.Name} {(pod.Ready ? "ready" : pod.Detail.Length > 0 ? pod.Detail : pod.Phase)} "
+                + $"pool={(pod.Pool.Length > 0 ? pod.Pool : "pending")} cpu={pod.CpuMillicores}m mem={pod.MemoryMiB}Mi"))
+            .TakeLast(24)
+            .ToArray();
+        return lines.Length == 0 ? ["No pods are visible yet."] : lines;
+    }
+
+    private async Task<IReadOnlyList<string>> InspectLogsAsync(
+        LabRunResource resource,
+        string? service,
+        CancellationToken ct)
+    {
+        var ns = resource.Status?.Namespace ?? resource.Spec.RunId;
+        var app = service ?? "checkout";
+        var pods = await _k8s.CoreV1.ListNamespacedPodAsync(
+            ns,
+            labelSelector: $"app={app}",
+            cancellationToken: ct);
+        var selected = pods.Items
+            .Where(pod => pod.Metadata?.Name is { Length: > 0 })
+            .OrderByDescending(pod =>
+                pod.Status?.ContainerStatuses?.All(container => container.Ready) == true)
+            .Take(2)
+            .ToArray();
+        if (selected.Length == 0) return [$"No {app} pod is available for logs."];
+
+        var lines = new List<string>();
+        foreach (var pod in selected)
+        {
+            await using var stream = await _k8s.CoreV1.ReadNamespacedPodLogAsync(
+                pod.Metadata.Name,
+                ns,
+                tailLines: 24,
+                timestamps: true,
+                cancellationToken: ct);
+            using var reader = new StreamReader(stream);
+            var text = await RankedLogSanitizer.ReadBoundedAsync(reader, ct: ct);
+            lines.AddRange(text
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(RankedLogSanitizer.Sanitize)
+                .Where(line => line.Length > 0));
+        }
+        return lines.TakeLast(32).ToArray();
+    }
+
+    private async Task<IReadOnlyList<string>> InspectDeploymentsAsync(
+        LabRunResource resource,
+        CancellationToken ct)
+    {
+        var ns = resource.Status?.Namespace ?? resource.Spec.RunId;
+        var deployments = await _k8s.AppsV1.ListNamespacedDeploymentAsync(
+            ns, cancellationToken: ct);
+        return deployments.Items
+            .OrderBy(deployment => deployment.Metadata?.Name, StringComparer.Ordinal)
+            .Select(deployment =>
+            {
+                var name = deployment.Metadata?.Name ?? "deployment";
+                var desired = deployment.Spec?.Replicas ?? 0;
+                var updated = deployment.Status?.UpdatedReplicas ?? 0;
+                var ready = deployment.Status?.ReadyReplicas ?? 0;
+                var unavailable = deployment.Status?.UnavailableReplicas ?? 0;
+                var generation = deployment.Metadata?.Generation ?? 0;
+                var observed = deployment.Status?.ObservedGeneration ?? 0;
+                var condition = deployment.Status?.Conditions?
+                    .OrderByDescending(item => item.LastUpdateTime)
+                    .FirstOrDefault();
+                var state = condition is null
+                    ? "waiting for controller status"
+                    : $"{condition.Type}={condition.Status} {condition.Reason}";
+                return $"{name}: generation {observed}/{generation} · updated {updated}/{desired} · "
+                    + $"ready {ready}/{desired} · unavailable {unavailable} · {state}";
+            })
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> InspectTrace(RunTrace? trace) =>
+        trace is null
+            ? ["No distributed trace has been captured yet."]
+            :
+            [
+                $"trace {trace.TraceId[..Math.Min(12, trace.TraceId.Length)]} · {trace.DurationMs}ms · release {trace.Release}",
+                .. trace.Spans.Select(span =>
+                    $"{(span.Status == "error" ? "ERR " : "OK  ")} {span.Service}/{span.Name} {span.DurationMs}ms"),
+            ];
+
+    private static IReadOnlyList<string> InspectHistory(RunView view)
+    {
+        var lines = view.RankedActions
+            .Select(action =>
+                $"{TimeSpan.FromMilliseconds(action.AcceptedAtMs):mm\\:ss}  {action.Command}")
+            .ToArray();
+        return lines.Length == 0 ? ["No mutations accepted yet."] : lines;
+    }
+
+    private static string SanitizeLogLine(string line)
+    {
+        var cleaned = line.Replace('\r', ' ').Replace('\t', ' ').Trim();
+        if (cleaned.Length > 180) cleaned = cleaned[..180] + "…";
+        return cleaned;
     }
 
     // The composed Object that owns each scalable tier. Kept in one place so the write-through below
@@ -895,7 +1384,7 @@ public sealed class RunBroker
         ("gatewayReplicas", "envoy"),
     ];
 
-    // Make a replica change visible now rather than a minute from now.
+    // Make an operator change visible now rather than a minute from now.
     //
     // Changing a LabRun's spec should reach the Deployment immediately, and on a settled run it does
     // (~200ms). But Crossplane v2 guards realtime composition with a circuit breaker, and the twenty
@@ -903,12 +1392,12 @@ public sealed class RunBroker
     // spec change waits out the breaker's cooldown, up to a minute, which is most of a practice
     // cluster's useful life. Measured on a fresh run: 55s through Crossplane, 228ms written through.
     //
-    // So the broker writes the replica count it just stored on the LabRun straight to the composed
-    // Object as well. This is not a second source of truth: the LabRun still holds the value, and
+    // So the broker writes the allowlisted state it just stored on the LabRun straight to the
+    // composed Object as well. This is not a second source of truth: the LabRun still holds it, and
     // when Crossplane does reconcile it writes the identical number, so there is nothing to diverge
     // and the workload cannot flap back. Best effort by design — if it fails, the run is exactly as
     // correct as before, just slower to show it.
-    private async Task WriteThroughReplicasAsync(
+    private async Task WriteThroughSpecAsync(
         string runId, IReadOnlyDictionary<string, object> spec, CancellationToken ct)
     {
         foreach (var (field, suffix) in ReplicaTiers)
@@ -926,6 +1415,79 @@ public sealed class RunBroker
             catch (HttpOperationException ex)
             {
                 _log.LogDebug(ex, "Write-through to {RunId}-{Suffix} failed.", runId, suffix);
+            }
+        }
+
+        var workloadChanges = new Dictionary<string, List<object>>(StringComparer.Ordinal);
+        void Replace(string suffix, string path, object value)
+        {
+            if (!workloadChanges.TryGetValue(suffix, out var operations))
+            {
+                operations = [];
+                workloadChanges[suffix] = operations;
+            }
+            operations.Add(new { op = "replace", path, value });
+        }
+        void ReplaceBoth(string path, object value)
+        {
+            Replace("checkout", path, value);
+            Replace("checkout-canary", path, value);
+        }
+
+        if (spec.TryGetValue("dbMaxConns", out var dbMaxConns) && dbMaxConns is int connections)
+            ReplaceBoth(
+                "/spec/forProvider/manifest/spec/template/spec/containers/0/env/4/value",
+                connections.ToString(CultureInfo.InvariantCulture));
+        if (spec.TryGetValue("networkMode", out var networkMode) && networkMode is string network)
+            ReplaceBoth(
+                "/spec/forProvider/manifest/spec/template/metadata/labels/homeops-db-network",
+                network);
+        if (spec.TryGetValue("targetPool", out var targetPool) && targetPool is string pool)
+        {
+            var hostname = pool switch
+            {
+                "apps" => "k3s-worker-apps",
+                "infra" => "k3s-worker-infra",
+                "unavailable" => "homeops-no-such-worker",
+                _ => "",
+            };
+            if (hostname.Length > 0)
+                ReplaceBoth(
+                    "/spec/forProvider/manifest/spec/template/spec/nodeSelector/kubernetes.io~1hostname",
+                    hostname);
+        }
+        if (spec.TryGetValue("restartToken", out var restartToken) && restartToken is string token)
+            ReplaceBoth(
+                "/spec/forProvider/manifest/spec/template/metadata/annotations/homeops.isaacwallace.dev~1restart-token",
+                token);
+        if (spec.TryGetValue("releaseTrack", out var releaseTrack) && releaseTrack is string release)
+            Replace(
+                "checkout",
+                "/spec/forProvider/manifest/spec/template/spec/containers/0/env/5/value",
+                release);
+        if (spec.TryGetValue("dataState", out var dataState) && dataState is string data)
+            ReplaceBoth(
+                "/spec/forProvider/manifest/spec/template/spec/containers/0/env/6/value",
+                data);
+
+        foreach (var (suffix, operations) in workloadChanges)
+        {
+            var patch = new k8s.Models.V1Patch(
+                operations,
+                k8s.Models.V1Patch.PatchType.JsonPatch);
+            try
+            {
+                await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+                    patch, "kubernetes.crossplane.io", "v1alpha2", "objects",
+                    $"{runId}-{suffix}", cancellationToken: ct);
+            }
+            catch (HttpOperationException ex)
+            {
+                _log.LogDebug(
+                    ex,
+                    "Workload write-through to {RunId}-{Suffix} failed.",
+                    runId,
+                    suffix);
             }
         }
     }
@@ -1067,14 +1629,24 @@ public sealed class RunBroker
     // than inferred, so a reload lands on the same verdict and a second api replica agrees with it.
     public const string DrillFailedAnnotation = "homeops.isaacwallace.dev/drill-failed-at";
     public const string DrillFailedMoveAnnotation = "homeops.isaacwallace.dev/drill-failed-move";
+    public const string DrillVoidedAnnotation = "homeops.isaacwallace.dev/drill-voided-at";
+    public const string InfrastructureUnhealthySinceAnnotation =
+        "homeops.isaacwallace.dev/infra-unhealthy-since";
+    public const string InfrastructureUnhealthyReasonAnnotation =
+        "homeops.isaacwallace.dev/infra-unhealthy-reason";
+    public const string InfrastructureVoidMove = "infrastructure-void";
     public const string RankedAttemptIdAnnotation = "homeops.isaacwallace.dev/ranked-attempt-id";
     public const string LastRankedDrillAnnotation = "homeops.isaacwallace.dev/last-ranked-drill";
+    public const string RankedActionAnnotationPrefix = "homeops.isaacwallace.dev/ranked-action-";
+    public const string DelayedStageAppliedAnnotationPrefix =
+        "homeops.isaacwallace.dev/ranked-delayed-stage-";
     public const string LearningCourseAnnotation = "homeops.isaacwallace.dev/learning-course";
     public const string LearningCourseVersionAnnotation = "homeops.isaacwallace.dev/learning-course-version";
     public const string LearningUnitAnnotation = "homeops.isaacwallace.dev/learning-unit";
 
     /// <summary>How long the objective must hold continuously before a stage counts as resolved.</summary>
     public static readonly TimeSpan GoalHold = TimeSpan.FromSeconds(15);
+    public static readonly TimeSpan InfrastructureFailureGrace = TimeSpan.FromSeconds(30);
 
     // Judge the active stage against what the cluster is measurably doing, then either open the next
     // stage of the cascade or record the drill as solved.
@@ -1091,7 +1663,7 @@ public sealed class RunBroker
     {
         var view = RunView.From(resource);
         if (view.DrillId.Length == 0 ||
-            !ScenarioDefinitions.All.TryGetValue(view.DrillId, out var drill) ||
+            ScenarioDefinitions.Find(view.DrillId) is not { } drill ||
             drill.Stages.Count == 0)
             return new DrillEvaluation([], resource);
 
@@ -1100,15 +1672,22 @@ public sealed class RunBroker
         if (stage.Goals.Count == 0) return new DrillEvaluation([], resource);
 
         var goals = ScenarioDefinitions.Evaluate(stage, telemetry, resource.Spec);
+        await TryPersistRankedActionsAsync(resource, view, ct);
+        await TryRecordRankedTelemetryAsync(resource, view, telemetry, stage, goals, ct);
         var annotations = resource.Metadata.Annotations;
-        // Nothing further is judged once the attempt is decided, either way. A failed ranked run
-        // keeps measuring and drawing — the point is to watch what the wrong move did — but it can
-        // no longer advance a stage or record a time.
+        // Terminal receipts take precedence over delayed activation. A decided attempt may keep
+        // rendering measured goals, but the platform must never introduce another fault afterwards.
         if (annotations?.ContainsKey(DrillSolvedAnnotation) == true)
         {
             await TryRecordAcademyAsync(resource, view, displayName, ct);
             await TryFinalizeRankedAsync(
                 resource, view, RankedOutcomes.Completed, displayName, ct);
+            return new DrillEvaluation(goals, resource);
+        }
+        if (annotations?.ContainsKey(DrillVoidedAnnotation) == true)
+        {
+            await TryFinalizeRankedAsync(
+                resource, view, RankedOutcomes.Void, displayName, ct);
             return new DrillEvaluation(goals, resource);
         }
         if (annotations?.ContainsKey(DrillFailedAnnotation) == true)
@@ -1118,6 +1697,29 @@ public sealed class RunBroker
             return new DrillEvaluation(goals, resource);
         }
 
+        var delayed = stage.DelayedSetup;
+        var delayedKey = $"{DelayedStageAppliedAnnotationPrefix}{stageIndex}";
+        if (delayed is { Count: > 0 } &&
+            annotations?.ContainsKey(delayedKey) != true)
+        {
+            var pending = new DrillGoalState(
+                "Incident activation",
+                $"after {stage.ActivationDelaySeconds}s",
+                view.DrillStageElapsedSeconds < stage.ActivationDelaySeconds
+                    ? "developing"
+                    : "applying",
+                false);
+            if (view.DrillStageElapsedSeconds < stage.ActivationDelaySeconds)
+                return new DrillEvaluation([.. goals, pending], resource);
+
+            var activated = await ApplyDelayedStageSetupAsync(
+                view.RunId,
+                stageIndex,
+                delayedKey,
+                delayed,
+                ct);
+            return new DrillEvaluation([.. goals, pending], activated ?? resource);
+        }
         var heldSince = annotations?.GetValueOrDefault(DrillGoalsMetSinceAnnotation);
         var now = DateTime.UtcNow;
 
@@ -1143,7 +1745,7 @@ public sealed class RunBroker
                 heldSince, null,
                 DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
                 out var since) ||
-            now - since < GoalHold)
+            now - since < TimeSpan.FromSeconds(stage.HoldSeconds))
             return new DrillEvaluation(goals, resource);
 
         // The stage is genuinely resolved. The moment that counts is when the objective was FIRST
@@ -1171,6 +1773,46 @@ public sealed class RunBroker
         return new DrillEvaluation(goals, resource);
     }
 
+    private async Task<LabRunResource?> ApplyDelayedStageSetupAsync(
+        string runId,
+        int stageIndex,
+        string annotationKey,
+        IReadOnlyDictionary<string, object> setup,
+        CancellationToken ct)
+    {
+        try
+        {
+            var applied = new Dictionary<string, object>(setup, StringComparer.Ordinal);
+            FreshenRestartToken(applied);
+            var annotations = new Dictionary<string, string?>
+            {
+                [annotationKey] = DateTime.UtcNow.ToString("O"),
+                [DrillGoalsMetSinceAnnotation] = null,
+            };
+            var patch = new k8s.Models.V1Patch(
+                new { metadata = new { annotations }, spec = applied },
+                k8s.Models.V1Patch.PatchType.MergePatch);
+            var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+                patch,
+                LabRun.Group,
+                LabRun.Version,
+                LabRun.Plural,
+                runId,
+                cancellationToken: ct);
+            await WriteThroughSpecAsync(runId, applied, ct);
+            return Parse(updated);
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogError(
+                ex,
+                "Could not activate delayed ranked fault for {RunId} stage {Stage}.",
+                runId,
+                stageIndex + 1);
+            return null;
+        }
+    }
+
     // Open the next stage: record where the cascade has got to, and apply the consequence. This is
     // what makes a multi-stage drill worth doing — the incident the operator is about to see is one
     // their own fix caused, applied to the same live workload they just repaired.
@@ -1181,9 +1823,7 @@ public sealed class RunBroker
         var setup = new Dictionary<string, object>(next.Setup, StringComparer.Ordinal);
         // A stage can ask for a rollout as part of its problem; the token has to be new every time
         // or the Deployment sees no change and nothing restarts.
-        if (setup.TryGetValue("restartToken", out var token) &&
-            token as string == ScenarioDefinitions.FreshRestartToken)
-            setup["restartToken"] = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6));
+        FreshenRestartToken(setup);
 
         var annotations = new Dictionary<string, string?>
         {
@@ -1202,7 +1842,7 @@ public sealed class RunBroker
                 k8s.Models.V1Patch.PatchType.MergePatch);
             var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
                 patch, LabRun.Group, LabRun.Version, LabRun.Plural, view.RunId, cancellationToken: ct);
-            await WriteThroughReplicasAsync(view.RunId, setup, ct);
+            await WriteThroughSpecAsync(view.RunId, setup, ct);
             return Parse(updated);
         }
         catch (HttpOperationException ex)
@@ -1362,6 +2002,98 @@ public sealed class RunBroker
         }
     }
 
+    private async Task TryPersistRankedActionsAsync(
+        LabRunResource resource,
+        RunView view,
+        CancellationToken ct)
+    {
+        try
+        {
+            await PersistRankedActionsAsync(resource, view, ct);
+        }
+        catch (Exception ex)
+        {
+            // Annotations remain on the live match, so the next measured snapshot retries the copy.
+            _log.LogError(ex, "Could not synchronize ranked actions for {RunId}.", view.RunId);
+        }
+    }
+
+    private async Task TryRecordRankedTelemetryAsync(
+        LabRunResource resource,
+        RunView view,
+        RunTelemetry telemetry,
+        DrillStage stage,
+        IReadOnlyList<DrillGoalState> goals,
+        CancellationToken ct)
+    {
+        if (view.DrillMode != "ranked") return;
+        var attemptId = resource.Metadata.Annotations?
+            .GetValueOrDefault(RankedAttemptIdAnnotation) ?? "";
+        if (attemptId.Length == 0) return;
+
+        var evaluated = stage.Goals.Zip(goals).ToArray();
+        var slo = evaluated
+            .Where(pair => pair.First.Metric is "throughput" or "p95" or "errors")
+            .ToArray();
+        try
+        {
+            var recorded = await _ranked.RecordTelemetryAsync(
+                new RankedTelemetryObservation(
+                    attemptId,
+                    view.RunId,
+                    view.Owner,
+                    DateTime.UtcNow,
+                    view.DrillStage,
+                    view.OfferedRequestsPerSec,
+                    telemetry.RequestsPerSec,
+                    telemetry.P95LatencyMs,
+                    telemetry.ErrorRatePct,
+                    evaluated.Count(pair => pair.Second.Met),
+                    evaluated.Length,
+                    slo.Count(pair => pair.Second.Met),
+                    slo.Length,
+                    view.DrillHeldSeconds),
+                ct);
+            if (!recorded)
+                throw new InvalidOperationException(
+                    $"Ranked telemetry could not be attached to attempt '{attemptId}'.");
+        }
+        catch (Exception ex)
+        {
+            // A completed match is not rated without at least one durable sample. The solve stays on
+            // the LabRun, so the next snapshot can retry both this bucket and finalization.
+            _log.LogError(ex, "Could not record ranked telemetry for {RunId}.", view.RunId);
+        }
+    }
+
+    private async Task PersistRankedActionsAsync(
+        LabRunResource resource,
+        RunView view,
+        CancellationToken ct)
+    {
+        if (view.DrillMode != "ranked" || view.RankedActions.Count == 0) return;
+        var attemptId = resource.Metadata.Annotations?
+            .GetValueOrDefault(RankedAttemptIdAnnotation) ?? "";
+        if (attemptId.Length == 0) return;
+
+        foreach (var action in view.RankedActions)
+        {
+            var recorded = await _ranked.RecordActionAsync(
+                action.Id,
+                attemptId,
+                view.RunId,
+                view.Owner,
+                action.Command,
+                action.ActionId,
+                action.Stage,
+                action.AcceptedUtc,
+                ct);
+            if (!recorded)
+                throw new InvalidOperationException(
+                    $"Ranked action '{action.Id}' could not be attached to its attempt.");
+        }
+    }
+
     private async Task<RankedAttemptView?> FinalizeRankedAsync(
         LabRunResource resource,
         RunView view,
@@ -1372,6 +2104,10 @@ public sealed class RunBroker
         int? stageReached = null)
     {
         if (view.DrillMode != "ranked") return null;
+
+        // Rating must explain every mutation the cluster accepted. If the durable action copy is
+        // unavailable, keep the attempt active and retry from the LabRun annotations next poll.
+        await PersistRankedActionsAsync(resource, view, ct);
 
         var attemptId = resource.Metadata.Annotations?
             .GetValueOrDefault(RankedAttemptIdAnnotation);
@@ -1396,6 +2132,8 @@ public sealed class RunBroker
     private static string TerminalOutcome(RunView view, string interruptedOutcome) =>
         view.DrillSolved
             ? RankedOutcomes.Completed
+            : view.DrillFailedMove == InfrastructureVoidMove
+                ? RankedOutcomes.Void
             : view.DrillFailed
                 ? RankedOutcomes.Failed
                 : interruptedOutcome;
@@ -1408,6 +2146,14 @@ public sealed class RunBroker
             out var parsed)
             ? parsed
             : null;
+
+    private static void FreshenRestartToken(IDictionary<string, object> setup)
+    {
+        if (setup.TryGetValue("restartToken", out var token) &&
+            token as string == ScenarioDefinitions.FreshRestartToken)
+            setup["restartToken"] =
+                Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6));
+    }
 
     private static int SetupInt(
         IReadOnlyDictionary<string, object> setup, string key, int fallback) =>
@@ -1478,12 +2224,19 @@ public sealed class RunBroker
         if (resource is null) return false;
         var view = RunView.From(resource);
         if (view.DrillMode == "ranked")
+        {
+            await PersistRankedActionsAsync(resource, view, ct);
+            var frame = await GetFrameAsync(resource, ct);
+            var infrastructureFailed = InfrastructureProblem(resource, frame) is not null;
             await FinalizeRankedAsync(
                 resource,
                 view,
-                TerminalOutcome(view, RankedOutcomes.Expired),
+                infrastructureFailed
+                    ? RankedOutcomes.Void
+                    : TerminalOutcome(view, RankedOutcomes.Expired),
                 "",
                 ct);
+        }
 
         try
         {
@@ -1508,12 +2261,15 @@ public sealed class RunBroker
         if (resource is null) return false;
         var view = RunView.From(resource);
         if (view.DrillMode == "ranked")
+        {
+            await PersistRankedActionsAsync(resource, view, ct);
             await FinalizeRankedAsync(
                 resource,
                 view,
                 TerminalOutcome(view, RankedOutcomes.Forfeited),
                 displayName,
                 ct);
+        }
 
         try
         {
@@ -1619,4 +2375,16 @@ public sealed record BrokerResult(RunView? Run, int Status, string? Error)
     public static BrokerResult Ok(RunView run) => new(run, 201, null);
     public static BrokerResult Accepted(RunView run) => new(run, 200, null);
     public static BrokerResult Fail(int status, string error) => new(null, status, error);
+}
+
+public sealed record RankedInspectionBrokerResult(
+    RankedInspectionResult? Inspection,
+    int Status,
+    string? Error)
+{
+    public static RankedInspectionBrokerResult Accepted(RankedInspectionResult inspection) =>
+        new(inspection, 200, null);
+
+    public static RankedInspectionBrokerResult Fail(int status, string error) =>
+        new(null, status, error);
 }

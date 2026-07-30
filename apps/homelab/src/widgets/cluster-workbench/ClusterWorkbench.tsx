@@ -20,7 +20,7 @@ import {
   useCoaching,
   useDrillState,
 } from "@/features/drill";
-import { RankedResult } from "@/features/ranked";
+import { RankedArena, RankedResult } from "@/features/ranked";
 import { RankedHub } from "@/widgets/leaderboard";
 import { SCALABLE, type ServiceId } from "./model/topology";
 import { useClusterEdges } from "./model/useClusterEdges";
@@ -193,7 +193,9 @@ export default function ClusterWorkbench({
   const activeSurface =
     run.drillMode === "ranked" ? ("ranked" as const) : ("practice" as const);
   const surfaceMismatch = drillRunning && activeSurface !== surface;
-  const flowing = run.loadEnabled && run.telemetry.requestsPerSec > 0;
+  const throughputWithheld = run.rankedBriefing?.telemetry.throughput === false;
+  const flowing =
+    run.loadEnabled && (throughputWithheld || run.telemetry.requestsPerSec > 0);
 
   // What the operator has asked for. Known the instant a control is used, whereas the Deployment's
   // own desired count only catches up a round-trip later — so the graph can draw a card per intended
@@ -331,13 +333,7 @@ export default function ClusterWorkbench({
                 drill.phase.kind === "failed" ? (
                   <RankedResult run={run} busy={busy} act={act} />
                 ) : (
-                  <DrillPanel
-                    run={run}
-                    busy={busy}
-                    provisioning={provisioning}
-                    act={act}
-                    state={drill}
-                  />
+                  <RankedArena run={run} busy={busy} act={act} />
                 )
               ) : (
                 <>

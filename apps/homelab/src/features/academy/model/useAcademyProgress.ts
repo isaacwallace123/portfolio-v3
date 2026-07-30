@@ -11,7 +11,12 @@ import {
   type CompleteUnitBody,
 } from "../api/learning-client";
 import type { LearningCourse } from "./course";
-import { courseState, emptyProgress, type CourseProgress } from "./progress";
+import {
+  courseState,
+  emptyProgress,
+  type CourseProgress,
+  type UnitProgress,
+} from "./progress";
 import { unlockedSegments } from "./unlocks";
 
 // The learner's progress, from wherever it can honestly be kept.
@@ -26,8 +31,63 @@ import { unlockedSegments } from "./unlocks";
 
 const STORAGE_PREFIX = "homeops:academy:";
 
+/**
+ * Unit types the account owns outright.
+ *
+ * A capstone and the final assessment become complete because the run broker judged a real cluster
+ * from measured telemetry and wrote the row itself. The API refuses a client-reported completion
+ * for either — `POST /units/{id}/complete` answers 409 for `drill:` and `assessment:` — so there is
+ * no such thing as a local one worth pushing, and offering one is a request that can only fail.
+ */
+const CLUSTER_OWNED = new Set<UnitProgress["unitType"]>([
+  "drill",
+  "assessment",
+]);
+
+/**
+ * What the one-way merge may push when a signed-out learner signs in.
+ *
+ * Only work the browser is actually allowed to report: lessons and checkpoints, and only those the
+ * account has no row for. An account row always wins — local storage is a waiting room, not a
+ * second source of truth — and anything the cluster owns is left to the server that measured it.
+ */
+export function syncableUnits(
+  local: CourseProgress,
+  remote: CourseProgress,
+): UnitProgress[] {
+  return Object.values(local.units).filter(
+    (u) =>
+      (u.status === "completed" || u.status === "mastered") &&
+      !CLUSTER_OWNED.has(u.unitType) &&
+      remote.units[u.unitId] === undefined,
+  );
+}
+
 function storageKey(course: LearningCourse) {
   return `${STORAGE_PREFIX}${course.id}:v${course.version}`;
+}
+
+/**
+ * What a stored blob is allowed to become.
+ *
+ * Progress from another version of the course is kept under its own key, so anything read here is
+ * already the right version. Two things are overwritten whatever the blob says: the certificate,
+ * because one the browser could mint for itself is an image rather than a record, and
+ * `accountBacked`, because local storage is by definition not an account. Everything else is the
+ * learner's own reading, and it is theirs to keep.
+ */
+export function localProgress(
+  course: LearningCourse,
+  parsed: Partial<CourseProgress>,
+): CourseProgress {
+  return {
+    ...emptyProgress(course),
+    ...parsed,
+    courseId: course.id,
+    courseVersion: course.version,
+    certificate: null,
+    accountBacked: false,
+  };
 }
 
 function readLocal(course: LearningCourse): CourseProgress {
@@ -35,15 +95,7 @@ function readLocal(course: LearningCourse): CourseProgress {
   try {
     const raw = window.localStorage.getItem(storageKey(course));
     if (!raw) return emptyProgress(course);
-    const parsed = JSON.parse(raw) as CourseProgress;
-    // Progress from another version of the course is kept in its own key, so anything read here is
-    // already the right version. A certificate is never trusted from local storage.
-    return {
-      ...emptyProgress(course),
-      ...parsed,
-      certificate: null,
-      accountBacked: false,
-    };
+    return localProgress(course, JSON.parse(raw) as Partial<CourseProgress>);
   } catch {
     return emptyProgress(course);
   }
@@ -98,12 +150,9 @@ export function useAcademyProgress(course: LearningCourse): AcademyProgress {
       const remote = toCourseProgress(dto, true);
 
       // One-way merge: anything finished locally that the account does not know about is pushed up
-      // once, then the account's answer stands. Local rows never overwrite an account row.
-      const unsynced = Object.values(local.units).filter(
-        (u) =>
-          (u.status === "completed" || u.status === "mastered") &&
-          remote.units[u.unitId] === undefined,
-      );
+      // once, then the account's answer stands. Local rows never overwrite an account row, and
+      // nothing the cluster owns is offered at all.
+      const unsynced = syncableUnits(local, remote);
       if (unsynced.length > 0) {
         await Promise.allSettled(
           unsynced.map((u) =>

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type { LearningCourse } from "../model/course";
 import { assessmentUnitId } from "../model/course";
+import { ASSESSMENT_HREF } from "../model/assessment";
 import { isComplete } from "../model/progress";
 import { assessmentLockReason, assessmentUnlocked } from "../model/unlocks";
 import { useAcademyProgress } from "../model/useAcademyProgress";
@@ -88,28 +89,30 @@ export function CoursePath({ course }: { course: LearningCourse }) {
           <p>{course.finalAssessmentSummary}</p>
 
           <div className={styles.actions}>
-            {assessmentOpen ? (
-              <Link
-                className={styles.primary}
-                href={`/practice/drill/${course.finalAssessmentDrillId}?assessment=1`}
-              >
-                <Radio size={15} aria-hidden />
-                {assessmentDone
-                  ? "Retry the assessment"
-                  : "Start the assessment"}
-                <ArrowRight size={14} aria-hidden />
-              </Link>
-            ) : (
-              <p
-                className={styles.notice}
-                data-tone="warn"
-                style={{ margin: 0 }}
-              >
-                <Lock size={15} aria-hidden />
-                <span>{assessmentLockReason(course, progress)}</span>
-              </p>
-            )}
+            {/* Always the overview, never straight into a provisioning screen — including while
+                it is locked, because "what is still missing, and where do I go about it" is a
+                question the assessment page answers and a one-line banner cannot. */}
+            <Link className={styles.primary} href={ASSESSMENT_HREF}>
+              <Radio size={15} aria-hidden />
+              {assessmentDone
+                ? "Review the final assessment"
+                : assessmentOpen
+                  ? "Open the final assessment"
+                  : "What the assessment needs"}
+              <ArrowRight size={14} aria-hidden />
+            </Link>
           </div>
+
+          {!assessmentOpen && (
+            <p
+              className={styles.notice}
+              data-tone="warn"
+              style={{ marginTop: 18 }}
+            >
+              <Lock size={15} aria-hidden />
+              <span>{assessmentLockReason(course, progress)}</span>
+            </p>
+          )}
         </div>
       </section>
 

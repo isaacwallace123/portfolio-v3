@@ -41,21 +41,24 @@ export async function liveFetch(
   const signal = init?.signal
     ? AbortSignal.any([init.signal, timeout])
     : timeout;
+  const headers = new Headers(init?.headers);
+  headers.set("Content-Type", "application/json");
+  headers.set("Authorization", `Bearer ${RUNS_KEY}`);
+  if (owner) headers.set("X-Owner-Key", owner);
+  else headers.delete("X-Owner-Key");
+  if (ownerName) headers.set("X-Owner-Name", ownerName);
+  else headers.delete("X-Owner-Name");
 
   try {
     return await fetch(`${API_BASE}${path}`, {
       ...init,
       signal,
       headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${RUNS_KEY}`,
         // Identifies which signed-in person owns the cluster. Resolved server-side from the SSO
         // session; the browser never supplies it, so it cannot be spoofed by a caller.
-        ...(owner ? { "X-Owner-Key": owner } : {}),
         // The name to put on the leaderboard, from the same verified session. Display only — nothing
         // is ever authorised by it, so the API can take it at face value for a row label.
-        ...(ownerName ? { "X-Owner-Name": ownerName } : {}),
-        ...init?.headers,
+        ...Object.fromEntries(headers.entries()),
       },
       cache: "no-store",
     });

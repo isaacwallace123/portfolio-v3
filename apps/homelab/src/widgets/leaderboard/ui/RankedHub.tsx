@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import {
   Activity,
-  ArrowRight,
   Check,
+  Clock3,
   Flame,
   Gauge,
   History,
@@ -32,16 +32,14 @@ import {
   type RankedProfile,
 } from "@/shared/api/live-client";
 import { clock } from "@/shared/lib/format";
-import { PODIUM_PLACES } from "../model/board";
 import { useLeaderboard } from "../model/useLeaderboard";
 import { BoardSkeleton } from "./BoardSkeleton";
-import { BoardTable } from "./BoardTable";
-import { Podium } from "./Podium";
 import { RatingBoard } from "./RatingBoard";
-import { SectionHead } from "./SectionHead";
+import { TimeBoard } from "./TimeBoard";
 import styles from "../leaderboard.module.css";
 
 type Act = (key: string, fn: () => Promise<LiveRunView | void>) => void;
+type BoardMode = "elo" | "time";
 
 export function RankedHub({
   status,
@@ -65,6 +63,7 @@ export function RankedHub({
   act: Act;
 }) {
   const boardState = useLeaderboard();
+  const [boardMode, setBoardMode] = useState<BoardMode>("elo");
   const [eligible, setEligible] = useState<DrillCatalogEntry[] | null>(null);
   const [profile, setProfile] = useState<RankedProfile | null>(null);
   const [ledgerError, setLedgerError] = useState<string | null>(null);
@@ -78,12 +77,11 @@ export function RankedHub({
           setEligible(catalog.drills.filter((drill) => drill.stageCount > 1));
       })
       .catch(() => {
-        if (alive) {
-          setEligible([]);
-          setPoolError(
-            "The ranked scenario pool is unavailable. Matchmaking will resume when the control plane is ready.",
-          );
-        }
+        if (!alive) return;
+        setEligible([]);
+        setPoolError(
+          "The ranked scenario pool is unavailable. Matchmaking will resume when the control plane is ready.",
+        );
       });
     return () => {
       alive = false;
@@ -92,7 +90,6 @@ export function RankedHub({
 
   useEffect(() => {
     if (!status.signedIn) return;
-
     let alive = true;
     fetchRankedProfile()
       .then((next) => {
@@ -126,7 +123,7 @@ export function RankedHub({
       .filter(
         (attempt) => attempt.outcome !== "active" && attempt.outcome !== "void",
       )
-      .slice(0, 4) ?? [];
+      .slice(0, 5) ?? [];
   const scenarioName = (id: string) =>
     eligible?.find((drill) => drill.id === id)?.title ??
     id.replace(/^cascade-/, "").replaceAll("-", " ");
@@ -135,7 +132,7 @@ export function RankedHub({
   )}`;
 
   const actionLabel = () => {
-    if (busy === "provision" || provisioning) return "Preparing live arena…";
+    if (busy === "provision" || provisioning) return "Preparing arena…";
     if (busy === "ranked") return "Drawing incident…";
     if (!status.enabled) return "Live control offline";
     if (!hasArena && slots === 0) return "All arena slots busy";
@@ -150,148 +147,44 @@ export function RankedHub({
     act("ranked", () => startDrill(run.runId, "", "ranked"));
   };
 
+  const fastest = boardState.times?.entries[0] ?? null;
+
   return (
-    <main className={styles.page}>
-      <section className={styles.hero} aria-labelledby="ranked-title">
-        <div className={styles.heroCopy}>
-          <p className={styles.livePill}>
-            <Signal size={12} />
-            Live ranked · seasonless
+    <main className={styles.rankedPage}>
+      <header className={styles.rankHeader}>
+        <div>
+          <p>
+            <Signal size={12} /> Live ranked · seasonless
           </p>
-          <h1 id="ranked-title">
-            Operate under pressure.
-            <span> Climb the board.</span>
-          </h1>
-          <p className={styles.lede}>
-            Real Kubernetes incidents, one clean attempt at a time. Every
-            verdict moves your rating. Successful recoveries also keep an
-            official clock, so consistency and speed stay separate.
-          </p>
-
-          <div className={styles.heroActions}>
-            {status.signedIn ? (
-              <button
-                type="button"
-                className={styles.primaryAction}
-                onClick={play}
-                disabled={actionLocked}
-              >
-                {actionBusy ? (
-                  <Loader2 size={16} className={styles.spin} />
-                ) : hasArena ? (
-                  <Trophy size={16} />
-                ) : (
-                  <Play size={16} fill="currentColor" />
-                )}
-                {actionLabel()}
-              </button>
-            ) : (
-              <a className={styles.primaryAction} href={signInUrl}>
-                <Lock size={16} />
-                Sign in to compete
-              </a>
-            )}
-            <a className={styles.secondaryAction} href="#standings">
-              View standings <ArrowRight size={14} />
-            </a>
-          </div>
-
-          <div className={styles.signalRow} aria-label="Ranked system status">
-            <span>
-              <Server size={13} />
-              {platform
-                ? `${platform.nodesReady}/${platform.nodesTotal} nodes ready`
-                : "Reading cluster"}
-            </span>
-            <span>
-              <Radio size={13} />
-              {poolLoading ? "Reading match pool" : `${poolSize} cascades live`}
-            </span>
-            <span>
-              <Activity size={13} />
-              {hasArena
-                ? provisioning
-                  ? "Arena converging"
-                  : "Arena ready"
-                : slots === null
-                  ? "Reading capacity"
-                  : `${slots} arena ${slots === 1 ? "slot" : "slots"} free`}
-            </span>
-          </div>
+          <h1>Ranked operations</h1>
+          <span>
+            Real Kubernetes incidents. Measured recovery. One rating ladder.
+          </span>
         </div>
-
-        <aside className={styles.operatorCard} aria-label="Operator rating">
-          <header className={styles.operatorHead}>
-            <span>Operator card</span>
-            <i data-online={status.signedIn}>
-              {status.signedIn ? "Verified" : "Guest"}
-            </i>
-          </header>
-
-          <div className={styles.operatorIdentity}>
-            <div>
-              <span>{profile?.division ?? "Unranked"}</span>
-              <strong>{profile?.rating ?? "—"}</strong>
-              <small>seasonless rating</small>
-            </div>
-            <p>{status.displayName ?? "Sign in to establish your rating"}</p>
-          </div>
-
-          {profile?.divisionCeiling && (
-            <div className={styles.ratingTrack}>
-              <span>
-                {profile.division} progress
-                <b>{Math.round(profile.divisionProgress * 100)}%</b>
-              </span>
-              <i>
-                <b style={{ width: `${profile.divisionProgress * 100}%` }} />
-              </i>
-            </div>
-          )}
-
-          <dl className={styles.operatorStats}>
-            <div>
-              <dt>Ladder</dt>
-              <dd>{profile?.ladderRank ? `#${profile.ladderRank}` : "—"}</dd>
-            </div>
-            <div>
-              <dt>Record</dt>
-              <dd>{profile ? `${profile.wins}–${profile.losses}` : "—"}</dd>
-            </div>
-            <div>
-              <dt>Streak</dt>
-              <dd>
-                <Flame size={12} /> {profile?.currentStreak ?? 0}
-              </dd>
-            </div>
-            <div>
-              <dt>Peak</dt>
-              <dd>{profile?.peakRating ?? "—"}</dd>
-            </div>
-          </dl>
-
-          {profile && profile.provisionalGamesRemaining > 0 && (
-            <p className={styles.profileNote}>
-              {profile.provisionalGamesRemaining} placement{" "}
-              {profile.provisionalGamesRemaining === 1 ? "match" : "matches"}{" "}
-              remaining
-            </p>
-          )}
-          {!status.signedIn && (
-            <p className={styles.profileNote}>
-              The ladder is public. Playing requires a verified HomeOps session.
-            </p>
-          )}
-        </aside>
-      </section>
+        <div className={styles.systemStatus} aria-label="Ranked system status">
+          <span>
+            <Server size={12} />
+            {platform
+              ? `${platform.nodesReady}/${platform.nodesTotal} nodes`
+              : "Reading cluster"}
+          </span>
+          <span>
+            <Radio size={12} />
+            {poolLoading ? "Reading pool" : `${poolSize} incidents`}
+          </span>
+          <span>
+            <Activity size={12} />
+            {slots === null ? "Reading capacity" : `${slots} slots free`}
+          </span>
+        </div>
+      </header>
 
       {(error || ledgerError || poolError || expired) && (
         <div className={styles.notices} role="status">
           {expired && (
             <p>
               <Timer size={14} />
-              Your previous arena expired safely. Prepare another to rejoin the
-              queue.
+              Your previous arena expired safely. Prepare another to rejoin.
             </p>
           )}
           {(error || ledgerError || poolError) && (
@@ -303,159 +196,255 @@ export function RankedHub({
         </div>
       )}
 
-      <section
-        className={styles.briefingGrid}
-        aria-label="Ranked match briefing"
-      >
-        <div className={styles.protocol}>
-          <header>
-            <span>Match protocol</span>
-            <b>What makes a run official</b>
-          </header>
-          <div>
-            <article>
-              <Radio size={16} />
+      <div className={styles.rankedLayout}>
+        <aside className={styles.rankSidebar}>
+          <section className={styles.queueCard}>
+            <header>
+              <span>Match queue</span>
+              <i>{hasArena ? "Arena ready" : "Standby"}</i>
+            </header>
+            <h2>
+              {hasArena
+                ? "Your isolated cluster is ready."
+                : "Draw an incident calibrated to you."}
+            </h2>
+            <p>
+              The fault stays hidden. Investigate real telemetry, operate
+              through the audited console, and hold the measured objective.
+            </p>
+            {status.signedIn ? (
+              <button
+                type="button"
+                className={styles.queueAction}
+                onClick={play}
+                disabled={actionLocked}
+              >
+                {actionBusy ? (
+                  <Loader2 size={15} className={styles.spin} />
+                ) : hasArena ? (
+                  <Trophy size={15} />
+                ) : (
+                  <Play size={15} fill="currentColor" />
+                )}
+                {actionLabel()}
+              </button>
+            ) : (
+              <a className={styles.queueAction} href={signInUrl}>
+                <Lock size={15} /> Sign in to compete
+              </a>
+            )}
+            <div className={styles.queueFacts}>
               <span>
-                <b>Real workload</b>
-                Every action changes an isolated Kubernetes namespace.
+                <Shuffle size={11} /> rating-matched draw
               </span>
-            </article>
-            <article>
-              <Shuffle size={16} />
               <span>
-                <b>Blind draw</b>
-                The server chooses the multi-stage incident after you commit.
+                <Gauge size={11} /> outcome judged
               </span>
-            </article>
-            <article>
-              <ShieldCheck size={16} />
-              <span>
-                <b>One shot</b>A wrong move, forfeit, or expiry closes the rated
-                attempt.
-              </span>
-            </article>
-            <article>
-              <Gauge size={16} />
-              <span>
-                <b>Two records</b>
-                ELO measures results; the clock measures clean execution.
-              </span>
-            </article>
-          </div>
-        </div>
+            </div>
+          </section>
 
-        <div className={styles.recentPanel}>
-          <header>
+          <section className={styles.operatorPanel}>
+            <header>
+              <span>Operator</span>
+              <i data-online={status.signedIn}>
+                {status.signedIn ? "Verified" : "Guest"}
+              </i>
+            </header>
+            <div className={styles.operatorRating}>
+              <div>
+                <small>{profile?.division ?? "Unranked"}</small>
+                <strong>{profile?.rating ?? "—"}</strong>
+              </div>
+              <span>{status.displayName ?? "No ranked identity"}</span>
+            </div>
+            <dl className={styles.operatorStats}>
+              <div>
+                <dt>Rank</dt>
+                <dd>{profile?.ladderRank ? `#${profile.ladderRank}` : "—"}</dd>
+              </div>
+              <div>
+                <dt>Record</dt>
+                <dd>{profile ? `${profile.wins}–${profile.losses}` : "—"}</dd>
+              </div>
+              <div>
+                <dt>Streak</dt>
+                <dd>
+                  <Flame size={11} /> {profile?.currentStreak ?? 0}
+                </dd>
+              </div>
+              <div>
+                <dt>Peak</dt>
+                <dd>{profile?.peakRating ?? "—"}</dd>
+              </div>
+            </dl>
+            {profile?.divisionCeiling && (
+              <div className={styles.ratingTrack}>
+                <span>
+                  {profile.division}
+                  <b>{Math.round(profile.divisionProgress * 100)}%</b>
+                </span>
+                <i>
+                  <b style={{ width: `${profile.divisionProgress * 100}%` }} />
+                </i>
+              </div>
+            )}
+          </section>
+
+          <section className={styles.recentPanel}>
+            <header>
+              <span>
+                <History size={12} /> Recent matches
+              </span>
+              <b>{profile?.gamesPlayed ?? 0} played</b>
+            </header>
+            {recent.length > 0 ? (
+              <div className={styles.recentList}>
+                {recent.map((attempt) => {
+                  const won = attempt.outcome === "completed";
+                  return (
+                    <article key={attempt.id}>
+                      <i data-won={won}>
+                        {won ? <Check size={10} /> : <X size={10} />}
+                      </i>
+                      <span>
+                        <b>{scenarioName(attempt.drillId)}</b>
+                        <small>
+                          {won
+                            ? clock(attempt.elapsedMs)
+                            : attempt.outcome.replaceAll("-", " ")}
+                        </small>
+                      </span>
+                      <strong data-positive={attempt.ratingDelta >= 0}>
+                        {attempt.ratingDelta >= 0 ? "+" : ""}
+                        {attempt.ratingDelta}
+                      </strong>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className={styles.emptyRecent}>No rated matches yet.</p>
+            )}
+          </section>
+
+          <section className={styles.protocolMini}>
             <span>
-              <History size={13} /> Your latest matches
+              <Radio size={12} /> Real isolated workload
             </span>
-            {profile && (
-              <b>
-                {profile.gamesPlayed
-                  ? `${Math.round((profile.wins / profile.gamesPlayed) * 100)}% win rate`
-                  : "Awaiting placement"}
-              </b>
-            )}
-          </header>
-          {recent.length > 0 ? (
-            <div className={styles.recentList}>
-              {recent.map((attempt) => {
-                const won = attempt.outcome === "completed";
-                return (
-                  <article key={attempt.id}>
-                    <i data-won={won}>
-                      {won ? <Check size={11} /> : <X size={11} />}
-                    </i>
-                    <span>
-                      <b>{scenarioName(attempt.drillId)}</b>
-                      <small>
-                        {won
-                          ? `${clock(attempt.elapsedMs)} official`
-                          : `${attempt.outcome} · stage ${attempt.stageReached}`}
-                      </small>
-                    </span>
-                    <strong data-positive={attempt.ratingDelta >= 0}>
-                      {attempt.ratingDelta >= 0 ? "+" : ""}
-                      {attempt.ratingDelta}
-                    </strong>
-                  </article>
-                );
-              })}
-            </div>
-          ) : (
-            <div className={styles.emptyRecent}>
-              <Trophy size={18} />
+            <span>
+              <ShieldCheck size={12} /> Server-authoritative result
+            </span>
+            <span>
+              <Clock3 size={12} /> Time never changes ELO
+            </span>
+          </section>
+        </aside>
+
+        <section className={styles.rankMain} id="standings">
+          <header className={styles.boardHeader}>
+            <div>
+              <p>Standings</p>
+              <h2>
+                {boardMode === "elo" ? "Operator ladder" : "Recovery times"}
+              </h2>
               <span>
-                <b>No rated matches yet</b>
-                Your first result starts the operator record.
+                {boardMode === "elo"
+                  ? "The default competitive view. Wins and losses move a seasonless ELO rating."
+                  : "Successful matches only, ordered by each operator’s fastest verified recovery."}
               </span>
             </div>
-          )}
-        </div>
-      </section>
-
-      <section className={styles.boards} id="standings">
-        <div className={styles.boardIntro}>
-          <p>Competitive record</p>
-          <h2>One ladder. Two ways to prove yourself.</h2>
-          <span>
-            Rating rewards reliable decisions across every outcome. Speed
-            records only count successful recoveries.
-          </span>
-        </div>
-
-        {boardState.error && (
-          <p className={styles.boardError}>{boardState.error}</p>
-        )}
-        <p className={styles.status} role="status">
-          {boardState.loading ? "Reading live standings…" : ""}
-        </p>
-        {boardState.loading && <BoardSkeleton />}
-
-        {boardState.board && boardState.standings && (
-          <>
-            <SectionHead
-              index="01"
-              title="Operator ladder"
-              note="Seasonless ELO across wins, failures, forfeits, and expiries."
-            />
-            <RatingBoard entries={boardState.standings} />
-
-            <SectionHead
-              index="02"
-              title="Speed podium"
-              note="Clean recoveries only. Fast execution never changes rating."
-            />
-            <Podium entries={boardState.board.overall} />
-
-            {boardState.board.overall.length > PODIUM_PLACES.length && (
-              <BoardTable
-                title="Overall circuit"
-                note="Breadth of cascades resolved, then average official time."
-                entries={boardState.board.overall}
-                overall
-              />
-            )}
-
-            <SectionHead
-              index="03"
-              title="Cascade records"
-              note="The fastest verified recovery for each live scenario."
-            />
-            <div className={styles.grid}>
-              {boardState.board.byDrill.map((drill, index) => (
-                <BoardTable
-                  key={drill.drillId}
-                  title={drill.title}
-                  entries={drill.entries}
-                  overall={false}
-                  index={index}
-                />
-              ))}
+            <div
+              className={styles.boardSwitch}
+              role="tablist"
+              aria-label="Leaderboard measure"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={boardMode === "elo"}
+                className={boardMode === "elo" ? styles.switchOn : ""}
+                onClick={() => setBoardMode("elo")}
+              >
+                <Trophy size={12} /> ELO
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={boardMode === "time"}
+                className={boardMode === "time" ? styles.switchOn : ""}
+                onClick={() => setBoardMode("time")}
+              >
+                <Clock3 size={12} /> Time
+              </button>
             </div>
-          </>
-        )}
-      </section>
+          </header>
+
+          <div className={styles.boardSummary}>
+            {boardMode === "elo" ? (
+              <>
+                <div>
+                  <span>Rated operators</span>
+                  <b>
+                    {profile?.ratedOperators ??
+                      boardState.standings?.length ??
+                      0}
+                  </b>
+                </div>
+                <div>
+                  <span>Your rating</span>
+                  <b>{profile?.rating ?? "—"}</b>
+                </div>
+                <div>
+                  <span>Your peak</span>
+                  <b>{profile?.peakRating ?? "—"}</b>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <span>Timed operators</span>
+                  <b>{boardState.times?.entries.length ?? 0}</b>
+                </div>
+                <div>
+                  <span>Fastest recovery</span>
+                  <b>{fastest ? clock(fastest.bestMs) : "—"}</b>
+                </div>
+                <div>
+                  <span>Current holder</span>
+                  <b>{fastest?.displayName ?? "Open"}</b>
+                </div>
+              </>
+            )}
+          </div>
+
+          {boardState.error && (
+            <p className={styles.boardError}>{boardState.error}</p>
+          )}
+          <p className={styles.status} role="status">
+            {boardState.loading ? "Reading live standings…" : ""}
+          </p>
+          {boardState.loading && <BoardSkeleton />}
+
+          {!boardState.loading &&
+            !boardState.error &&
+            (boardMode === "elo" ? (
+              <RatingBoard entries={boardState.standings ?? []} />
+            ) : (
+              <TimeBoard entries={boardState.times?.entries ?? []} />
+            ))}
+
+          <footer className={styles.boardFooter}>
+            <p>
+              <b>ELO is the default.</b> It measures whether you restore the
+              objective against difficulty calibrated near your rating.
+            </p>
+            <p>
+              <b>Time is separate.</b> It records execution speed only after a
+              recovery survives the verification window.
+            </p>
+          </footer>
+        </section>
+      </div>
     </main>
   );
 }

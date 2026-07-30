@@ -25,6 +25,8 @@ public static class DrillKit
     public static (string, object) Release(string track) => ("releaseTrack", track);
     /// <summary>Named for the tier rather than the field: `Data` collides with the Api.Data namespace.</summary>
     public static (string, object) Catalogue(string state) => ("dataState", state);
+    public static (string, object) DatabaseConnections(int max) => ("dbMaxConns", max);
+    public static (string, object) Network(string mode) => ("networkMode", mode);
     public static (string, object) Pool(string pool) => ("targetPool", pool);
     /// <summary>Restarts the checkout tier. The broker swaps in a fresh token, so it always rolls.</summary>
     public static (string, object) Restart => ("restartToken", ScenarioDefinitions.FreshRestartToken);
@@ -34,7 +36,8 @@ public static class DrillKit
     /// holding the previous stage in your head.</summary>
     public static (string, object)[] Healthy(int checkout = 3, int traffic = 2) =>
         [Checkout(checkout), Canary(0), Gateways(1), Cache(false), Traffic(traffic),
-         Release("stable"), Catalogue("healthy"), Pool("apps")];
+         Release("stable"), Catalogue("healthy"), DatabaseConnections(8), Network("normal"),
+         Pool("apps")];
 
     // ── Objectives ────────────────────────────────────────────────────────────────────────────
     // What the platform must measurably be doing for a stage to be over.
@@ -50,6 +53,10 @@ public static class DrillKit
     public static DrillGoal AtMostReplicas(int max) => new("Checkout replicas", "replicas", max, "");
     public static DrillGoal OnRelease(string track) => new("Release", "release", 0, track);
     public static DrillGoal DataIs(string state) => new("Catalogue", "data", 0, state);
+    public static DrillGoal DatabaseConnectionsAtLeast(int count) =>
+        new("Database connection pool", "db-pool", count, "", Below: false);
+    public static DrillGoal NetworkIs(string mode) =>
+        new("Database network path", "network", 0, mode);
     public static DrillGoal OnPool(string pool) => new("Worker pool", "pool", 0, pool);
     public static DrillGoal CacheIs(string state) => new("Cache tier", "cache", 0, state);
     public static DrillGoal NoCanary() => new("Canary replicas", "canary", 0, "");
@@ -178,6 +185,20 @@ public static class DrillKit
         "Wrong on its own. Caching genuinely reduces blast radius during a recovery, but it caches "
         + "the corrupt rows too — you have made the bad data faster to serve and harder to notice.",
         Cache(true));
+
+    public static readonly Move RestoreDatabasePool = Right(
+        "db-pool-8", "Restore the database connection pool",
+        "Return checkout to eight bounded Postgres connections per pod.",
+        "Correct. The queue is waiting for database leases, so restoring the bounded pool lets "
+        + "concurrent requests reach Postgres instead of serializing behind one connection.",
+        DatabaseConnections(8));
+
+    public static readonly Move RestoreDatabaseNetwork = Right(
+        "network-normal", "Restore checkout-to-Postgres access",
+        "Reapply the allowlisted database egress policy.",
+        "Correct. The application and database are both healthy; the missing path between them is "
+        + "the fault, so restoring that policy is the only direct recovery.",
+        Network("normal"));
 
     // Placement
     public static readonly Move Evacuate = Right(
@@ -342,7 +363,8 @@ public static class DrillKit
         new[]
         {
             ScaleOut, ScaleTo4, TrimTo2, Shrink, CacheOn, CacheOff, Rollback, RollCandidate,
-            Restore, CacheOverData, Evacuate, ReturnToApps, GatewayOut, GatewayIn,
+            Restore, CacheOverData, RestoreDatabasePool, RestoreDatabaseNetwork,
+            Evacuate, ReturnToApps, GatewayOut, GatewayIn,
             CanaryStart, CanaryGrow, CanaryAbort,
         }.ToDictionary(m => m.Id, StringComparer.Ordinal);
 
