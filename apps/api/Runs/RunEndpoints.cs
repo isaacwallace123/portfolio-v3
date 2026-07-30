@@ -303,8 +303,11 @@ public static class RunEndpoints
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
-        // Start a drill ON a running cluster (objective + clock + decisions over the live workload).
-        // With mode "ranked" and no drill id the broker draws one from the multi-stage pool.
+        // Start a PRACTICE drill ON a running cluster (objective + clock + decisions over the live
+        // workload). Ranked is no longer a mode flag here: it starts the match clock, and this
+        // endpoint has no way to know whether the cluster underneath it is playable yet. Ranked goes
+        // through POST /v1/ranked/launch, which verifies the arena first; asking for it here is
+        // refused rather than quietly downgraded.
         app.MapPost("/v1/runs/{runId}/drill", async (
             string runId, DrillRequest req, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
@@ -314,7 +317,6 @@ public static class RunEndpoints
                 req.Mode ?? "practice",
                 req.LearningUnitId ?? "",
                 Owner(ctx),
-                OwnerName(ctx),
                 ct);
             return result.Run is not null
                 ? Results.Ok(Public(result.Run))

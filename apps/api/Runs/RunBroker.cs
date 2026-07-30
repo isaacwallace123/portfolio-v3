@@ -57,26 +57,45 @@ public sealed class RunBroker
     public async Task<BrokerResult> CreateRunAsync(
         string scenarioId, string owner, CancellationToken ct)
     {
+        var provision = await ProvisionAsync(scenarioId, owner, ct);
+        return provision.Resource is null
+            ? BrokerResult.Fail(provision.Status, provision.Error ?? "The cluster could not be provisioned.")
+            : new BrokerResult(RunView.From(provision.Resource), provision.Status, null);
+    }
+
+    /// <summary>
+    /// Create or reuse the caller's cluster, handing back the resource rather than its projection.
+    ///
+    /// The ranked launch needs the LabRun itself — its annotations carry the launch's own state and
+    /// its resourceVersion is what every subsequent write is checked against — so provisioning is
+    /// factored to return the object and <see cref="CreateRunAsync"/> projects it, rather than the
+    /// launch re-fetching a run it has just created.
+    /// </summary>
+    public async Task<ClusterProvision> ProvisionAsync(
+        string scenarioId, string owner, CancellationToken ct)
+    {
         if (string.IsNullOrWhiteSpace(scenarioId))
-            return BrokerResult.Fail(400, "scenarioId is required.");
+            return ClusterProvision.Fail(400, "scenarioId is required.");
         // Provisioning is never anonymous: the caller must present a resolved owner key.
         if (!IsValidOwner(owner))
-            return BrokerResult.Fail(401, "Sign in to provision a cluster.");
+            return ClusterProvision.Fail(401, "Sign in to provision a cluster.");
         if (!_options.Scenarios.Contains(scenarioId) ||
             !ScenarioDefinitions.All.TryGetValue(scenarioId, out var scenario))
-            return BrokerResult.Fail(404, $"Unknown scenario '{scenarioId}'.");
+            return ClusterProvision.Fail(404, $"Unknown scenario '{scenarioId}'.");
 
-        var all = await ListAsync(ct);
-        var live = all.Where(r => r.Status is "provisioning" or "ready").ToArray();
+        var all = await ListResourcesAsync(ct);
+        var live = all
+            .Where(r => RunView.From(r).Status is "provisioning" or "ready")
+            .ToArray();
 
         // One cluster per person. Returning the existing cluster (rather than an error) makes the
         // page idempotent: a reload or a second tab lands back on the cluster you already own.
-        var mine = live.FirstOrDefault(r => r.Owner == owner);
+        var mine = live.FirstOrDefault(r => r.Spec.Owner == owner);
         if (mine is not null)
-            return BrokerResult.Accepted(mine);
+            return new ClusterProvision(mine, 200, null);
 
         if (live.Length >= _options.MaxConcurrentRuns)
-            return BrokerResult.Fail(429, "No cluster slots are free. Try again shortly.");
+            return ClusterProvision.Fail(429, "No cluster slots are free. Try again shortly.");
 
         var runId = $"run-hl-{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(5))}";
         var setup = scenario.Setup;
@@ -108,13 +127,26 @@ public sealed class RunBroker
         {
             var created = await _k8s.CustomObjects.CreateClusterCustomObjectAsync(
                 body, LabRun.Group, LabRun.Version, LabRun.Plural, cancellationToken: ct);
-            return BrokerResult.Ok(RunView.From(Parse(created)));
+            return new ClusterProvision(Parse(created), 201, null);
         }
         catch (HttpOperationException ex)
         {
             _log.LogError(ex, "Failed to create LabRun {RunId}.", runId);
-            return BrokerResult.Fail(502, "The run controller rejected the request.");
+            return ClusterProvision.Fail(502, "The run controller rejected the request.");
         }
+    }
+
+    /// <summary>The caller's own live cluster, or null. The launch is owner-addressed rather than
+    /// run-addressed: there is exactly one per operator, so a caller never names a run id and can
+    /// never name somebody else's.</summary>
+    public async Task<LabRunResource?> FindLiveOwnedResourceAsync(
+        string owner, CancellationToken ct)
+    {
+        if (!IsValidOwner(owner)) return null;
+        var all = await ListResourcesAsync(ct);
+        return all.FirstOrDefault(r =>
+            string.Equals(r.Spec.Owner, owner, StringComparison.Ordinal) &&
+            RunView.From(r).Status is "provisioning" or "ready");
     }
 
     // Owner keys are opaque hex digests issued by the front end after verifying the SSO session.
@@ -238,17 +270,24 @@ public sealed class RunBroker
     // the drill's starting conditions. The namespace and its workload are untouched, so the drill
     // begins against live traffic instead of waiting out another provisioning cycle.
     //
-    // In ranked mode the drill is drawn rather than chosen, from the multi-stage pool only. Picking
-    // your own drill and having the time count would rank familiarity; drawing one ranks operators.
+    // Practice only. Ranked used to be a mode flag here, which meant one request drew an incident,
+    // opened a rated attempt, and stamped the match clock — against a cluster that might still be
+    // provisioning. Ranked now goes through the launch lifecycle, which verifies the environment is
+    // playable before any of that happens; see RankedLaunchOrchestrator.
     public async Task<BrokerResult> StartDrillAsync(
         string runId,
         string drillId,
         string mode,
         string learningUnitId,
         string owner,
-        string displayName,
         CancellationToken ct)
     {
+        if (string.Equals(mode, "ranked", StringComparison.OrdinalIgnoreCase))
+            return BrokerResult.Fail(
+                409,
+                "Ranked matches start through POST /v1/ranked/launch, which verifies the arena "
+                + "before the clock starts.");
+
         var resource = await GetOwnedResourceAsync(runId, owner, ct);
         if (resource is null)
             return BrokerResult.Fail(404, "No such run.");
@@ -256,50 +295,16 @@ public sealed class RunBroker
         if (current.DrillId.Length > 0)
             return BrokerResult.Fail(409, "End the current incident before starting another.");
 
-        var ranked = string.Equals(mode, "ranked", StringComparison.OrdinalIgnoreCase);
-        if (ranked && drillId.Length > 0)
-            return BrokerResult.Fail(
-                409,
-                "Ranked incidents are drawn by the server and cannot be selected.");
-        if (!ranked && RankedScenarioSeed.IsToken(drillId))
+        if (RankedScenarioSeed.IsToken(drillId))
             return BrokerResult.Fail(404, $"Unknown drill '{drillId}'.");
-        if (ranked && drillId.Length == 0)
-        {
-            RankedDrawContext context;
-            try
-            {
-                context = await _ranked.DrawContextAsync(owner, ct);
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex, "Could not read ranked matchmaking profile for {RunId}.", runId);
-                return BrokerResult.Fail(503, "Ranked matchmaking is unavailable right now.");
-            }
-
-            var draw = RankedMatchmaker.Draw(
-                context.Rating,
-                context.RecentFamilies,
-                context.PlayedSeedIds,
-                calibrationAdjustments: context.FamilyAdjustments);
-            if (draw is null)
-                return BrokerResult.Fail(
-                    503,
-                    "A unique ranked incident could not be generated safely. Try again.");
-            drillId = draw.Plan.DrillId;
-        }
 
         var drill = ScenarioDefinitions.Find(drillId);
         if (!ScenarioDefinitions.IsDrill(drillId) || drill is null)
             return BrokerResult.Fail(404, $"Unknown drill '{drillId}'.");
-        if (ranked && !drill.IsRanked)
-            return BrokerResult.Fail(409, "Only multi-stage drills can be run ranked.");
 
         CourseManifest? learningCourse = null;
         if (!string.IsNullOrWhiteSpace(learningUnitId))
         {
-            if (ranked)
-                return BrokerResult.Fail(409, "Academy progress cannot be attached to ranked play.");
-
             learningCourse = CourseManifests.All.Values.FirstOrDefault(
                 course => course.Contains(learningUnitId));
             var unitDrillId = learningUnitId.StartsWith("assessment:", StringComparison.Ordinal)
@@ -314,47 +319,13 @@ public sealed class RunBroker
         // Clear the previous drill's state so its decisions unlock again and, crucially, so its
         // completion does not carry over — a recorded solve is a fact about one drill, not the run.
         var startedAt = DateTime.UtcNow;
-        RankedAttemptView? rankedAttempt = null;
-        if (ranked)
-        {
-            try
-            {
-                // A previous start can fail after its DB row is opened but before Kubernetes
-                // accepts the annotation. If this cluster has no drill, that active row cannot
-                // represent a playable match; seal it as void before opening the replacement.
-                var orphan = await _ranked.ActiveForOwnerAsync(owner, ct);
-                if (orphan is not null)
-                    await _ranked.FinalizeAsync(
-                        orphan.Id,
-                        owner,
-                        RankedOutcomes.Void,
-                        0,
-                        0,
-                        "",
-                        displayName,
-                        ct);
-
-                rankedAttempt = await _ranked.BeginAsync(
-                    runId, drill.Id, owner, displayName, startedAt, ct);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BrokerResult.Fail(409, ex.Message);
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex, "Could not open a ranked attempt for {RunId}.", runId);
-                return BrokerResult.Fail(503, "Ranked results are unavailable right now.");
-            }
-        }
-
         var now = startedAt.ToString("O");
         var annotations = new Dictionary<string, string?>
         {
             ["homeops.isaacwallace.dev/drill-started"] = now,
             [DrillStageAnnotation] = "0",
             [DrillStageStartedAnnotation] = now,
-            [DrillModeAnnotation] = ranked ? "ranked" : "practice",
+            [DrillModeAnnotation] = "practice",
             [DrillSolvedAnnotation] = null, // null removes the annotation in a merge patch
             [DrillFailedAnnotation] = null,
             [DrillFailedMoveAnnotation] = null,
@@ -363,13 +334,11 @@ public sealed class RunBroker
             [InfrastructureUnhealthyReasonAnnotation] = null,
             [DrillGoalsMetSinceAnnotation] = null,
             [DrillRecordedAnnotation] = null,
-            [RankedAttemptIdAnnotation] = rankedAttempt?.Id,
+            [RankedAttemptIdAnnotation] = null,
             [LearningCourseAnnotation] = learningCourse?.CourseId,
             [LearningCourseVersionAnnotation] = learningCourse?.CourseVersion.ToString(CultureInfo.InvariantCulture),
             [LearningUnitAnnotation] = learningCourse is null ? null : learningUnitId,
         };
-        if (ranked)
-            annotations[LastRankedDrillAnnotation] = drill.Id;
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
             if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal) ||
                 key.StartsWith(RankedActionAnnotationPrefix, StringComparison.Ordinal) ||
@@ -389,11 +358,215 @@ public sealed class RunBroker
 
         var started = await PatchRunAsync(
             runId, new { metadata = new { annotations }, spec }, $"start drill {drillId}", ct);
-        // Do not void on an ambiguous Kubernetes response: the patch may have landed before the
-        // connection failed. If it did, snapshots will finalize this attempt normally; if it did
-        // not, the next ranked start performs the orphan cleanup above.
         await WriteThroughSpecAsync(runId, setup, ct);
         return started;
+    }
+
+    /// <summary>
+    /// The activation boundary of a ranked launch, as one write.
+    ///
+    /// The opening fault, the drill id, the match clock, and the attempt id all land together under
+    /// the resourceVersion the caller verified. Null means the version moved — another replica
+    /// activated the same launch — and the caller re-reads rather than writing over it.
+    /// </summary>
+    public async Task<LabRunResource?> ActivateRankedIncidentAsync(
+        RankedLaunchActivation activation, CancellationToken ct)
+    {
+        var resource = await GetOwnedResourceAsync(activation.RunId, activation.Owner, ct);
+        if (resource is null) return null;
+
+        var drill = ScenarioDefinitions.Find(activation.DrillId);
+        if (drill is null || drill.Stages.Count == 0 || !drill.IsRanked) return null;
+
+        var startedAt = activation.ActivatedUtc.ToString("O");
+        var annotations = new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["homeops.isaacwallace.dev/drill-started"] = startedAt,
+            [DrillStageAnnotation] = "0",
+            [DrillStageStartedAnnotation] = startedAt,
+            [DrillModeAnnotation] = "ranked",
+            [DrillSolvedAnnotation] = null,
+            [DrillFailedAnnotation] = null,
+            [DrillFailedMoveAnnotation] = null,
+            [DrillVoidedAnnotation] = null,
+            [InfrastructureUnhealthySinceAnnotation] = null,
+            [InfrastructureUnhealthyReasonAnnotation] = null,
+            [DrillGoalsMetSinceAnnotation] = null,
+            [DrillRecordedAnnotation] = null,
+            [RankedAttemptIdAnnotation] = activation.AttemptId,
+            [LastRankedDrillAnnotation] = activation.DrillId,
+            [RankedLaunchOrchestrator.LaunchAttemptAnnotation] = activation.AttemptId,
+            [RankedLaunchOrchestrator.LaunchPhaseAnnotation] = RankedLaunchPhases.Active,
+            [RankedLaunchOrchestrator.LaunchFailureAnnotation] = null,
+            [RankedLaunchOrchestrator.LaunchFailurePhaseAnnotation] = null,
+            // Academy progress is never attached to ranked play.
+            [LearningCourseAnnotation] = null,
+            [LearningCourseVersionAnnotation] = null,
+            [LearningUnitAnnotation] = null,
+        };
+        foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
+            if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal) ||
+                key.StartsWith(RankedActionAnnotationPrefix, StringComparison.Ordinal) ||
+                key.StartsWith(DelayedStageAppliedAnnotationPrefix, StringComparison.Ordinal))
+                annotations[key] = null;
+
+        var setup = new Dictionary<string, object>(drill.Stages[0].Setup, StringComparer.Ordinal);
+        if (!setup.ContainsKey("loadReplicas")) setup["loadReplicas"] = 1;
+        FreshenRestartToken(setup);
+        var spec = new Dictionary<string, object>(setup, StringComparer.Ordinal)
+        {
+            ["drillId"] = activation.DrillId,
+            ["drillStartedAt"] = startedAt,
+        };
+
+        var activated = await CompareAndSetAsync(
+            activation.RunId,
+            activation.ExpectedVersion,
+            new { metadata = new { annotations }, spec },
+            "activate ranked incident",
+            ct);
+        if (activated is null) return null;
+
+        await WriteThroughSpecAsync(activation.RunId, setup, ct);
+        return activated;
+    }
+
+    /// <summary>
+    /// Start the arena's load generator ahead of a ranked launch.
+    ///
+    /// A cluster is provisioned as the open sandbox, which starts with no traffic at all — and every
+    /// generated objective is measured against served load, so a match started against a silent
+    /// gateway would have nothing to judge. This is the only write a launch makes to the workload
+    /// before activation, and it is on the safe side of the boundary: it changes what the cluster is
+    /// doing, never what the operator is being timed on.
+    /// </summary>
+    public async Task<LabRunResource?> StartRankedTrafficAsync(
+        string runId, string owner, string expectedVersion, CancellationToken ct)
+    {
+        var resource = await GetOwnedResourceAsync(runId, owner, ct);
+        if (resource is null) return null;
+        if (resource.Spec.LoadReplicas is > 0) return resource;
+
+        var setup = Patch(("loadReplicas", 1));
+        var started = await CompareAndSetAsync(
+            runId, expectedVersion, new { spec = setup }, "start ranked arena traffic", ct);
+        if (started is null) return null;
+
+        await WriteThroughSpecAsync(runId, setup, ct);
+        return started;
+    }
+
+    /// <summary>Draw a generated incident for this operator, without touching a cluster. Separate
+    /// from activation so a launch records what it drew before it opens anything rated.</summary>
+    public async Task<RankedDraw?> DrawRankedIncidentAsync(string owner, CancellationToken ct)
+    {
+        var context = await _ranked.DrawContextAsync(owner, ct);
+        return RankedMatchmaker.Draw(
+            context.Rating,
+            context.RecentFamilies,
+            context.PlayedSeedIds,
+            calibrationAdjustments: context.FamilyAdjustments);
+    }
+
+    /// <summary>Write launch bookkeeping onto the cluster under the version the caller read. Null
+    /// means the write did not land and the caller must re-read.</summary>
+    public Task<LabRunResource?> PatchLaunchStateAsync(
+        string runId,
+        string owner,
+        string expectedVersion,
+        IReadOnlyDictionary<string, string?> annotations,
+        CancellationToken ct) =>
+        PatchOwnedLaunchStateAsync(runId, owner, expectedVersion, annotations, ct);
+
+    private async Task<LabRunResource?> PatchOwnedLaunchStateAsync(
+        string runId,
+        string owner,
+        string expectedVersion,
+        IReadOnlyDictionary<string, string?> annotations,
+        CancellationToken ct)
+    {
+        var resource = await GetOwnedResourceAsync(runId, owner, ct);
+        if (resource is null) return null;
+        return await CompareAndSetAsync(
+            runId,
+            expectedVersion,
+            new { metadata = new { annotations } },
+            "record ranked launch state",
+            ct);
+    }
+
+    /// <summary>
+    /// A merge patch that carries the resourceVersion it expects.
+    ///
+    /// The API server rejects the patch with 409 when the stored version has moved, which is the
+    /// only primitive available here that makes "check then write" atomic across replicas. A losing
+    /// writer gets null and re-reads; it never retries blindly, because the thing it lost the race
+    /// to may have been the activation.
+    /// </summary>
+    private async Task<LabRunResource?> CompareAndSetAsync(
+        string runId,
+        string expectedVersion,
+        object patchBody,
+        string what,
+        CancellationToken ct)
+    {
+        var guarded = expectedVersion.Length == 0
+            ? patchBody
+            : Merge(patchBody, expectedVersion);
+        var patch = new k8s.Models.V1Patch(guarded, k8s.Models.V1Patch.PatchType.MergePatch);
+        try
+        {
+            var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+                patch, LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
+            return Parse(updated);
+        }
+        catch (HttpOperationException ex)
+            when (ex.Response.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            _log.LogDebug("Lost the race to {What} on {RunId}.", what, runId);
+            return null;
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogError(ex, "Failed to {What} on {RunId}.", what, runId);
+            return null;
+        }
+    }
+
+    /// <summary>Fold the expected version into a patch body without every caller having to build
+    /// the metadata block twice. Round-tripped through the Kubernetes client's own serializer, so
+    /// the merged document is byte-for-byte the one the client would otherwise have produced.
+    /// </summary>
+    private static object Merge(object patchBody, string expectedVersion)
+    {
+        var json = System.Text.Json.Nodes.JsonNode
+            .Parse(KubernetesJson.Serialize(patchBody))?.AsObject() ?? [];
+        if (json["metadata"] is not System.Text.Json.Nodes.JsonObject metadata)
+        {
+            metadata = [];
+            json["metadata"] = metadata;
+        }
+        metadata["resourceVersion"] = expectedVersion;
+        return json;
+    }
+
+    /// <summary>What a ranked launch is allowed to gate on: the required workloads and whether the
+    /// platform can actually measure them yet. One frame, the same single pass over the namespace
+    /// the live page already takes.</summary>
+    public async Task<RankedLaunchReadiness> ReadLaunchReadinessAsync(
+        LabRunResource resource, CancellationToken ct)
+    {
+        var frame = await GetFrameAsync(resource, ct);
+        var view = RunView.From(resource);
+        return new RankedLaunchReadiness(
+            frame.Components
+                .Select(component => new RankedLaunchWorkload(
+                    component.Name, component.Desired, component.Ready))
+                .ToArray(),
+            frame.Telemetry?.PodCount ?? 0,
+            frame.GatewayReporting,
+            frame.Telemetry?.RequestsPerSec ?? 0,
+            view.OfferedRequestsPerSec);
     }
 
     // End the active drill and return the cluster to open-sandbox baseline.
@@ -445,6 +618,10 @@ public sealed class RunBroker
             [LearningCourseVersionAnnotation] = null,
             [LearningUnitAnnotation] = null,
         };
+        // The cluster goes back to being an open sandbox, so the launch that produced the match is
+        // over too. Leaving its bookkeeping behind would make the next ranked launch resume onto a
+        // finished match's incident and attempt.
+        foreach (var key in RankedLaunchOrchestrator.LaunchAnnotations) annotations[key] = null;
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
             if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal) ||
                 key.StartsWith(RankedActionAnnotationPrefix, StringComparison.Ordinal) ||
@@ -732,7 +909,11 @@ public sealed class RunBroker
             telemetry,
             components,
             events is null ? [] : BuildEvents(events),
-            await traceTask);
+            await traceTask,
+            // Whether the gateway answered at all, which the aggregate telemetry cannot express: a
+            // gateway that has never been scraped and a gateway serving nothing both read as zero
+            // requests a second, and only one of them is an environment a match can be judged in.
+            envoy is not null);
     }
 
     /// <summary>
@@ -2217,12 +2398,44 @@ public sealed class RunBroker
         return await PatchRunAsync(runId, patchBody, "renew cluster", ct);
     }
 
+    /// <summary>
+    /// Seal an attempt a ranked launch opened but never activated.
+    ///
+    /// Between opening the attempt and stamping the clock there is a row with no match behind it.
+    /// If the cluster is torn down in that window the row would otherwise stay active forever and
+    /// block the operator's next launch. Void is terminal and unrated, so cleaning it up cannot
+    /// move anybody's rating — which is the point: nothing that happened before activation may.
+    /// </summary>
+    private async Task VoidUnactivatedLaunchAttemptAsync(
+        LabRunResource resource, string displayName, CancellationToken ct)
+    {
+        var view = RunView.From(resource);
+        if (view.DrillMode == "ranked") return;
+        var attemptId = resource.Metadata.Annotations?
+            .GetValueOrDefault(RankedLaunchOrchestrator.LaunchAttemptAnnotation);
+        if (string.IsNullOrEmpty(attemptId)) return;
+
+        try
+        {
+            await _ranked.FinalizeAsync(
+                attemptId, view.Owner, RankedOutcomes.Void, 0, 0, "", displayName, ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(
+                ex,
+                "Could not void the unactivated ranked attempt on {RunId}.",
+                view.RunId);
+        }
+    }
+
     // Owner-free teardown used by the TTL reaper (the platform, not a user, is acting).
     public async Task<bool> DeleteExpiredAsync(string runId, CancellationToken ct)
     {
         var resource = await GetResourceAsync(runId, ct);
         if (resource is null) return false;
         var view = RunView.From(resource);
+        await VoidUnactivatedLaunchAttemptAsync(resource, "", ct);
         if (view.DrillMode == "ranked")
         {
             await PersistRankedActionsAsync(resource, view, ct);
@@ -2260,6 +2473,7 @@ public sealed class RunBroker
         var resource = await GetOwnedResourceAsync(runId, owner, ct);
         if (resource is null) return false;
         var view = RunView.From(resource);
+        await VoidUnactivatedLaunchAttemptAsync(resource, displayName, ct);
         if (view.DrillMode == "ranked")
         {
             await PersistRankedActionsAsync(resource, view, ct);
@@ -2283,12 +2497,15 @@ public sealed class RunBroker
         }
     }
 
-    public async Task<IReadOnlyList<RunView>> ListAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<RunView>> ListAsync(CancellationToken ct) =>
+        (await ListResourcesAsync(ct)).Select(RunView.From).ToList();
+
+    private async Task<IReadOnlyList<LabRunResource>> ListResourcesAsync(CancellationToken ct)
     {
         var obj = await _k8s.CustomObjects.ListClusterCustomObjectAsync(
             LabRun.Group, LabRun.Version, LabRun.Plural, cancellationToken: ct);
         var list = KubernetesJson.Deserialize<LabRunList>(KubernetesJson.Serialize(obj));
-        return list.Items.Select(RunView.From).ToList();
+        return list.Items;
     }
 
     // The custom-objects API returns loosely-typed JSON; round-trip it through the typed model.
@@ -2341,7 +2558,9 @@ public sealed record RunFrame(
     RunTelemetry? Telemetry,
     IReadOnlyList<RunComponent> Components,
     IReadOnlyList<RunEventView> Events,
-    RunTrace? Trace);
+    RunTrace? Trace,
+    /// <summary>Whether the run's Envoy gateways answered this frame's scrape.</summary>
+    bool GatewayReporting = false);
 
 public sealed record PlatformStatus(
     string Cluster,
@@ -2368,6 +2587,13 @@ public sealed record RunReport(
 {
     public static RunReport NotReady(string runId, string scenarioId) =>
         new(false, runId, scenarioId, "pending", 0, "", "", [], [], DateTime.MinValue);
+}
+
+/// <summary>Provisioning as the launch needs it: the LabRun itself, or the broker's own refusal
+/// status so an owner-key or capacity problem surfaces identically on both entry points.</summary>
+public sealed record ClusterProvision(LabRunResource? Resource, int Status, string? Error)
+{
+    public static ClusterProvision Fail(int status, string error) => new(null, status, error);
 }
 
 public sealed record BrokerResult(RunView? Run, int Status, string? Error)
