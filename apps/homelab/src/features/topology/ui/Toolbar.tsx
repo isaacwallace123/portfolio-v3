@@ -1,20 +1,15 @@
 "use client";
 
-import { ChevronsDownUp, Search, X } from "lucide-react";
-import { LAYERS } from "../model/layers";
+import { Search, Spline, X } from "lucide-react";
 import s from "../topology.module.css";
 
 interface Props {
   live: boolean;
   query: string;
   onQuery: (value: string) => void;
-  /** Layers currently drawn as their individual components. */
-  expanded: ReadonlySet<string>;
-  onToggleLayer: (layer: string) => void;
-  onCollapseAll: () => void;
-  /** Layers with more than one component — the rest have nothing to collapse. */
-  collapsible: readonly string[];
-  /** Boxes currently drawn, against the size of the whole inventory. */
+  /** Draw every component link at once instead of only the one being pointed at. */
+  showAllLinks: boolean;
+  onToggleLinks: () => void;
   shown: number;
   total: number;
 }
@@ -23,15 +18,11 @@ export function Toolbar({
   live,
   query,
   onQuery,
-  expanded,
-  onToggleLayer,
-  onCollapseAll,
-  collapsible,
+  showAllLinks,
+  onToggleLinks,
   shown,
   total,
 }: Props) {
-  const anyExpanded = expanded.size > 0;
-
   return (
     <div className={s.toolbar}>
       <span className={s.liveTag}>
@@ -59,36 +50,20 @@ export function Toolbar({
         )}
       </div>
 
-      {/* These open and close layers rather than filtering them away: the shape of the system is the
-          point of the page, so nothing is ever hidden — only summarised until you ask for it. */}
-      <div className={s.layerPills} role="group" aria-label="Expand a layer">
-        {LAYERS.filter(({ id }) => collapsible.includes(id)).map(
-          ({ id, label }) => (
-            <button
-              key={id}
-              type="button"
-              data-layer={id}
-              data-active={expanded.has(id) || undefined}
-              aria-pressed={expanded.has(id)}
-              onClick={() => onToggleLayer(id)}
-            >
-              {label}
-            </button>
-          ),
-        )}
-        <button
-          type="button"
-          className={s.collapseAll}
-          onClick={onCollapseAll}
-          disabled={!anyExpanded}
-          aria-label="Collapse every layer"
-        >
-          <ChevronsDownUp size={12} /> Collapse
-        </button>
-      </div>
+      {/* Off by default: thirty-eight links drawn at once is the mess this arrangement avoids, but
+          being able to see the whole web at once is worth one button. */}
+      <button
+        type="button"
+        className={s.linkToggle}
+        data-active={showAllLinks || undefined}
+        aria-pressed={showAllLinks}
+        onClick={onToggleLinks}
+      >
+        <Spline size={12} /> All connections
+      </button>
 
       <span className={s.count}>
-        {shown} {shown === 1 ? "box" : "boxes"} · {total} components
+        {shown === total ? `${total} components` : `${shown} of ${total}`}
       </span>
     </div>
   );
