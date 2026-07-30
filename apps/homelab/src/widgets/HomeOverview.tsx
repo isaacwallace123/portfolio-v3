@@ -12,7 +12,7 @@ import {
   Play,
   RefreshCw,
   Server,
-  ShieldCheck,
+  Trophy,
   Waypoints,
 } from "lucide-react";
 import {
@@ -253,16 +253,16 @@ export default function HomeOverview() {
               Start a workspace <ArrowRight size={15} />
             </span>
           </a>
-          <a href="/drills">
-            <ShieldCheck size={22} />
-            <small>03 / RESPOND</small>
-            <h3>Guided incidents</h3>
+          <a href="/ranked">
+            <Trophy size={22} />
+            <small>03 / COMPETE</small>
+            <h3>Ranked operations</h3>
             <p>
-              Diagnose failure from measured requests and spans, make a real
-              intervention, and receive an evidence-backed outcome.
+              Take a server-drawn cascade on a live isolated workload. Every
+              verdict moves seasonless ELO; clean recoveries also record time.
             </p>
             <span>
-              Enter the drills <ArrowRight size={15} />
+              Enter ranked <ArrowRight size={15} />
             </span>
           </a>
         </div>

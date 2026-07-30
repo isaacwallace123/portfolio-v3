@@ -1,5 +1,7 @@
 using IsaacWallace.Api.Auth;
 using IsaacWallace.Api.Data;
+using IsaacWallace.Api.Learning;
+using IsaacWallace.Api.Ranked;
 using IsaacWallace.Api.Runs;
 using k8s;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -40,6 +42,17 @@ builder.Services.AddDbContext<HomeOpsDbContext>(o =>
     else o.UseSqlite(config.GetConnectionString("Default") ?? "Data Source=app.db");
 });
 builder.Services.AddScoped<DrillResultStore>();
+builder.Services.AddScoped<RankedStore>();
+
+// HomeOps Academy progress, in its own context on the same database. Separate from the arena's
+// store because a course outlives every cluster a learner ever provisioned — see LearningDbContext.
+builder.Services.AddDbContext<LearningDbContext>(o =>
+{
+    var postgres = config.GetConnectionString("Postgres");
+    if (!string.IsNullOrWhiteSpace(postgres)) o.UseNpgsql(postgres);
+    else o.UseSqlite(config.GetConnectionString("Default") ?? "Data Source=app.db");
+});
+builder.Services.AddScoped<LearningProgressStore>();
 
 // HomeOps run-broker: creates Crossplane LabRun objects on the cluster. In a pod it uses the
 // mounted ServiceAccount (scoped to LabRuns only); on a dev box it uses the local kubeconfig.
@@ -75,8 +88,13 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 // The drill catalog has rules a compiler cannot check: every stage needs an objective, a correct
 // move, and no trap it cannot be recovered from. Refusing to start is the right response to breaking
 // one — a drill nobody can finish is worse than an outage, because it looks like it is working.
-var catalogProblems = DrillKit.Problems(ScenarioDefinitions.Drills);
-if (catalogProblems.Count > 0)
+var catalogProblems = DrillKit.Problems(ScenarioDefinitions.Drills)
+    .Concat(ScenarioDefinitions.RankedDrills
+        .Where(scenario => !RankedRules.IsCalibratedScenario(scenario.Id))
+        .Select(scenario =>
+            $"{scenario.Id}: ranked scenario has no explicit rating calibration."))
+    .ToArray();
+if (catalogProblems.Length > 0)
     throw new InvalidOperationException(
         "The drill catalog is invalid:" + Environment.NewLine +
         string.Join(Environment.NewLine, catalogProblems));
@@ -97,6 +115,22 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         app.Logger.LogError(ex, "Could not prepare the drill-results schema; results will not record.");
+    }
+}
+
+// Academy tables, same idempotent-DDL approach and the same tolerance: a database the Academy
+// cannot reach means progress does not persist, which is a bad day. It must not mean the arena
+// refuses to start.
+using (var scope = app.Services.CreateScope())
+{
+    var learning = scope.ServiceProvider.GetRequiredService<LearningDbContext>();
+    try
+    {
+        await learning.EnsureSchemaAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Could not prepare the Academy schema; progress will not persist.");
     }
 }
 
@@ -143,5 +177,10 @@ app.MapGet("/v1/me", (HttpContext ctx) =>
 
 // HomeOps run-broker: /v1/scenarios + /v1/runs (create/list/get/delete), gated by runs:* scopes.
 app.MapRunEndpoints();
+app.MapRankedEndpoints();
+
+// HomeOps Academy: /v1/learning/* — curriculum progress and the certificate. Records what a
+// learner has done; never touches a cluster.
+app.MapLearningEndpoints();
 
 app.Run();

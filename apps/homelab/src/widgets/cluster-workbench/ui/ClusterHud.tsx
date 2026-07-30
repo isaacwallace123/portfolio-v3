@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2, Timer, Trash2, X } from "lucide-react";
 import type {
   LiveRunView,
@@ -23,6 +24,7 @@ export interface Converging {
  */
 export function ClusterHud({
   run,
+  surface,
   components,
   trace,
   drillTitle,
@@ -37,6 +39,7 @@ export function ClusterHud({
   onDismissError,
 }: {
   run: LiveRunView;
+  surface: "practice" | "ranked";
   components: RunComponent[];
   trace: LiveTrace | null;
   drillTitle: string | null;
@@ -54,6 +57,19 @@ export function ClusterHud({
   const totalCpu = components.reduce((a, c) => a + c.cpuMillicores, 0);
   const totalMem = components.reduce((a, c) => a + c.memoryMiB, 0);
   const podCount = components.reduce((a, c) => a + c.pods.length, 0);
+  const [confirmTeardownFor, setConfirmTeardownFor] = useState<string | null>(
+    null,
+  );
+  const teardownForfeits =
+    run.drillMode === "ranked" && !run.drillSolved && !run.drillFailed;
+  const confirmingTeardown =
+    teardownForfeits && confirmTeardownFor === run.runId;
+
+  useEffect(() => {
+    if (!confirmingTeardown) return;
+    const timer = window.setTimeout(() => setConfirmTeardownFor(null), 5_000);
+    return () => window.clearTimeout(timer);
+  }, [confirmingTeardown]);
 
   return (
     <>
@@ -61,7 +77,7 @@ export function ClusterHud({
         <span
           className={`${styles.dot} ${provisioning ? styles.dotWarn : styles.dotOk}`}
         />
-        <b>Practice cluster</b>
+        <b>{surface === "ranked" ? "Ranked arena" : "Practice cluster"}</b>
         <code>{run.namespace ?? run.runId}</code>
         {drillTitle && <span className={styles.drillTag}>{drillTitle}</span>}
       </div>
@@ -75,16 +91,34 @@ export function ClusterHud({
           {!run.renewable && <em className={styles.extended}>extended</em>}
         </span>
         <button
-          className={`${styles.hudCard} ${styles.danger}`}
-          onClick={onTeardown}
+          className={`${styles.hudCard} ${styles.danger} ${confirmingTeardown ? styles.dangerConfirm : ""}`}
+          onClick={() => {
+            if (teardownForfeits && !confirmingTeardown) {
+              setConfirmTeardownFor(run.runId);
+              return;
+            }
+            setConfirmTeardownFor(null);
+            onTeardown();
+          }}
           disabled={busy !== null}
+          title={
+            confirmingTeardown
+              ? "Confirm: destroy the cluster and record a ranked loss"
+              : teardownForfeits
+                ? "This also forfeits the active ranked match"
+                : "Destroy this disposable cluster"
+          }
         >
           {busy === "teardown" ? (
             <Loader2 size={13} className={styles.spin} />
           ) : (
             <Trash2 size={13} />
           )}
-          Tear down
+          {confirmingTeardown
+            ? "Confirm loss + teardown"
+            : teardownForfeits
+              ? "Forfeit + tear down"
+              : "Tear down"}
         </button>
       </div>
 

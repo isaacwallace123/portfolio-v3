@@ -49,6 +49,7 @@ export async function DELETE(
     `/v1/runs/${runId}`,
     { method: "DELETE" },
     g.caller.owner,
+    g.caller.displayName,
   );
   return jsonNoStore(await res.json().catch(() => ({})), res.status);
 }

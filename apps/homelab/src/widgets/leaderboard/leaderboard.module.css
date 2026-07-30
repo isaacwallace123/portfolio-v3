@@ -319,6 +319,49 @@
 .table tbody tr:hover {
   background: color-mix(in srgb, var(--mint) 7%, transparent);
 }
+.ratingBoard {
+  margin-bottom: 42px;
+}
+.ratingBoard .table td {
+  padding-block: 14px;
+}
+.rating {
+  color: var(--acid) !important;
+  font:
+    700 15px/1 ui-monospace,
+    monospace;
+}
+.division {
+  display: inline-flex;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-mid);
+  font:
+    700 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.division[data-division="gold"],
+.division[data-division="master"] {
+  border-color: color-mix(in srgb, var(--amber) 42%, var(--line));
+  color: var(--amber);
+}
+.division[data-division="platinum"],
+.division[data-division="diamond"] {
+  border-color: color-mix(in srgb, var(--mint) 42%, var(--line));
+  color: var(--mint);
+}
+.streak {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.streak svg {
+  color: var(--amber);
+}
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
