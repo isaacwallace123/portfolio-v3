@@ -336,6 +336,84 @@ public sealed class RankedStoreTests
             CancellationToken.None));
     }
 
+    [Fact]
+    public async Task GeneratedPlanIsPersistedOwnerScopedAndRevealedOnlyAfterTheMatch()
+    {
+        await using var fixture = await RankedFixture.CreateAsync();
+        var plan = RankedScenarioGenerator.Generate(
+            new RankedScenarioSeed(
+                314.ToString("x32"),
+                RankedScenarioSeed.CurrentVersion,
+                RankedRules.InitialRating));
+        var attempt = await fixture.Store.BeginAsync(
+            "run-hl-generated1",
+            plan.DrillId,
+            "owner-generated",
+            "Dorothy",
+            DateTime.UtcNow,
+            CancellationToken.None);
+
+        Assert.NotNull(attempt.Briefing);
+        Assert.Null(attempt.Debrief);
+        Assert.Equal(plan.Seed.SeedId, attempt.Briefing.SeedId);
+        var receipt = Assert.Single(await fixture.Db.RankedScenarios.ToListAsync());
+        Assert.Equal(plan.DrillId, receipt.DrillId);
+        Assert.Contains(plan.Seed.SeedId, receipt.PlanJson);
+
+        var context = await fixture.Store.DrawContextAsync(
+            "owner-generated", CancellationToken.None);
+        var other = await fixture.Store.DrawContextAsync(
+            "owner-other", CancellationToken.None);
+        Assert.Contains(plan.Seed.SeedId, context.PlayedSeedIds);
+        Assert.Equal(plan.FamilyList.OrderBy(family => family), context.RecentFamilies.OrderBy(family => family));
+        Assert.Empty(other.PlayedSeedIds);
+        Assert.Empty(other.RecentFamilies);
+
+        await fixture.Store.FinalizeAsync(
+            attempt.Id,
+            "owner-generated",
+            RankedOutcomes.Void,
+            0,
+            0,
+            "",
+            "Dorothy",
+            CancellationToken.None);
+        var settled = (await fixture.Store.ProfileAsync(
+            "owner-generated", CancellationToken.None)).RecentAttempts.Single();
+        Assert.NotNull(settled.Debrief);
+        Assert.Equal(
+            plan.Faults.Select(fault => fault.ModuleId).OrderBy(id => id),
+            settled.Debrief.Faults.Select(fault => fault.ModuleId).OrderBy(id => id));
+    }
+
+    [Fact]
+    public async Task DifferentOwnersMayReceiveTheSameOpaqueSeed()
+    {
+        await using var fixture = await RankedFixture.CreateAsync();
+        var seed = new RankedScenarioSeed(
+            2718.ToString("x32"),
+            RankedScenarioSeed.CurrentVersion,
+            RankedRules.InitialRating);
+        var plan = RankedScenarioGenerator.Generate(seed);
+
+        await fixture.Store.BeginAsync(
+            "run-hl-ownerone1",
+            plan.DrillId,
+            "owner-one",
+            "One",
+            DateTime.UtcNow,
+            CancellationToken.None);
+        await fixture.Store.BeginAsync(
+            "run-hl-ownertwo2",
+            plan.DrillId,
+            "owner-two",
+            "Two",
+            DateTime.UtcNow,
+            CancellationToken.None);
+
+        Assert.Equal(2, await fixture.Db.RankedScenarios.CountAsync());
+    }
+
     private static async Task RecordControlledRecoveryAsync(
         RankedStore store,
         RankedAttemptView attempt,

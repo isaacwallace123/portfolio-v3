@@ -1,4 +1,5 @@
 using System.Data;
+using System.Text.Json;
 using IsaacWallace.Api.Ranked;
 using IsaacWallace.Api.Runs;
 using Microsoft.EntityFrameworkCore;
@@ -21,7 +22,9 @@ public sealed record RankedAttemptView(
     double ExpectedScore,
     int RatingDelta,
     int PostRating,
-    RankedPerformanceView? Performance);
+    RankedPerformanceView? Performance,
+    RankedMatchBriefing? Briefing,
+    RankedMatchDebrief? Debrief);
 
 public sealed record RankedPerformanceView(
     int QualityScore,
@@ -57,6 +60,11 @@ public sealed record RankedTelemetryObservation(
     int SloGoalsMet,
     int SloGoalsTotal,
     int HeldSeconds);
+
+public sealed record RankedDrawContext(
+    int Rating,
+    IReadOnlySet<string> PlayedSeedIds,
+    IReadOnlyList<string> RecentFamilies);
 
 public sealed record RankedProfileView(
     int Rating,
@@ -124,7 +132,8 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             .AsNoTracking()
             .SingleOrDefaultAsync(r => r.OwnerKey == owner, ct);
         var current = rating?.Rating ?? RankedRules.InitialRating;
-        var scenarioRating = RankedRules.ScenarioRating(drillId);
+        var generated = RankedScenarioCatalog.TryPlan(drillId);
+        var scenarioRating = generated?.ScenarioRating ?? RankedRules.ScenarioRating(drillId);
 
         var attempt = new RankedAttempt
         {
@@ -140,6 +149,21 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             ExpectedScore = RankedRules.ExpectedScore(current, scenarioRating),
             PostRating = current,
         };
+        if (generated is not null)
+        {
+            attempt.Scenario = new RankedScenarioRecord
+            {
+                AttemptId = attempt.Id,
+                OwnerKey = owner,
+                DrillId = generated.DrillId,
+                SeedId = generated.Seed.SeedId,
+                GeneratorVersion = generated.Seed.GeneratorVersion,
+                PlayerRating = generated.Seed.PlayerRating,
+                PlanJson = JsonSerializer.Serialize(generated),
+                FamiliesJson = JsonSerializer.Serialize(generated.FamilyList),
+                CreatedUtc = Utc(startedUtc),
+            };
+        }
         db.RankedAttempts.Add(attempt);
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
@@ -165,6 +189,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
                 IsolationLevel.Serializable, ct);
             var attempt = await db.RankedAttempts
                 .Include(candidate => candidate.Performance)
+                .Include(candidate => candidate.Scenario)
                 .SingleOrDefaultAsync(a => a.Id == attemptId && a.OwnerKey == owner, ct);
             if (attempt is null) return null;
             if (attempt.Outcome != RankedOutcomes.Active) return View(attempt);
@@ -178,7 +203,8 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             if (!string.IsNullOrWhiteSpace(displayName))
                 attempt.DisplayName = CleanName(displayName);
 
-            if (!ScenarioDefinitions.All.TryGetValue(attempt.DrillId, out var scenario))
+            var scenario = ScenarioDefinitions.Find(attempt.DrillId);
+            if (scenario is null)
                 throw new InvalidOperationException(
                     $"Ranked scenario '{attempt.DrillId}' is no longer available for audit.");
 
@@ -208,7 +234,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
                     action.Command,
                     action.Stage,
                     action.AcceptedUtc)).ToArray(),
-                (int)RunBroker.GoalHold.TotalSeconds);
+                scenario.Stages[^1].HoldSeconds);
             attempt.Performance = Performance(attempt, performance, now);
 
             if (RankedOutcomes.IsRated(outcome))
@@ -289,6 +315,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
         var attempt = await db.RankedAttempts
             .AsNoTracking()
             .Include(candidate => candidate.Performance)
+            .Include(candidate => candidate.Scenario)
             .SingleOrDefaultAsync(a => a.Id == attemptId && a.OwnerKey == owner, ct);
         return attempt is null ? null : View(attempt);
     }
@@ -301,6 +328,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
         var attempt = await db.RankedAttempts
             .AsNoTracking()
             .Include(candidate => candidate.Performance)
+            .Include(candidate => candidate.Scenario)
             .Where(a =>
                 a.RunId == runId &&
                 a.OwnerKey == owner &&
@@ -317,6 +345,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
         var attempt = await db.RankedAttempts
             .AsNoTracking()
             .Include(candidate => candidate.Performance)
+            .Include(candidate => candidate.Scenario)
             .Where(a => a.OwnerKey == owner && a.Outcome == RankedOutcomes.Active)
             .OrderByDescending(a => a.StartedUtc)
             .FirstOrDefaultAsync(ct);
@@ -477,6 +506,7 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
         var recent = await db.RankedAttempts
             .AsNoTracking()
             .Include(attempt => attempt.Performance)
+            .Include(attempt => attempt.Scenario)
             .Where(a => a.OwnerKey == owner)
             .OrderByDescending(a => a.StartedUtc)
             .Take(12)
@@ -498,6 +528,31 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             rating?.BestStreak ?? 0,
             Math.Max(0, RankedRules.PlacementGames - (rating?.GamesPlayed ?? 0)),
             recent.Select(View).ToArray());
+    }
+
+    public async Task<RankedDrawContext> DrawContextAsync(
+        string owner,
+        CancellationToken ct)
+    {
+        var rating = await db.OperatorRatings
+            .AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.OwnerKey == owner, ct);
+        var scenarios = await db.RankedScenarios
+            .AsNoTracking()
+            .Where(scenario => scenario.OwnerKey == owner)
+            .OrderByDescending(scenario => scenario.CreatedUtc)
+            .ToListAsync(ct);
+        var recentFamilies = scenarios
+            .Take(RankedMatchmaker.RecentExclusionCount)
+            .SelectMany(scenario =>
+                JsonSerializer.Deserialize<string[]>(scenario.FamiliesJson) ?? [])
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        return new RankedDrawContext(
+            rating?.Rating ?? RankedRules.InitialRating,
+            scenarios.Select(scenario => scenario.SeedId).ToHashSet(StringComparer.Ordinal),
+            recentFamilies);
     }
 
     public async Task<IReadOnlyList<RankedStandingView>> LeaderboardAsync(
@@ -562,7 +617,13 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             attempt.ExpectedScore,
             attempt.RatingDelta,
             attempt.PostRating,
-            attempt.Performance is null ? null : View(attempt.Performance));
+            attempt.Performance is null ? null : View(attempt.Performance),
+            ReadPlan(attempt) is { } briefingPlan
+                ? RankedMatchBriefing.From(briefingPlan)
+                : null,
+            attempt.Outcome != RankedOutcomes.Active && ReadPlan(attempt) is { } debriefPlan
+                ? RankedMatchDebrief.From(debriefPlan)
+                : null);
 
     private static RankedPerformanceView View(RankedPerformanceRecord performance) =>
         new(
@@ -625,4 +686,20 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             Band = result.Band,
             CreatedUtc = now,
         };
+
+    private static RankedScenarioPlan? ReadPlan(RankedAttempt attempt)
+    {
+        if (attempt.Scenario is { PlanJson.Length: > 0 })
+        {
+            try
+            {
+                return JsonSerializer.Deserialize<RankedScenarioPlan>(attempt.Scenario.PlanJson);
+            }
+            catch (JsonException)
+            {
+                // The token remains a deterministic repair source if a stored receipt was damaged.
+            }
+        }
+        return RankedScenarioCatalog.TryPlan(attempt.DrillId);
+    }
 }

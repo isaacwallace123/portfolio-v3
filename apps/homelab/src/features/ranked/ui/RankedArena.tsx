@@ -188,6 +188,7 @@ export function RankedArena({
     run.drillHoldSeconds > 0
       ? Math.min(1, run.drillHeldSeconds / run.drillHoldSeconds)
       : 0;
+  const briefing = run.rankedBriefing;
 
   return (
     <div className={styles.arena}>
@@ -221,6 +222,33 @@ export function RankedArena({
         </div>
         <h2>{run.drillTitle}</h2>
         <p>{run.drillStageObjective || run.drillObjective}</p>
+        {briefing && (
+          <>
+            <div className={styles.matchReceipt}>
+              <span>
+                Seed <code>{briefing.seedId.slice(0, 12)}</code>
+              </span>
+              <span>
+                Generator <b>v{briefing.generatorVersion}</b>
+              </span>
+              <span>
+                Cut for <b>{briefing.scenarioRating} ELO</b>
+              </span>
+              <span>
+                Hold <b>{briefing.verificationHoldSeconds}s</b>
+              </span>
+            </div>
+            <details className={styles.matchConstraints}>
+              <summary>Environment and match constraints</summary>
+              <p>{briefing.environment}</p>
+              <ul>
+                {briefing.constraints.map((constraint) => (
+                  <li key={constraint}>{constraint}</li>
+                ))}
+              </ul>
+            </details>
+          </>
+        )}
       </section>
 
       <section className={styles.objectiveGrid}>

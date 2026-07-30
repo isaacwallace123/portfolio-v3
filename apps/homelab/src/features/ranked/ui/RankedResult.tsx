@@ -95,6 +95,7 @@ export function RankedResult({
   const failed = run.drillOptions.find(
     (option) => option.id === run.drillFailedMove,
   );
+  const debrief = attempt?.debrief ?? run.rankedDebrief;
 
   return (
     <div className={`${styles.result} ${won ? "" : styles.lost}`}>
@@ -230,6 +231,42 @@ export function RankedResult({
         </section>
       )}
 
+      {debrief && (
+        <section className={styles.debriefCard}>
+          <header>
+            <div>
+              <span>Generated incident debrief</span>
+              <b>
+                Seed {debrief.seedId.slice(0, 12)} · generator v
+                {debrief.generatorVersion}
+              </b>
+            </div>
+            <strong>{debrief.difficultyScore.toFixed(1)} difficulty</strong>
+          </header>
+          <div className={styles.faultGrid}>
+            {debrief.faults.map((fault) => (
+              <article key={`${fault.phase}-${fault.moduleId}`}>
+                <span>
+                  Phase {fault.phase}
+                  {fault.wasHidden ? " · hidden escalation" : ""}
+                  {fault.activationDelaySeconds > 0
+                    ? ` · +${fault.activationDelaySeconds}s`
+                    : ""}
+                </span>
+                <h3>{fault.label}</h3>
+                <p>{fault.diagnosis}</p>
+                <small>
+                  Resolved by{" "}
+                  {fault.resolvedBy.length > 0
+                    ? fault.resolvedBy.join(" or ")
+                    : "measured state convergence"}
+                </small>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
       <div className={styles.actionLog}>
         <header>
           <span>Operational timeline</span>
@@ -247,17 +284,21 @@ export function RankedResult({
         )}
       </div>
 
-      {won && scenario && (
+      {won && (scenario || run.rankedBriefing) && (
         <div className={styles.speedCompare}>
           <span>
-            <Timer size={10} /> par {clock(scenario.parSeconds * 1000)}
+            <Timer size={10} /> par{" "}
+            {clock(
+              (scenario?.parSeconds ?? run.rankedBriefing?.parSeconds ?? 0) *
+                1000,
+            )}
           </span>
-          {scenario.averageMs > 0 && (
+          {(scenario?.averageMs ?? 0) > 0 && (
             <span>
-              <Gauge size={10} /> field {clock(scenario.averageMs)}
+              <Gauge size={10} /> field {clock(scenario?.averageMs ?? 0)}
             </span>
           )}
-          {scenario.yourBestMs && (
+          {scenario?.yourBestMs && (
             <span
               className={
                 attempt?.elapsedMs === scenario.yourBestMs

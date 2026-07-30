@@ -32,7 +32,8 @@ public sealed record RankedMatchBriefing(
     int OfferedRequestsPerSec,
     int ParSeconds,
     int VerificationHoldSeconds,
-    string TelemetryNotice)
+    string TelemetryNotice,
+    RankedTelemetryVisibility Telemetry)
 {
     public static RankedMatchBriefing From(RankedScenarioPlan plan)
     {
@@ -49,7 +50,8 @@ public sealed record RankedMatchBriefing(
             opening.Load.OfferedRequestsPerSec,
             plan.ParSeconds,
             opening.Objectives.HoldSeconds,
-            plan.Telemetry.Notice);
+            plan.Telemetry.Notice,
+            plan.Telemetry);
     }
 }
 

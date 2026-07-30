@@ -389,8 +389,8 @@ public static class RankedScenarioGenerator
         $"Every objective must hold continuously for {objectives.HoldSeconds} seconds before it "
         + "counts. A single bad reading in that window restarts the hold.",
         telemetry.Notice,
-        "One wrong operator command ends the attempt. It is still applied — watching what it does "
-        + "to a live workload is the point — but nothing after it is judged.",
+        "Every accepted command is applied and audited. Harmful, unnecessary, or repeated changes "
+        + "lower operational quality; the measured objective, not an answer key, decides the run.",
         "Commands are limited to the ranked operator allowlist.",
     ];
 
@@ -413,7 +413,7 @@ public static class RankedScenarioGenerator
         private readonly string _material =
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"{seed.SeedId}:{seed.GeneratorVersion}:{seed.PlayerRating}");
+                $"{seed.SeedId}:{seed.GeneratorVersion}");
         private int _counter;
 
         public int Next(int exclusiveMax)

@@ -83,10 +83,23 @@ export function metricsOutput(
   }
 
   const t = run.telemetry;
+  const visibility = run.rankedBriefing?.telemetry;
+  const served =
+    visibility?.throughput === false
+      ? "served [withheld]"
+      : `served ${t.requestsPerSec}/s`;
+  const latency =
+    visibility?.latency === false
+      ? "p95 [withheld]"
+      : `p95 ${Math.round(t.p95LatencyMs * 10) / 10}ms`;
+  const errors =
+    visibility?.errors === false
+      ? "errors [withheld]"
+      : `errors ${t.errorRatePct.toFixed(2)}%`;
   return [
-    `served ${t.requestsPerSec}/s · offered ${run.offeredRequestsPerSec}/s`,
-    `p95 ${Math.round(t.p95LatencyMs * 10) / 10}ms · target <${t.latencyTargetMs}ms`,
-    `errors ${t.errorRatePct.toFixed(2)}% · SLO score ${t.score}`,
+    `${served} · offered ${run.offeredRequestsPerSec}/s`,
+    `${latency} · objective is judged server-side`,
+    `${errors} · live gauges follow match visibility`,
     `checkout ${t.apiReplicas} · gateway ${run.gatewayReplicas} · canary ${run.canaryReplicas}`,
   ];
 }

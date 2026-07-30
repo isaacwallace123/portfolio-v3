@@ -33,7 +33,8 @@ public static class RankedScenarioMaterializer
             plan.ParSeconds,
             plan.Objective,
             stages[0].Setup,
-            stages);
+            stages,
+            Rated: true);
     }
 
     private static DrillStage ToStage(RankedScenarioPlan plan, RankedScenarioPhase phase)
@@ -62,7 +63,10 @@ public static class RankedScenarioMaterializer
             phase.Setup,
             Options(phase).Select(move => move.Build()).ToArray(),
             // Two faults can each demand the same capacity target; the objective should read once.
-            goals.GroupBy(Key, StringComparer.Ordinal).Select(group => group.First()).ToArray());
+            goals.GroupBy(Key, StringComparer.Ordinal).Select(group => group.First()).ToArray(),
+            phase.DelayedSetup,
+            phase.ActivationDelaySeconds,
+            phase.Objectives.HoldSeconds);
 
         static string Key(DrillGoal goal) => $"{goal.Metric}|{goal.State}|{goal.Threshold}|{goal.Below}";
     }

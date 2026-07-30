@@ -1,5 +1,9 @@
 import type { RunTelemetry, RunView } from "@iw/lab-runtime";
-import type { DrillGoal } from "@/shared/api/live-client";
+import type {
+  DrillGoal,
+  RankedMatchBriefing,
+  RankedMatchDebrief,
+} from "@/shared/api/live-client";
 
 /** One option in the active stage's quiz. Correctness is withheld until it is chosen. */
 export interface DrillOption {
@@ -81,6 +85,8 @@ export interface RealRun {
   drillGoals?: DrillGoal[];
   drillHeldSeconds?: number;
   drillHoldSeconds?: number;
+  rankedBriefing?: RankedMatchBriefing | null;
+  rankedDebrief?: RankedMatchDebrief | null;
   ttlSeconds: number;
   renewable: boolean;
   createdAt?: string;
@@ -89,9 +95,9 @@ export interface RealRun {
     cpuMillicores: number;
     memoryMiB: number;
     postgresCpuPct: number;
-    requestsPerSec: number;
-    p95LatencyMs: number;
-    errorRatePct: number;
+    requestsPerSec: number | null;
+    p95LatencyMs: number | null;
+    errorRatePct: number | null;
   } | null;
 }
 
@@ -163,6 +169,10 @@ export interface LiveRunView extends RunView {
   /** How long every condition has held, and how long it must, before the stage resolves. */
   drillHeldSeconds: number;
   drillHoldSeconds: number;
+  /** Safe pre-match projection: seed receipt, objectives, constraints, and visible instruments. */
+  rankedBriefing: RankedMatchBriefing | null;
+  /** Full generated plan, present only after the match is decided. */
+  rankedDebrief: RankedMatchDebrief | null;
 }
 
 export function toLiveRunView(real: RealRun): LiveRunView {
@@ -275,5 +285,7 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     drillGoals: real.drillGoals ?? [],
     drillHeldSeconds: real.drillHeldSeconds ?? 0,
     drillHoldSeconds: real.drillHoldSeconds ?? 0,
+    rankedBriefing: real.rankedBriefing ?? null,
+    rankedDebrief: real.rankedDebrief ?? null,
   };
 }

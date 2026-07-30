@@ -193,7 +193,9 @@ export default function ClusterWorkbench({
   const activeSurface =
     run.drillMode === "ranked" ? ("ranked" as const) : ("practice" as const);
   const surfaceMismatch = drillRunning && activeSurface !== surface;
-  const flowing = run.loadEnabled && run.telemetry.requestsPerSec > 0;
+  const throughputWithheld = run.rankedBriefing?.telemetry.throughput === false;
+  const flowing =
+    run.loadEnabled && (throughputWithheld || run.telemetry.requestsPerSec > 0);
 
   // What the operator has asked for. Known the instant a control is used, whereas the Deployment's
   // own desired count only catches up a round-trip later — so the graph can draw a card per intended

@@ -275,6 +275,82 @@ export interface RankedPerformance {
   band: string;
 }
 
+export interface RankedTelemetryVisibility {
+  throughput: boolean;
+  latency: boolean;
+  errors: boolean;
+  state: boolean;
+}
+
+export interface RankedMatchBriefing {
+  seedId: string;
+  generatorVersion: number;
+  scenarioRating: number;
+  difficulty: string;
+  environment: string;
+  objective: string;
+  openingObjective: string;
+  constraints: string[];
+  offeredRequestsPerSec: number;
+  parSeconds: number;
+  verificationHoldSeconds: number;
+  telemetryNotice: string;
+  telemetry: RankedTelemetryVisibility;
+}
+
+export interface RankedFaultReveal {
+  moduleId: string;
+  family: string;
+  label: string;
+  diagnosis: string;
+  phase: number;
+  activationDelaySeconds: number;
+  wasHidden: boolean;
+  resolvedBy: string[];
+}
+
+export interface RankedDebriefPhase {
+  number: number;
+  id: string;
+  title: string;
+  objective: string;
+  handoff: string;
+  offeredRequestsPerSec: number;
+  objectives: {
+    p95CeilingMs: number;
+    errorCeilingPct: number;
+    servedShare: number;
+    holdSeconds: number;
+  };
+  activationDelaySeconds: number;
+  wasHidden: boolean;
+}
+
+export interface RankedMatchDebrief {
+  seedId: string;
+  generatorVersion: number;
+  scenarioRating: number;
+  difficulty: string;
+  difficultyScore: number;
+  environment: string;
+  objective: string;
+  parSeconds: number;
+  verificationHoldSeconds: number;
+  initial: {
+    checkoutReplicas: number;
+    canaryReplicas: number;
+    gatewayReplicas: number;
+    cacheEnabled: boolean;
+    releaseTrack: string;
+    dataState: string;
+    targetPool: string;
+    loadGenerators: number;
+  };
+  telemetry: RankedTelemetryVisibility;
+  faults: RankedFaultReveal[];
+  phases: RankedDebriefPhase[];
+}
+
 export interface RankedAttempt {
   id: string;
   runId: string;
@@ -292,6 +368,8 @@ export interface RankedAttempt {
   ratingDelta: number;
   postRating: number;
   performance: RankedPerformance | null;
+  briefing: RankedMatchBriefing | null;
+  debrief: RankedMatchDebrief | null;
 }
 
 export interface RankedProfile {

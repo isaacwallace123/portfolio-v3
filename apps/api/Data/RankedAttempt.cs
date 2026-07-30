@@ -24,6 +24,7 @@ public sealed class RankedAttempt
     public int RatingDelta { get; set; }
     public int PostRating { get; set; }
     public RankedPerformanceRecord? Performance { get; set; }
+    public RankedScenarioRecord? Scenario { get; set; }
 }
 
 public sealed class OperatorRating

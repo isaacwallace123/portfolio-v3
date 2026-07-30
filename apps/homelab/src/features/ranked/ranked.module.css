@@ -442,6 +442,60 @@
   font-size: 10.5px;
   line-height: 1.5;
 }
+.matchReceipt {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1px;
+  overflow: hidden;
+  margin-top: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--line);
+}
+.matchReceipt span {
+  padding: 7px 8px;
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  font:
+    650 8px/1.3 ui-monospace,
+    monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.matchReceipt b,
+.matchReceipt code {
+  color: var(--ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.matchConstraints {
+  border-top: 1px solid var(--line);
+  padding-top: 7px;
+}
+.matchConstraints summary {
+  color: var(--accent);
+  cursor: pointer;
+  font:
+    700 8px/1.3 ui-monospace,
+    monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.matchConstraints p,
+.matchConstraints li {
+  color: var(--ink-dim);
+  font-size: 9px;
+  line-height: 1.45;
+}
+.matchConstraints p {
+  margin: 8px 0 5px;
+}
+.matchConstraints ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 16px;
+}
 
 .objectiveGrid {
   position: relative;
@@ -1001,6 +1055,77 @@
   color: var(--ink-dim);
   font-size: 9px;
   line-height: 1.45;
+}
+.debriefCard {
+  width: 100%;
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+  text-align: left;
+}
+.debriefCard > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.debriefCard > header div {
+  display: grid;
+  gap: 4px;
+}
+.debriefCard > header span,
+.debriefCard > header b,
+.debriefCard > header strong,
+.faultGrid article > span,
+.faultGrid article > small {
+  font:
+    650 8px/1.35 ui-monospace,
+    monospace;
+  letter-spacing: 0.04em;
+}
+.debriefCard > header span {
+  color: var(--accent);
+  text-transform: uppercase;
+}
+.debriefCard > header b {
+  color: var(--ink-dim);
+  font-weight: 600;
+}
+.debriefCard > header strong {
+  color: var(--ink);
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+.faultGrid {
+  display: grid;
+  gap: 6px;
+}
+.faultGrid article {
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.faultGrid article > span {
+  color: var(--amber);
+  text-transform: uppercase;
+}
+.faultGrid h3 {
+  margin: 5px 0 3px;
+  color: var(--ink);
+  font-size: 11px;
+}
+.faultGrid p {
+  margin: 0 0 6px;
+  color: var(--ink-dim);
+  font-size: 9px;
+  line-height: 1.45;
+}
+.faultGrid article > small {
+  color: var(--mint);
 }
 .speedCompare {
   display: flex;

@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using IsaacWallace.Api.Auth;
 using IsaacWallace.Api.Data;
+using IsaacWallace.Api.Ranked;
 
 namespace IsaacWallace.Api.Runs;
 
@@ -134,10 +135,8 @@ public static class RunEndpoints
         app.MapGet("/v1/leaderboard", async (
             HttpContext ctx, DrillResultStore results, int? limit, CancellationToken ct) =>
         {
-            var titles = ScenarioDefinitions.RankedDrills
-                .ToDictionary(d => d.Id, d => d.Title, StringComparer.Ordinal);
             var board = await results.LeaderboardAsync(
-                Owner(ctx), titles, Math.Clamp(limit ?? 20, 1, 100), ct);
+                Owner(ctx), Math.Clamp(limit ?? 20, 1, 100), ct);
             return Results.Ok(board);
         }).RequireScope(ApiScopes.RunsRead);
 
@@ -206,11 +205,15 @@ public static class RunEndpoints
             var judged = telemetry is null
                 ? new DrillEvaluation([], resource)
                 : await broker.EvaluateDrillAsync(resource, telemetry, OwnerName(ctx), ct);
+            var plan = PlanFor(judged.Resource);
+            var goals = ProjectGoals(judged.Resource, judged.Goals, plan);
 
             return Results.Ok(new
             {
-                run = RunView.From(judged.Resource) with { DrillGoals = judged.Goals },
-                telemetry,
+                run = RunView.From(judged.Resource) with { DrillGoals = goals },
+                telemetry = telemetry is null
+                    ? null
+                    : PublicRunTelemetry.From(telemetry, plan?.Telemetry),
                 components = frame.Components,
                 events = frame.Events,
                 trace = frame.Trace,
@@ -219,10 +222,14 @@ public static class RunEndpoints
 
         app.MapGet("/v1/runs/{runId}/telemetry", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
-            var telemetry = await broker.GetTelemetryAsync(runId, Owner(ctx), ct);
+            var owner = Owner(ctx);
+            var resource = await broker.GetOwnedAsync(runId, owner, ct);
+            if (resource is null)
+                return Results.NotFound(new { error = "No such run." });
+            var telemetry = await broker.GetTelemetryAsync(runId, owner, ct);
             return telemetry is null
                 ? Results.NotFound(new { error = "No such run." })
-                : Results.Ok(telemetry);
+                : Results.Ok(PublicRunTelemetry.From(telemetry, PlanFor(resource)?.Telemetry));
         }).RequireScope(ApiScopes.RunsRead).ValidatesRunId();
 
         app.MapGet("/v1/runs/{runId}/trace", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
@@ -330,6 +337,38 @@ public static class RunEndpoints
             var deleted = await broker.DeleteRunAsync(runId, Owner(ctx), OwnerName(ctx), ct);
             return deleted ? Results.Ok(new { ok = true }) : Results.NotFound(new { error = "No such run." });
         }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
+    }
+
+    private static RankedScenarioPlan? PlanFor(LabRunResource resource)
+    {
+        var drillId = resource.Spec.DrillId;
+        if (string.IsNullOrEmpty(drillId) && RankedScenarioSeed.IsToken(resource.Spec.ScenarioId))
+            drillId = resource.Spec.ScenarioId;
+        return RankedScenarioCatalog.TryPlan(drillId ?? "");
+    }
+
+    private static IReadOnlyList<DrillGoalState> ProjectGoals(
+        LabRunResource resource,
+        IReadOnlyList<DrillGoalState> judged,
+        RankedScenarioPlan? plan)
+    {
+        if (plan is null || judged.Count == 0) return judged;
+        var definition = ScenarioDefinitions.Find(plan.DrillId);
+        if (definition is null || definition.Stages.Count == 0) return judged;
+
+        var stageIndex = 0;
+        var raw = resource.Metadata.Annotations?.GetValueOrDefault(
+            RunBroker.DrillStageAnnotation);
+        if (int.TryParse(raw, out var parsed))
+            stageIndex = Math.Clamp(parsed, 0, definition.Stages.Count - 1);
+        var definitions = definition.Stages[stageIndex].Goals;
+
+        return judged.Select((goal, index) =>
+        {
+            if (index >= definitions.Count || plan.Telemetry.Reveals(definitions[index].Metric))
+                return goal;
+            return goal with { Current = "withheld", Met = false };
+        }).ToArray();
     }
 }
 

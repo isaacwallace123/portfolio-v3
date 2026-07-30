@@ -13,6 +13,7 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
     public DbSet<RankedActionEntry> RankedActions => Set<RankedActionEntry>();
     public DbSet<RankedTelemetrySample> RankedTelemetry => Set<RankedTelemetrySample>();
     public DbSet<RankedPerformanceRecord> RankedPerformance => Set<RankedPerformanceRecord>();
+    public DbSet<RankedScenarioRecord> RankedScenarios => Set<RankedScenarioRecord>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -58,6 +59,9 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
             e.HasOne(a => a.Performance)
                 .WithOne()
                 .HasForeignKey<RankedPerformanceRecord>(p => p.AttemptId);
+            e.HasOne(a => a.Scenario)
+                .WithOne()
+                .HasForeignKey<RankedScenarioRecord>(scenario => scenario.AttemptId);
         });
 
         builder.Entity<OperatorRating>(e =>
@@ -112,6 +116,18 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
             e.Property(performance => performance.OwnerKey).HasMaxLength(64);
             e.Property(performance => performance.Band).HasMaxLength(24);
             e.HasIndex(performance => performance.OwnerKey);
+        });
+
+        builder.Entity<RankedScenarioRecord>(e =>
+        {
+            e.ToTable("RankedScenarios");
+            e.HasKey(scenario => scenario.AttemptId);
+            e.Property(scenario => scenario.AttemptId).HasMaxLength(64);
+            e.Property(scenario => scenario.OwnerKey).HasMaxLength(64);
+            e.Property(scenario => scenario.DrillId).HasMaxLength(64);
+            e.Property(scenario => scenario.SeedId).HasMaxLength(32);
+            e.HasIndex(scenario => new { scenario.OwnerKey, scenario.CreatedUtc });
+            e.HasIndex(scenario => new { scenario.OwnerKey, scenario.SeedId }).IsUnique();
         });
     }
 
@@ -269,6 +285,25 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
               );
               CREATE INDEX IF NOT EXISTS "IX_RankedPerformance_OwnerKey"
                   ON "RankedPerformance" ("OwnerKey");
+
+              CREATE TABLE IF NOT EXISTS "RankedScenarios" (
+                  "AttemptId" character varying(64) NOT NULL
+                      CONSTRAINT "PK_RankedScenarios" PRIMARY KEY,
+                  "OwnerKey" character varying(64) NOT NULL,
+                  "DrillId" character varying(64) NOT NULL,
+                  "SeedId" character varying(32) NOT NULL,
+                  "GeneratorVersion" integer NOT NULL,
+                  "PlayerRating" integer NOT NULL,
+                  "PlanJson" text NOT NULL,
+                  "FamiliesJson" text NOT NULL,
+                  "CreatedUtc" timestamp with time zone NOT NULL,
+                  CONSTRAINT "FK_RankedScenarios_RankedAttempts_AttemptId"
+                      FOREIGN KEY ("AttemptId") REFERENCES "RankedAttempts" ("Id") ON DELETE CASCADE
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedScenarios_Owner_Created"
+                  ON "RankedScenarios" ("OwnerKey", "CreatedUtc");
+              CREATE UNIQUE INDEX IF NOT EXISTS "IX_RankedScenarios_Owner_Seed"
+                  ON "RankedScenarios" ("OwnerKey", "SeedId");
               """
             : """
               CREATE TABLE IF NOT EXISTS "DrillResults" (
@@ -411,6 +446,24 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
               );
               CREATE INDEX IF NOT EXISTS "IX_RankedPerformance_OwnerKey"
                   ON "RankedPerformance" ("OwnerKey");
+
+              CREATE TABLE IF NOT EXISTS "RankedScenarios" (
+                  "AttemptId" TEXT NOT NULL CONSTRAINT "PK_RankedScenarios" PRIMARY KEY,
+                  "OwnerKey" TEXT NOT NULL,
+                  "DrillId" TEXT NOT NULL,
+                  "SeedId" TEXT NOT NULL,
+                  "GeneratorVersion" INTEGER NOT NULL,
+                  "PlayerRating" INTEGER NOT NULL,
+                  "PlanJson" TEXT NOT NULL,
+                  "FamiliesJson" TEXT NOT NULL,
+                  "CreatedUtc" TEXT NOT NULL,
+                  CONSTRAINT "FK_RankedScenarios_RankedAttempts_AttemptId"
+                      FOREIGN KEY ("AttemptId") REFERENCES "RankedAttempts" ("Id") ON DELETE CASCADE
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedScenarios_Owner_Created"
+                  ON "RankedScenarios" ("OwnerKey", "CreatedUtc");
+              CREATE UNIQUE INDEX IF NOT EXISTS "IX_RankedScenarios_Owner_Seed"
+                  ON "RankedScenarios" ("OwnerKey", "SeedId");
               """, ct);
     }
 }

@@ -1,3 +1,4 @@
+using IsaacWallace.Api.Ranked;
 using static IsaacWallace.Api.Runs.DrillKit;
 // So a drill can say `Offered(4)` in its brief and quote the rate the generators are actually
 // configured for, rather than a number typed out by hand next to a goal that computes its own.
@@ -97,7 +98,10 @@ public sealed record DrillStage(
     string Handoff,
     IReadOnlyDictionary<string, object> Setup,
     IReadOnlyList<ScenarioDecisionDefinition> Decisions,
-    IReadOnlyList<DrillGoal> Goals);
+    IReadOnlyList<DrillGoal> Goals,
+    IReadOnlyDictionary<string, object>? DelayedSetup = null,
+    int ActivationDelaySeconds = 0,
+    int HoldSeconds = 15);
 
 public sealed record ScenarioDefinition(
     string Id,
@@ -114,11 +118,12 @@ public sealed record ScenarioDefinition(
     // this). A drill starts from its first stage's Setup instead.
     IReadOnlyDictionary<string, object> Setup,
     // Empty for the open sandbox, which has nothing to achieve.
-    IReadOnlyList<DrillStage> Stages)
+    IReadOnlyList<DrillStage> Stages,
+    bool Rated = false)
 {
     /// <summary>Multi-stage drills are the ranked pool: one lucky guess cannot carry a cascade, so a
     /// time recorded on one says something about the operator rather than about the draw.</summary>
-    public bool IsRanked => Stages.Count > 1;
+    public bool IsRanked => Rated || Stages.Count > 1;
 
     public string Mode => IsRanked ? "ranked" : "practice";
 }
@@ -142,7 +147,12 @@ public static class ScenarioDefinitions
 
     // A drill is a scenario that layers an objective, a clock, and decisions over a live cluster.
     public static bool IsDrill(string id) =>
-        id != SandboxId && All.TryGetValue(id, out var d) && d.Stages.Count > 0;
+        id != SandboxId && Find(id) is { Stages.Count: > 0 };
+
+    public static ScenarioDefinition? Find(string id) =>
+        All.TryGetValue(id, out var definition)
+            ? definition
+            : RankedScenarioCatalog.TryDefinition(id);
 
     public static IEnumerable<ScenarioDefinition> Drills =>
         All.Values.Where(d => IsDrill(d.Id));

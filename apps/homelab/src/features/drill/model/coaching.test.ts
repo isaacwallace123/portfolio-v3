@@ -84,6 +84,8 @@ function run(over: Partial<LiveRunView> = {}): LiveRunView {
     drillGoals: [],
     drillHeldSeconds: 0,
     drillHoldSeconds: 20,
+    rankedBriefing: null,
+    rankedDebrief: null,
     ...over,
   };
 }

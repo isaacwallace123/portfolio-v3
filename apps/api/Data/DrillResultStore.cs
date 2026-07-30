@@ -112,18 +112,15 @@ public sealed class DrillResultStore(HomeOpsDbContext db, ILogger<DrillResultSto
     /// </summary>
     public async Task<LeaderboardView> LeaderboardAsync(
         string owner,
-        IReadOnlyDictionary<string, string> rankedTitles,
         int limit,
         CancellationToken ct)
     {
-        var ids = rankedTitles.Keys.ToArray();
-
         // Materialised and aggregated in memory: picking each operator's best row per drill AND
         // carrying that row's own missteps and date is two levels of grouping, which is where LINQ
         // translation gets provider-specific. Ranked solves are a small set, and this keeps the
         // ranking rules readable — which matters more here than shaving a query.
         var rows = await db.DrillResults
-            .Where(r => r.Mode == "ranked" && ids.Contains(r.DrillId))
+            .Where(r => r.Mode == "ranked")
             .Select(r => new
             {
                 r.OwnerKey,

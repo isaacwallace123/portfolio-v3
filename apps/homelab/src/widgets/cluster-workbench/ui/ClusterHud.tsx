@@ -54,6 +54,10 @@ export function ClusterHud({
   onDismissError: () => void;
 }) {
   const t = run.telemetry;
+  const visibility = run.rankedBriefing?.telemetry;
+  const throughputWithheld = visibility?.throughput === false;
+  const latencyWithheld = visibility?.latency === false;
+  const errorsWithheld = visibility?.errors === false;
   const totalCpu = components.reduce((a, c) => a + c.cpuMillicores, 0);
   const totalMem = components.reduce((a, c) => a + c.memoryMiB, 0);
   const podCount = components.reduce((a, c) => a + c.pods.length, 0);
@@ -169,6 +173,7 @@ export function ClusterHud({
             between these two is the whole signal a capacity drill is scored on. */}
         <div
           className={`${styles.stat} ${
+            !throughputWithheld &&
             run.offeredRequestsPerSec > 0 &&
             t.requestsPerSec < run.offeredRequestsPerSec * 0.8
               ? styles.statBad
@@ -179,31 +184,42 @@ export function ClusterHud({
             {run.offeredRequestsPerSec > 0 ? "Served / offered" : "Throughput"}
           </span>
           <b>
-            {t.requestsPerSec}
-            {run.offeredRequestsPerSec > 0
-              ? ` / ${run.offeredRequestsPerSec}`
-              : ""}
-            /s
+            {throughputWithheld
+              ? "withheld"
+              : `${t.requestsPerSec}${
+                  run.offeredRequestsPerSec > 0
+                    ? ` / ${run.offeredRequestsPerSec}`
+                    : ""
+                }/s`}
           </b>
         </div>
         <div
-          className={`${styles.stat} ${t.p95LatencyMs > t.latencyTargetMs ? styles.statBad : ""}`}
+          className={`${styles.stat} ${
+            !latencyWithheld && t.p95LatencyMs > t.latencyTargetMs
+              ? styles.statBad
+              : ""
+          }`}
         >
           <span>p95</span>
           {/* Sub-millisecond keeps its decimal: a well-cached run really is this fast, and "0ms"
               reads as a dead gauge rather than as the best result on the board. */}
           <b>
-            {t.p95LatencyMs < 10
-              ? Math.round(t.p95LatencyMs * 10) / 10
-              : Math.round(t.p95LatencyMs)}
-            ms
+            {latencyWithheld
+              ? "withheld"
+              : `${
+                  t.p95LatencyMs < 10
+                    ? Math.round(t.p95LatencyMs * 10) / 10
+                    : Math.round(t.p95LatencyMs)
+                }ms`}
           </b>
         </div>
         <div
-          className={`${styles.stat} ${t.errorRatePct > 1 ? styles.statBad : ""}`}
+          className={`${styles.stat} ${
+            !errorsWithheld && t.errorRatePct > 1 ? styles.statBad : ""
+          }`}
         >
           <span>Errors</span>
-          <b>{t.errorRatePct.toFixed(2)}%</b>
+          <b>{errorsWithheld ? "withheld" : `${t.errorRatePct.toFixed(2)}%`}</b>
         </div>
         <div className={styles.stat}>
           <span>CPU</span>
@@ -215,7 +231,11 @@ export function ClusterHud({
         </div>
         <div className={styles.stat}>
           <span>SLO</span>
-          <b>{t.score}</b>
+          <b>
+            {throughputWithheld || latencyWithheld || errorsWithheld
+              ? "judged"
+              : t.score}
+          </b>
         </div>
       </div>
 

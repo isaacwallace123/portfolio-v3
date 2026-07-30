@@ -33,11 +33,6 @@ public sealed class TimeLeaderboardTests
             NullLogger<DrillResultStore>.Instance);
         var board = await store.LeaderboardAsync(
             "owner-b",
-            new Dictionary<string, string>
-            {
-                ["cascade-one"] = "One",
-                ["cascade-two"] = "Two",
-            },
             25,
             CancellationToken.None);
 

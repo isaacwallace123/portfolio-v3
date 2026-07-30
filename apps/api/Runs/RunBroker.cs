@@ -160,7 +160,12 @@ public sealed class RunBroker
             return BrokerResult.Fail(409, "This drill is already resolved.");
         if (view.DrillFailed)
             return BrokerResult.Fail(409, "This ranked attempt is over.");
-        if (!ScenarioDefinitions.All.TryGetValue(view.DrillId, out var scenario))
+        if (view.DrillMode == "ranked")
+            return BrokerResult.Fail(
+                409,
+                "Ranked incidents accept only audited operator commands.");
+        var scenario = ScenarioDefinitions.Find(view.DrillId);
+        if (scenario is null)
             return BrokerResult.Fail(404, "The scenario definition is not available.");
 
         var stageIndex = Math.Max(0, view.DrillStage - 1);
@@ -250,12 +255,18 @@ public sealed class RunBroker
             return BrokerResult.Fail(409, "End the current incident before starting another.");
 
         var ranked = string.Equals(mode, "ranked", StringComparison.OrdinalIgnoreCase);
+        if (ranked && drillId.Length > 0)
+            return BrokerResult.Fail(
+                409,
+                "Ranked incidents are drawn by the server and cannot be selected.");
+        if (!ranked && RankedScenarioSeed.IsToken(drillId))
+            return BrokerResult.Fail(404, $"Unknown drill '{drillId}'.");
         if (ranked && drillId.Length == 0)
         {
-            RankedProfileView profile;
+            RankedDrawContext context;
             try
             {
-                profile = await _ranked.ProfileAsync(owner, ct);
+                context = await _ranked.DrawContextAsync(owner, ct);
             }
             catch (Exception ex)
             {
@@ -263,21 +274,19 @@ public sealed class RunBroker
                 return BrokerResult.Fail(503, "Ranked matchmaking is unavailable right now.");
             }
 
-            var recent = profile.RecentAttempts
-                .Where(attempt => attempt.Outcome != RankedOutcomes.Void)
-                .Select(attempt => attempt.DrillId)
-                .Prepend(resource.Metadata.Annotations?
-                    .GetValueOrDefault(LastRankedDrillAnnotation) ?? "");
-            var pool = RankedMatchmaker.CandidatePool(
-                profile.Rating,
-                ScenarioDefinitions.RankedDrills,
-                recent);
-            if (pool.Count == 0) return BrokerResult.Fail(409, "No ranked drills are available.");
-            drillId = pool[RandomNumberGenerator.GetInt32(pool.Count)].Id;
+            var draw = RankedMatchmaker.Draw(
+                context.Rating,
+                context.RecentFamilies,
+                context.PlayedSeedIds);
+            if (draw is null)
+                return BrokerResult.Fail(
+                    503,
+                    "A unique ranked incident could not be generated safely. Try again.");
+            drillId = draw.Plan.DrillId;
         }
 
-        if (!ScenarioDefinitions.IsDrill(drillId) ||
-            !ScenarioDefinitions.All.TryGetValue(drillId, out var drill))
+        var drill = ScenarioDefinitions.Find(drillId);
+        if (!ScenarioDefinitions.IsDrill(drillId) || drill is null)
             return BrokerResult.Fail(404, $"Unknown drill '{drillId}'.");
         if (ranked && !drill.IsRanked)
             return BrokerResult.Fail(409, "Only multi-stage drills can be run ranked.");
@@ -357,7 +366,8 @@ public sealed class RunBroker
             annotations[LastRankedDrillAnnotation] = drill.Id;
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
             if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal) ||
-                key.StartsWith(RankedActionAnnotationPrefix, StringComparison.Ordinal))
+                key.StartsWith(RankedActionAnnotationPrefix, StringComparison.Ordinal) ||
+                key.StartsWith(DelayedStageAppliedAnnotationPrefix, StringComparison.Ordinal))
                 annotations[key] = null; // null removes the annotation in a merge patch
 
         // The first stage's Setup is the opening fault. A drill always needs live traffic to measure
@@ -427,7 +437,8 @@ public sealed class RunBroker
         };
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
             if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal) ||
-                key.StartsWith(RankedActionAnnotationPrefix, StringComparison.Ordinal))
+                key.StartsWith(RankedActionAnnotationPrefix, StringComparison.Ordinal) ||
+                key.StartsWith(DelayedStageAppliedAnnotationPrefix, StringComparison.Ordinal))
                 annotations[key] = null;
 
         var patchBody = new
@@ -1172,6 +1183,8 @@ public sealed class RunBroker
     public const string RankedAttemptIdAnnotation = "homeops.isaacwallace.dev/ranked-attempt-id";
     public const string LastRankedDrillAnnotation = "homeops.isaacwallace.dev/last-ranked-drill";
     public const string RankedActionAnnotationPrefix = "homeops.isaacwallace.dev/ranked-action-";
+    public const string DelayedStageAppliedAnnotationPrefix =
+        "homeops.isaacwallace.dev/ranked-delayed-stage-";
     public const string LearningCourseAnnotation = "homeops.isaacwallace.dev/learning-course";
     public const string LearningCourseVersionAnnotation = "homeops.isaacwallace.dev/learning-course-version";
     public const string LearningUnitAnnotation = "homeops.isaacwallace.dev/learning-unit";
@@ -1194,7 +1207,7 @@ public sealed class RunBroker
     {
         var view = RunView.From(resource);
         if (view.DrillId.Length == 0 ||
-            !ScenarioDefinitions.All.TryGetValue(view.DrillId, out var drill) ||
+            ScenarioDefinitions.Find(view.DrillId) is not { } drill ||
             drill.Stages.Count == 0)
             return new DrillEvaluation([], resource);
 
@@ -1206,6 +1219,29 @@ public sealed class RunBroker
         await TryPersistRankedActionsAsync(resource, view, ct);
         await TryRecordRankedTelemetryAsync(resource, view, telemetry, stage, goals, ct);
         var annotations = resource.Metadata.Annotations;
+        var delayed = stage.DelayedSetup;
+        var delayedKey = $"{DelayedStageAppliedAnnotationPrefix}{stageIndex}";
+        if (delayed is { Count: > 0 } &&
+            annotations?.ContainsKey(delayedKey) != true)
+        {
+            var pending = new DrillGoalState(
+                "Incident activation",
+                $"after {stage.ActivationDelaySeconds}s",
+                view.DrillStageElapsedSeconds < stage.ActivationDelaySeconds
+                    ? "developing"
+                    : "applying",
+                false);
+            if (view.DrillStageElapsedSeconds < stage.ActivationDelaySeconds)
+                return new DrillEvaluation([.. goals, pending], resource);
+
+            var activated = await ApplyDelayedStageSetupAsync(
+                view.RunId,
+                stageIndex,
+                delayedKey,
+                delayed,
+                ct);
+            return new DrillEvaluation([.. goals, pending], activated ?? resource);
+        }
         // Nothing further is judged once the attempt is decided, either way. A failed ranked run
         // keeps measuring and drawing — the point is to watch what the wrong move did — but it can
         // no longer advance a stage or record a time.
@@ -1248,7 +1284,7 @@ public sealed class RunBroker
                 heldSince, null,
                 DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
                 out var since) ||
-            now - since < GoalHold)
+            now - since < TimeSpan.FromSeconds(stage.HoldSeconds))
             return new DrillEvaluation(goals, resource);
 
         // The stage is genuinely resolved. The moment that counts is when the objective was FIRST
@@ -1274,6 +1310,44 @@ public sealed class RunBroker
         }
 
         return new DrillEvaluation(goals, resource);
+    }
+
+    private async Task<LabRunResource?> ApplyDelayedStageSetupAsync(
+        string runId,
+        int stageIndex,
+        string annotationKey,
+        IReadOnlyDictionary<string, object> setup,
+        CancellationToken ct)
+    {
+        try
+        {
+            var annotations = new Dictionary<string, string?>
+            {
+                [annotationKey] = DateTime.UtcNow.ToString("O"),
+                [DrillGoalsMetSinceAnnotation] = null,
+            };
+            var patch = new k8s.Models.V1Patch(
+                new { metadata = new { annotations }, spec = setup },
+                k8s.Models.V1Patch.PatchType.MergePatch);
+            var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+                patch,
+                LabRun.Group,
+                LabRun.Version,
+                LabRun.Plural,
+                runId,
+                cancellationToken: ct);
+            await WriteThroughReplicasAsync(runId, setup, ct);
+            return Parse(updated);
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogError(
+                ex,
+                "Could not activate delayed ranked fault for {RunId} stage {Stage}.",
+                runId,
+                stageIndex + 1);
+            return null;
+        }
     }
 
     // Open the next stage: record where the cascade has got to, and apply the consequence. This is
