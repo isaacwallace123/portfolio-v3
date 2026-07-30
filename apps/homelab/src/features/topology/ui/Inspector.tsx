@@ -5,14 +5,12 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   Boxes,
-  ChevronDown,
   Clock,
   Cpu,
   GitPullRequest,
   MemoryStick,
 } from "lucide-react";
 import type { TopologyNode } from "@/shared/api/live-client";
-import type { ViewNode } from "../model/collapse";
 import { layerIcon, layerLabel } from "../model/layers";
 import s from "../topology.module.css";
 
@@ -22,15 +20,13 @@ function LayerGlyph({ layer, size = 12 }: { layer: string; size?: number }) {
 }
 
 interface Props {
-  selected: ViewNode | undefined;
-  /** The whole inventory, collapsed or not — this list is always complete. */
+  selected: TopologyNode | undefined;
+  /** The whole inventory — this list is always complete, whatever the map is showing. */
   nodes: TopologyNode[];
-  /** What feeds the selection, and what it feeds, as currently drawn. */
-  upstream: ViewNode[];
-  downstream: ViewNode[];
+  /** What feeds the selection, and what it feeds. */
+  upstream: TopologyNode[];
+  downstream: TopologyNode[];
   onSelect: (id: string) => void;
-  onSelectGroup: (layer: string) => void;
-  onExpand: (layer: string) => void;
 }
 
 export function Inspector({
@@ -39,79 +35,21 @@ export function Inspector({
   upstream,
   downstream,
   onSelect,
-  onSelectGroup,
-  onExpand,
 }: Props) {
   return (
     <aside className={s.inspector}>
-      {selected?.kind === "group" && (
-        <>
-          <header className={s.inspectorHead} data-layer={selected.layer}>
-            <div className={s.inspectorTags}>
-              <span className={s.statusTag} data-status={selected.status}>
-                <i /> {selected.status}
-              </span>
-              <span className={s.layerTag}>
-                <LayerGlyph layer={selected.layer} /> Layer
-              </span>
-            </div>
-            <h2>{selected.label}</h2>
-            <p>
-              {selected.count} components · {selected.ready}/{selected.desired}{" "}
-              ready
-            </p>
-          </header>
-
-          <button
-            type="button"
-            className={s.expandButton}
-            onClick={() => onExpand(selected.layer)}
-          >
-            <ChevronDown size={14} /> Open this layer on the chart
-          </button>
-
-          <Relations
-            title="Depends on"
-            icon={<ArrowUpRight size={12} />}
-            items={upstream}
-            onSelect={onSelect}
-            onSelectGroup={onSelectGroup}
-          />
-          <Relations
-            title="Feeds"
-            icon={<ArrowDownRight size={12} />}
-            items={downstream}
-            onSelect={onSelect}
-            onSelectGroup={onSelectGroup}
-          />
-
-          <div className={s.memberList}>
-            <strong>Inside this layer</strong>
-            {selected.members.map((node) => (
-              <button
-                key={node.id}
-                type="button"
-                onClick={() => onSelect(node.id)}
-              >
-                <i className={s.listDot} data-status={node.status} />
-                <span>
-                  <b>{node.label}</b>
-                  <small>{node.kind}</small>
-                </span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-
-      {selected?.kind === "component" && (
+      {selected ? (
         <ComponentDetail
-          node={selected.node}
+          node={selected}
           upstream={upstream}
           downstream={downstream}
           onSelect={onSelect}
-          onSelectGroup={onSelectGroup}
         />
+      ) : (
+        <p className={s.placeholder}>
+          Point at a component on the map, or pick one below, to see its live
+          state and what sits on either side of it.
+        </p>
       )}
 
       <div className={s.componentList}>
@@ -120,10 +58,7 @@ export function Inspector({
           <button
             key={node.id}
             type="button"
-            data-selected={
-              (selected?.kind === "component" && selected.id === node.id) ||
-              undefined
-            }
+            data-selected={selected?.id === node.id || undefined}
             onClick={() => onSelect(node.id)}
           >
             <i className={s.listDot} data-status={node.status} />
@@ -143,13 +78,11 @@ function ComponentDetail({
   upstream,
   downstream,
   onSelect,
-  onSelectGroup,
 }: {
   node: TopologyNode;
-  upstream: ViewNode[];
-  downstream: ViewNode[];
+  upstream: TopologyNode[];
+  downstream: TopologyNode[];
   onSelect: (id: string) => void;
-  onSelectGroup: (layer: string) => void;
 }) {
   return (
     <>
@@ -206,14 +139,12 @@ function ComponentDetail({
         icon={<ArrowUpRight size={12} />}
         items={upstream}
         onSelect={onSelect}
-        onSelectGroup={onSelectGroup}
       />
       <Relations
         title="Feeds"
         icon={<ArrowDownRight size={12} />}
         items={downstream}
         onSelect={onSelect}
-        onSelectGroup={onSelectGroup}
       />
 
       <p className={s.observed}>
@@ -229,13 +160,11 @@ function Relations({
   icon,
   items,
   onSelect,
-  onSelectGroup,
 }: {
   title: string;
   icon: React.ReactNode;
-  items: ViewNode[];
+  items: TopologyNode[];
   onSelect: (id: string) => void;
-  onSelectGroup: (layer: string) => void;
 }) {
   if (items.length === 0) return null;
   return (
@@ -249,16 +178,9 @@ function Relations({
             key={item.id}
             type="button"
             data-layer={item.layer}
-            data-group={item.kind === "group" || undefined}
-            onClick={() =>
-              item.kind === "group"
-                ? onSelectGroup(item.layer)
-                : onSelect(item.id)
-            }
+            onClick={() => onSelect(item.id)}
           >
-            {item.kind === "group"
-              ? `${item.label} ×${item.count}`
-              : item.node.label}
+            {item.label}
           </button>
         ))}
       </div>

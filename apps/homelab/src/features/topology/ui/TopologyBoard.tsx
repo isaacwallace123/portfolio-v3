@@ -3,41 +3,33 @@
 import { useCallback, useMemo, useState } from "react";
 import { RefreshCw, Workflow } from "lucide-react";
 import type { TopologyNode } from "@/shared/api/live-client";
-import {
-  buildView,
-  collapsibleLayers,
-  groupId,
-  type ViewNode,
-} from "../model/collapse";
-import { layoutFlow } from "../model/layout";
+import { layoutGrouped } from "../model/grouped";
 import { LAYERS } from "../model/layers";
 import { useTopology } from "../model/useTopology";
-import { FlowChart } from "./FlowChart";
+import { GroupedMap } from "./GroupedMap";
 import { Inspector } from "./Inspector";
 import { Toolbar } from "./Toolbar";
 import s from "../topology.module.css";
 
 /**
- * The live homelab, drawn as a flowchart.
+ * The live homelab, grouped by layer.
  *
- * Nodes are ranked by dependency rather than grouped by kind, so reading downward is reading the
- * direction things actually flow: the edge tunnel at the top, then the gateway, then the platform
- * controllers, then the applications they reconcile.
+ * Every component is drawn, inside a container for the layer it belongs to. That arrangement was
+ * arrived at by measurement rather than taste: giving each component its own rank in a layered
+ * flowchart produced a 2050px canvas with 83% of the connector ink running sideways and one edge in
+ * thirty-eight a clean vertical drop, and dagre reproduced the same sprawl from the same graph. The
+ * limit is the shape of the system — a gateway feeding eight applications needs eight lines wherever
+ * the boxes go. Enclosure does what coordinates could not: the eye groups by container, and the map
+ * lands at 1306×900, which a panel shows at nearly full size.
  *
- * It opens collapsed — one box per layer — because the full inventory cannot be drawn compactly.
- * That was measured rather than assumed: thirty-three components come out 2050px wide and 83% of
- * the connector ink runs sideways, and dagre produces the same sprawl from the same graph, so it is
- * the shape of the system rather than the layout engine. Collapsed it is 782px, eleven links, and it
- * fits a panel at full size. Open any layer to see inside it.
- *
- * The whole surface is one feature slice: the layout engine, the collapse model, the polling and the
- * viewport all live under `features/topology`, and the route is a shell that renders this.
+ * Connectors stay coarse at rest — one per pair of layers — and the component's own links are drawn
+ * when you point at it.
  */
 export function TopologyBoard() {
   const { topology, error } = useTopology();
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [showAllLinks, setShowAllLinks] = useState(false);
   const [query, setQuery] = useState("");
   const [focusRequest, setFocusRequest] = useState<{
     id: string;
@@ -56,32 +48,15 @@ export function TopologyBoard() {
     [needle],
   );
 
-  // Searching opens whatever it finds. Leaving the match inside a collapsed box would be the one
-  // case where the summary hides the answer you asked for by name.
-  const openLayers = useMemo(() => {
-    if (needle === "") return expanded;
-    const found = new Set(expanded);
-    for (const node of nodes) if (matches(node)) found.add(node.layer);
-    return found;
-  }, [expanded, needle, nodes, matches]);
-
-  const view = useMemo(
-    () => buildView(nodes, edges, openLayers),
-    [nodes, edges, openLayers],
+  // A search narrows the map to what matched; the containers that still hold something stay.
+  const visible = useMemo(
+    () => (needle === "" ? nodes : nodes.filter(matches)),
+    [nodes, needle, matches],
   );
 
-  // A search narrows to the components that matched, plus the groups that stayed shut.
-  const visible = useMemo(() => {
-    if (needle === "") return view.nodes;
-    return view.nodes.filter((n) => n.kind === "group" || matches(n.node));
-  }, [view.nodes, needle, matches]);
+  const layout = useMemo(() => layoutGrouped(visible, edges), [visible, edges]);
 
-  const layout = useMemo(
-    () => layoutFlow(visible, view.edges),
-    [visible, view.edges],
-  );
-
-  // Adjacency over the *drawn* graph, so highlighting matches what is actually on screen.
+  // Adjacency over the component graph, which is what a hover traces.
   const adjacency = useMemo(() => {
     const up = new Map<string, string[]>();
     const down = new Map<string, string[]>();
@@ -90,28 +65,20 @@ export function TopologyBoard() {
       if (list) list.push(v);
       else m.set(k, [v]);
     };
-    for (const e of view.edges) {
+    for (const e of edges) {
+      if (e.source === e.target) continue;
       push(down, e.source, e.target);
       push(up, e.target, e.source);
-      // A merged pair feeds both ways, so each end is upstream of the other.
-      if (e.bidirectional) {
-        push(down, e.target, e.source);
-        push(up, e.source, e.target);
-      }
     }
     return { up, down };
-  }, [view.edges]);
+  }, [edges]);
 
-  const byId = useMemo(
-    () => new Map(view.nodes.map((n) => [n.id, n])),
-    [view.nodes],
-  );
+  const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
-  const selected: ViewNode | undefined =
-    (selectedId ? byId.get(selectedId) : undefined) ?? layout.nodes[0]?.node;
+  const selected = selectedId ? byId.get(selectedId) : undefined;
 
   const resolve = useCallback(
-    (ids: string[] | undefined): ViewNode[] =>
+    (ids: string[] | undefined): TopologyNode[] =>
       (ids ?? []).flatMap((id) => {
         const node = byId.get(id);
         return node ? [node] : [];
@@ -119,7 +86,7 @@ export function TopologyBoard() {
     [byId],
   );
 
-  const focusId = hoveredId ?? selected?.id ?? null;
+  const focusId = hoveredId ?? selectedId;
   const neighbours = useMemo(() => {
     if (!focusId) return new Set<string>();
     return new Set([
@@ -128,43 +95,10 @@ export function TopologyBoard() {
     ]);
   }, [focusId, adjacency]);
 
-  const toggleLayer = useCallback((layer: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(layer)) next.delete(layer);
-      else next.add(layer);
-      return next;
-    });
-  }, []);
-
-  const expandLayer = useCallback((layer: string) => {
-    setExpanded((prev) => new Set(prev).add(layer));
-  }, []);
-
-  const collapseAll = useCallback(() => {
-    setExpanded(new Set());
-    setSelectedId(null);
-  }, []);
-
-  // Picking from the list also moves the canvas, and opens the layer if the component is inside a
-  // box that is still shut — otherwise the selection lands on something not drawn.
-  const selectFromList = useCallback(
-    (id: string) => {
-      const layer = nodes.find((n) => n.id === id)?.layer;
-      if (layer && !byId.has(id))
-        setExpanded((prev) => new Set(prev).add(layer));
-      setSelectedId(id);
-      setFocusRequest((prev) => ({ id, nonce: (prev?.nonce ?? 0) + 1 }));
-    },
-    [nodes, byId],
-  );
-
-  const selectGroup = useCallback((layer: string) => {
-    setSelectedId(groupId(layer));
-    setFocusRequest((prev) => ({
-      id: groupId(layer),
-      nonce: (prev?.nonce ?? 0) + 1,
-    }));
+  // Picking from the list also brings the box into view, since the map is larger than the panel.
+  const selectFromList = useCallback((id: string) => {
+    setSelectedId(id);
+    setFocusRequest((prev) => ({ id, nonce: (prev?.nonce ?? 0) + 1 }));
   }, []);
 
   return (
@@ -174,13 +108,14 @@ export function TopologyBoard() {
           <Workflow size={14} /> Sanitized live architecture
         </p>
         <h1>
-          The whole homelab, <em>as a flowchart.</em>
+          The whole homelab, <em>grouped by layer.</em>
         </h1>
         <p className={s.lede}>
-          Every box is read live from the Kubernetes API and ranked by what it
-          depends on, so traffic and control flow downward: compute, the
-          platform controllers, the gateway and data tiers, then the
-          applications they run. Open any layer to see the components inside it.
+          Every box is a real workload read from the Kubernetes API, sitting in
+          the layer it belongs to — compute, the platform controllers, the
+          network edge, storage, observability, and the applications they all
+          carry. Point at anything to trace what it depends on and what depends
+          on it.
         </p>
       </header>
 
@@ -190,11 +125,9 @@ export function TopologyBoard() {
             live={topology !== null}
             query={query}
             onQuery={setQuery}
-            expanded={openLayers}
-            onToggleLayer={toggleLayer}
-            onCollapseAll={collapseAll}
-            collapsible={collapsibleLayers(nodes)}
-            shown={layout.nodes.length}
+            showAllLinks={showAllLinks}
+            onToggleLinks={() => setShowAllLinks((v) => !v)}
+            shown={layout.members.length}
             total={nodes.length}
           />
 
@@ -203,19 +136,19 @@ export function TopologyBoard() {
               <RefreshCw className={s.spin} size={22} />
               <span>{error ?? "Reading sanitized Kubernetes inventory…"}</span>
             </div>
-          ) : layout.nodes.length === 0 ? (
+          ) : layout.members.length === 0 ? (
             <div className={s.loading}>
               <span>Nothing matches that search.</span>
             </div>
           ) : (
-            <FlowChart
+            <GroupedMap
               layout={layout}
-              selectedId={selected?.id ?? null}
+              selectedId={selectedId}
               hoveredId={hoveredId}
               neighbours={neighbours}
+              showAllLinks={showAllLinks}
               onSelect={setSelectedId}
               onHover={setHoveredId}
-              onExpand={expandLayer}
               focusRequest={focusRequest}
             />
           )}
@@ -235,11 +168,9 @@ export function TopologyBoard() {
         <Inspector
           selected={selected}
           nodes={nodes}
-          upstream={resolve(adjacency.up.get(selected?.id ?? ""))}
-          downstream={resolve(adjacency.down.get(selected?.id ?? ""))}
+          upstream={resolve(adjacency.up.get(selectedId ?? ""))}
+          downstream={resolve(adjacency.down.get(selectedId ?? ""))}
           onSelect={selectFromList}
-          onSelectGroup={selectGroup}
-          onExpand={expandLayer}
         />
       </section>
 

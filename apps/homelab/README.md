@@ -5,8 +5,8 @@ Interactive public application for `homelab.isaacwallace.dev`.
 HomeOps has four surfaces:
 
 - `/` — live, sanitized cluster overview backed by the Kubernetes API and metrics-server.
-- `/topology` — a layered flowchart of the allowlisted homelab inventory with live readiness,
-  aggregate resource use, and GitOps state.
+- `/topology` — the allowlisted homelab inventory grouped by layer, with live readiness, aggregate
+  resource use, and GitOps state. Point at a component to trace what it depends on.
 - `/practice` — a disposable application workspace that can be scaled, restarted, moved between
   worker pools, switched between stable/regressed releases, loaded with k6, cached, reset, and torn
   down. Drills run **on** that workspace, so `/drills` redirects here.
@@ -74,9 +74,9 @@ src/
   widgets/                page-level compositions (cluster-workbench, leaderboard, HomeOverview)
   features/
     drill/                running a drill on a cluster
-    topology/             the live architecture flowchart
-      model/              layout engine, collapse model, inventory poll, viewport, palette
-      ui/                 TopologyBoard + the chart, node, toolbar, inspector
+    topology/             the live architecture map
+      model/              grouped layout, inventory poll, viewport, layer palette
+      ui/                 TopologyBoard + the map, component, toolbar, inspector
       topology.module.css scoped styling — layer colours declared once
       index.ts            the slice's public surface
   shared/                 api clients, the route guards, formatting
@@ -84,15 +84,17 @@ src/
 
 Each slice keeps its own `model/` (logic), `ui/` (presentation), scoped CSS, and an `index.ts` that
 is the only thing outside the slice may import. `features/topology` holds everything about reading
-the graph — ranking, crossing reduction, connector routing, collapsing, pan and zoom — so
-`/topology` is a route shell and nothing more.
+the graph — grouping, sizing, connector routing, pan and zoom — so `/topology` is a route shell and
+nothing more.
 
-The topology page opens with one box per layer rather than all thirty-three components, because the
-full inventory cannot be drawn compactly. That was measured, not assumed: everything at once comes
-out 2050px wide with 83% of the connector ink running sideways, and dagre produces the same sprawl
-from the same graph — the limit is the shape of the system, not the layout engine. Collapsed it is
-782px across with eleven links and fits a panel at full size. `model/collapse.ts` rewrites the graph
-onto whichever boxes are currently open; the same layout engine runs either way.
+The topology page draws every component inside a container for its layer rather than giving each one
+its own rank in a flowchart. That was measured, not assumed: a rank per component came out 2050px
+wide with 83% of the connector ink running sideways and one edge in thirty-eight a clean vertical
+drop, and dagre reproduced the same sprawl from the same graph — the limit is the shape of the
+system, not the layout engine. Grouping lands at 1306×900, which a panel shows at nearly full size,
+because a container is a background rather than an obstacle and the eye groups by enclosure instead
+of by tracing lines. Connectors stay coarse at rest, one per pair of layers; a component's own links
+are drawn when you point at it.
 
 ```bash
 npm run dev -w apps/homelab
