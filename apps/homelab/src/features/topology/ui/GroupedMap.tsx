@@ -1,7 +1,7 @@
 "use client";
 
 import { createElement, memo, useEffect, useMemo, useRef } from "react";
-import { Crosshair, Minus, Plus } from "lucide-react";
+import { Crosshair, Globe, Minus, Plus } from "lucide-react";
 import { curvePath, type GroupedLayout, type MapEdge } from "../model/grouped";
 import { layerIcon } from "../model/layers";
 import { useViewport } from "../model/useViewport";
@@ -81,8 +81,10 @@ function GroupedMapImpl({
   useEffect(() => {
     if (!focusRequest || focusRequest.nonce === lastCentred.current) return;
     lastCentred.current = focusRequest.nonce;
-    const member = layout.members.find((m) => m.id === focusRequest.id);
-    const box = member ?? layout.groups.find((g) => g.id === focusRequest.id);
+    const box =
+      layout.members.find((m) => m.id === focusRequest.id) ??
+      layout.servers.find((sv) => sv.id === focusRequest.id) ??
+      layout.groups.find((g) => g.id === focusRequest.id);
     if (box) centerOn(box.x + box.w / 2, box.y + box.h / 2);
   }, [focusRequest, layout, centerOn]);
 
@@ -102,6 +104,35 @@ function GroupedMapImpl({
           <g
             transform={`translate(${viewport.x} ${viewport.y}) scale(${viewport.scale})`}
           >
+            {/* Where traffic arrives. Context, so no status and no counts. */}
+            {layout.entry && (
+              <g
+                className={s.entry}
+                transform={`translate(${layout.entry.x} ${layout.entry.y})`}
+              >
+                <rect
+                  className={s.entryBox}
+                  width={layout.entry.w}
+                  height={layout.entry.h}
+                  rx={10}
+                />
+                <g
+                  className={s.entryGlyph}
+                  transform={`translate(16 ${layout.entry.h / 2 - 7})`}
+                  aria-hidden="true"
+                >
+                  <Globe size={14} />
+                </g>
+                <text
+                  className={s.entryLabel}
+                  x={40}
+                  y={layout.entry.h / 2 + 4}
+                >
+                  INTERNET
+                </text>
+              </g>
+            )}
+
             {/* Containers: background only. */}
             <g className={s.groups}>
               {layout.groups.map((group) => (
@@ -155,6 +186,21 @@ function GroupedMapImpl({
               </g>
             )}
 
+            {/* The machines everything else runs on, above the workloads rather than beside them. */}
+            <g>
+              {layout.servers.map((server) => (
+                <ServerCard
+                  key={server.id}
+                  server={server}
+                  selected={selectedId === server.id}
+                  related={server.id === focusId || neighbours.has(server.id)}
+                  focusing={focusing && !showAllLinks}
+                  onSelect={onSelect}
+                  onHover={onHover}
+                />
+              ))}
+            </g>
+
             <g>
               {layout.members.map((member) => (
                 <MemberNode
@@ -196,6 +242,67 @@ function GroupedMapImpl({
           : "Point at a component to trace it · drag to pan"}
       </p>
     </div>
+  );
+}
+
+/** A machine. Bigger than a workload box, and showing what it is actually carrying. */
+function ServerCard({
+  server,
+  selected,
+  related,
+  focusing,
+  onSelect,
+  onHover,
+}: {
+  server: GroupedLayout["servers"][number];
+  selected: boolean;
+  related: boolean;
+  focusing: boolean;
+  onSelect: (id: string) => void;
+  onHover: (id: string | null) => void;
+}) {
+  const { node, x, y, w, h } = server;
+  return (
+    <g
+      data-flow-node={node.id}
+      className={s.server}
+      data-selected={selected || undefined}
+      data-dim={focusing && !related ? "" : undefined}
+      transform={`translate(${x} ${y})`}
+      onClick={() => onSelect(node.id)}
+      onMouseEnter={() => onHover(node.id)}
+      onMouseLeave={() => onHover(null)}
+      tabIndex={0}
+      role="button"
+      aria-label={`${node.label} — ${node.kind}, ${node.status}`}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(node.id);
+        }
+      }}
+    >
+      <rect className={s.serverBox} width={w} height={h} rx={11} />
+      <circle
+        className={s.serverStatus}
+        data-status={node.status}
+        cx={18}
+        cy={22}
+        r={4}
+      />
+      <text className={s.serverLabel} x={30} y={26}>
+        {node.label}
+      </text>
+      <text className={s.serverMeta} x={16} y={46}>
+        {node.kind}
+      </text>
+      <text className={s.serverLoad} x={16} y={62}>
+        {node.cpuUtilizationPct !== null
+          ? `CPU ${node.cpuUtilizationPct}%  ·  MEM ${node.memoryUtilizationPct ?? 0}%`
+          : `${node.cpuMillicores}m  ·  ${node.memoryMiB} MiB`}
+      </text>
+      <title>{`${node.label} — ${node.kind}`}</title>
+    </g>
   );
 }
 

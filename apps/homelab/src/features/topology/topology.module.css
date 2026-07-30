@@ -32,70 +32,82 @@ because a mid-tone that reads as "healthy" on ink reads as washed out on paper. 
   --flow-node-bg: rgba(10, 28, 23, 0.94);
   --flow-grid: rgba(177, 255, 203, 0.05);
 
+  /* The map is the page, the way it was in v2: one canvas filling the viewport under the navbar,
+     with the chrome floating over it. A hero above the fold pushed the thing people came to look at
+     into the bottom third of the screen. */
   position: relative;
   z-index: 1;
-  width: 100%;
-  max-width: 1680px;
-  margin: 0 auto;
-  padding: 70px 28px 80px;
+  height: calc(100dvh - 4rem);
+  display: flex;
+  flex-direction: column;
 }
-:global(:root[data-theme="light"]) .page {
-  --flow-compute: #2f5fd0;
-  --flow-network: #067c78;
-  --flow-data: #7a3fc4;
-  --flow-node-bg: rgba(255, 255, 255, 0.96);
-  --flow-grid: rgba(12, 80, 54, 0.06);
-} /* ── heading ──────────────────────────────────────────────────────────────── */
+
+/* This route has no room for a footer under a full-height canvas. */
+.page ~ :global(footer),
+:global(body:has(.page)) :global(footer) {
+  display: none;
+}
+
+/* ── heading ──────────────────────────────────────────────────────────────── */
 
 .heading {
-  margin-bottom: 34px;
-}
-.kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--ink-dim);
-  font:
-    700 10px/1 ui-monospace,
-    monospace;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 12px clamp(14px, 2.4vw, 28px);
+  border-bottom: 1px solid var(--line);
 }
 .heading h1 {
-  max-width: 920px;
-  margin: 18px 0 22px;
   color: var(--ink);
-  font-size: clamp(44px, 5vw, 72px);
-  font-weight: 520;
-  line-height: 0.94;
-  letter-spacing: -0.075em;
+  font-size: 19px;
+  font-weight: 560;
+  letter-spacing: -0.04em;
+  white-space: nowrap;
 }
 .heading h1 em {
   color: var(--acid);
   font-style: normal;
 }
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-dim);
+  font:
+    700 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
 .lede {
-  max-width: 760px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   color: var(--muted);
-  font-size: 15px;
-  line-height: 1.75;
-} /* ── shell ────────────────────────────────────────────────────────────────── */
+  font-size: 12px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── shell ────────────────────────────────────────────────────────────────── */
 
 .workbench {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 330px;
-  gap: 20px;
-  align-items: start;
 }
+
 .panel {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
-  background: var(--surface);
-  box-shadow: var(--shadow-2);
-} /* ── toolbar ──────────────────────────────────────────────────────────────── */
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+}
+
+/* ── toolbar ──────────────────────────────────────────────────────────────── */
 
 .toolbar {
   display: flex;
@@ -201,9 +213,14 @@ because a mid-tone that reads as "healthy" on ink reads as washed out on paper. 
 
 .canvas {
   position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .frame {
-  height: clamp(460px, 64vh, 780px);
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
   cursor: grab;
   touch-action: none;
@@ -323,7 +340,87 @@ so a component inside
 }
 .groupStatus[data-status="unavailable"] {
   fill: var(--red);
-} /* ── connectors ───────────────────────────────────────────────────────────── */
+} /* ── servers and entry ───────────────────────────────────────────────────── */
+
+/* The machines read as hardware rather than workload: warmer, heavier, and carrying live load
+   instead of a replica count. They sit above everything because everything runs on them. */
+.server {
+  cursor: pointer;
+  --accent-layer: var(--flow-compute);
+  transition: opacity var(--dur-base) ease;
+}
+.server[data-dim] {
+  opacity: 0.28;
+}
+.server:focus {
+  outline: none;
+}
+.serverBox {
+  fill: color-mix(in srgb, var(--flow-compute) 10%, var(--flow-node-bg));
+  stroke: color-mix(in srgb, var(--flow-compute) 45%, transparent);
+  stroke-width: 1.2;
+  transition:
+    stroke var(--dur-base) ease,
+    stroke-width var(--dur-base) ease;
+}
+.server:hover .serverBox,
+.server:focus-visible .serverBox,
+.server[data-selected] .serverBox {
+  stroke: var(--flow-compute);
+  stroke-width: 2;
+}
+.serverStatus {
+  fill: var(--mint);
+}
+.serverStatus[data-status="degraded"] {
+  fill: var(--amber);
+}
+.serverStatus[data-status="unavailable"] {
+  fill: var(--red);
+}
+.serverLabel {
+  fill: var(--ink);
+  font:
+    700 12px/1 ui-monospace,
+    monospace;
+}
+.serverMeta {
+  fill: var(--flow-compute);
+  font:
+    600 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.serverLoad {
+  fill: var(--ink-dim);
+  font:
+    600 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.06em;
+}
+
+.entry {
+  pointer-events: none;
+}
+.entryBox {
+  fill: color-mix(in srgb, var(--flow-network) 8%, transparent);
+  stroke: color-mix(in srgb, var(--flow-network) 32%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+.entryGlyph {
+  color: var(--flow-network);
+}
+.entryLabel {
+  fill: var(--flow-network);
+  font:
+    700 10px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.16em;
+}
+
+/* ── connectors ───────────────────────────────────────────────────────────── */
 
 .edges {
   pointer-events: none;
@@ -498,11 +595,11 @@ so it sits back rather than shouting. */
 } /* ── loading ──────────────────────────────────────────────────────────────── */
 
 .loading {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 12px;
-  height: clamp(460px, 64vh, 780px);
   color: var(--ink-dim);
   font:
     600 12px/1 ui-monospace,
@@ -520,16 +617,13 @@ so it sits back rather than shouting. */
 /* ── inspector ────────────────────────────────────────────────────────────── */
 
 .inspector {
-  position: sticky;
-  top: 88px;
   display: flex;
   flex-direction: column;
   gap: 18px;
+  min-height: 0;
   padding: 20px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
+  overflow-y: auto;
   background: var(--surface);
-  box-shadow: var(--shadow-2);
 }
 .inspectorHead {
   --accent-layer: var(--mint);
@@ -791,7 +885,8 @@ so it sits back rather than shouting. */
   background: var(--red);
 }
 .source {
-  margin-top: 18px;
+  padding: 8px clamp(14px, 2.4vw, 28px);
+  border-top: 1px solid var(--line);
   color: var(--ink-dim);
   font:
     600 10px/1.6 ui-monospace,
