@@ -252,15 +252,28 @@ public sealed class RunBroker
         var ranked = string.Equals(mode, "ranked", StringComparison.OrdinalIgnoreCase);
         if (ranked && drillId.Length == 0)
         {
-            var pool = ScenarioDefinitions.RankedDrills
-                // Never redraw the drill this cluster just ran: the point of a draw is that you do
-                // not know what is coming, and back-to-back repeats are the one outcome that
-                // reliably ruins that.
-                .Where(d => d.Id != resource.Metadata.Annotations?
-                    .GetValueOrDefault(LastRankedDrillAnnotation))
-                .ToArray();
-            if (pool.Length == 0) return BrokerResult.Fail(409, "No ranked drills are available.");
-            drillId = pool[RandomNumberGenerator.GetInt32(pool.Length)].Id;
+            RankedProfileView profile;
+            try
+            {
+                profile = await _ranked.ProfileAsync(owner, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Could not read ranked matchmaking profile for {RunId}.", runId);
+                return BrokerResult.Fail(503, "Ranked matchmaking is unavailable right now.");
+            }
+
+            var recent = profile.RecentAttempts
+                .Where(attempt => attempt.Outcome != RankedOutcomes.Void)
+                .Select(attempt => attempt.DrillId)
+                .Prepend(resource.Metadata.Annotations?
+                    .GetValueOrDefault(LastRankedDrillAnnotation) ?? "");
+            var pool = RankedMatchmaker.CandidatePool(
+                profile.Rating,
+                ScenarioDefinitions.RankedDrills,
+                recent);
+            if (pool.Count == 0) return BrokerResult.Fail(409, "No ranked drills are available.");
+            drillId = pool[RandomNumberGenerator.GetInt32(pool.Count)].Id;
         }
 
         if (!ScenarioDefinitions.IsDrill(drillId) ||
@@ -343,7 +356,8 @@ public sealed class RunBroker
         if (ranked)
             annotations[LastRankedDrillAnnotation] = drill.Id;
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
-            if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal))
+            if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal) ||
+                key.StartsWith(RankedActionAnnotationPrefix, StringComparison.Ordinal))
                 annotations[key] = null; // null removes the annotation in a merge patch
 
         // The first stage's Setup is the opening fault. A drill always needs live traffic to measure
@@ -380,6 +394,7 @@ public sealed class RunBroker
         {
             try
             {
+                await PersistRankedActionsAsync(resource, view, ct);
                 await FinalizeRankedAsync(
                     resource,
                     view,
@@ -411,7 +426,8 @@ public sealed class RunBroker
             [LearningUnitAnnotation] = null,
         };
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
-            if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal))
+            if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal) ||
+                key.StartsWith(RankedActionAnnotationPrefix, StringComparison.Ordinal))
                 annotations[key] = null;
 
         var patchBody = new
@@ -884,6 +900,92 @@ public sealed class RunBroker
         }
     }
 
+    /// <summary>
+    /// Apply one command from the competitive operator allowlist. The caller supplies operator
+    /// vocabulary, never a patch; RankedCommand is the complete translation boundary. Unlike the
+    /// old decision endpoint, an ineffective action does not end the match. The measured stage
+    /// objective remains the only path to progression.
+    /// </summary>
+    public async Task<BrokerResult> SubmitRankedCommandAsync(
+        string runId, string input, string owner, CancellationToken ct)
+    {
+        var resource = await GetOwnedResourceAsync(runId, owner, ct);
+        if (resource is null)
+            return BrokerResult.Fail(404, "No such ranked arena.");
+
+        var view = RunView.From(resource);
+        if (view.DrillMode != "ranked" || view.DrillId.Length == 0)
+            return BrokerResult.Fail(409, "No ranked match is active on this cluster.");
+        if (view.DrillSolved || view.DrillFailed)
+            return BrokerResult.Fail(409, "This ranked match is already sealed.");
+
+        if (!RankedCommand.TryParse(input, out var command, out var error) || command is null)
+            return BrokerResult.Fail(400, error);
+
+        var acceptedAt = DateTime.UtcNow;
+        var entryId = Guid.NewGuid().ToString("n");
+        var actionKey = $"{RankedActionAnnotationPrefix}{entryId}";
+        var actionValue =
+            $"{acceptedAt:O}|{command.Canonical}|{command.ActionId}|{view.DrillStage}";
+        var patchBody = new
+        {
+            metadata = new
+            {
+                annotations = new Dictionary<string, string>
+                {
+                    [actionKey] = actionValue,
+                },
+            },
+            spec = command.SpecPatch,
+        };
+
+        var patch = new k8s.Models.V1Patch(
+            patchBody,
+            k8s.Models.V1Patch.PatchType.MergePatch);
+        try
+        {
+            var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+                patch, LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
+            await WriteThroughReplicasAsync(runId, command.SpecPatch, ct);
+            var updatedView = RunView.From(Parse(updated));
+            var attemptId = resource.Metadata.Annotations?
+                .GetValueOrDefault(RankedAttemptIdAnnotation) ?? "";
+            try
+            {
+                await _ranked.RecordActionAsync(
+                    entryId,
+                    attemptId,
+                    runId,
+                    owner,
+                    command.Canonical,
+                    command.ActionId,
+                    view.DrillStage,
+                    acceptedAt,
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                // The LabRun annotation is the retry source. Snapshot evaluation copies it into the
+                // database later, so a brief store outage never turns an applied action into a lie.
+                _log.LogError(
+                    ex,
+                    "Could not persist ranked action {ActionEntryId} for {RunId}.",
+                    entryId,
+                    runId);
+            }
+            return BrokerResult.Accepted(updatedView);
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogError(
+                ex,
+                "Failed ranked command {Command} on {RunId}.",
+                command.Canonical,
+                runId);
+            return BrokerResult.Fail(502, "The ranked controller rejected the command.");
+        }
+    }
+
     // The composed Object that owns each scalable tier. Kept in one place so the write-through below
     // cannot drift from the naming the Composition uses.
     private static readonly (string SpecField, string ObjectSuffix)[] ReplicaTiers =
@@ -1069,6 +1171,7 @@ public sealed class RunBroker
     public const string DrillFailedMoveAnnotation = "homeops.isaacwallace.dev/drill-failed-move";
     public const string RankedAttemptIdAnnotation = "homeops.isaacwallace.dev/ranked-attempt-id";
     public const string LastRankedDrillAnnotation = "homeops.isaacwallace.dev/last-ranked-drill";
+    public const string RankedActionAnnotationPrefix = "homeops.isaacwallace.dev/ranked-action-";
     public const string LearningCourseAnnotation = "homeops.isaacwallace.dev/learning-course";
     public const string LearningCourseVersionAnnotation = "homeops.isaacwallace.dev/learning-course-version";
     public const string LearningUnitAnnotation = "homeops.isaacwallace.dev/learning-unit";
@@ -1100,6 +1203,7 @@ public sealed class RunBroker
         if (stage.Goals.Count == 0) return new DrillEvaluation([], resource);
 
         var goals = ScenarioDefinitions.Evaluate(stage, telemetry, resource.Spec);
+        await TryPersistRankedActionsAsync(resource, view, ct);
         var annotations = resource.Metadata.Annotations;
         // Nothing further is judged once the attempt is decided, either way. A failed ranked run
         // keeps measuring and drawing — the point is to watch what the wrong move did — but it can
@@ -1362,6 +1466,50 @@ public sealed class RunBroker
         }
     }
 
+    private async Task TryPersistRankedActionsAsync(
+        LabRunResource resource,
+        RunView view,
+        CancellationToken ct)
+    {
+        try
+        {
+            await PersistRankedActionsAsync(resource, view, ct);
+        }
+        catch (Exception ex)
+        {
+            // Annotations remain on the live match, so the next measured snapshot retries the copy.
+            _log.LogError(ex, "Could not synchronize ranked actions for {RunId}.", view.RunId);
+        }
+    }
+
+    private async Task PersistRankedActionsAsync(
+        LabRunResource resource,
+        RunView view,
+        CancellationToken ct)
+    {
+        if (view.DrillMode != "ranked" || view.RankedActions.Count == 0) return;
+        var attemptId = resource.Metadata.Annotations?
+            .GetValueOrDefault(RankedAttemptIdAnnotation) ?? "";
+        if (attemptId.Length == 0) return;
+
+        foreach (var action in view.RankedActions)
+        {
+            var recorded = await _ranked.RecordActionAsync(
+                action.Id,
+                attemptId,
+                view.RunId,
+                view.Owner,
+                action.Command,
+                action.ActionId,
+                action.Stage,
+                action.AcceptedUtc,
+                ct);
+            if (!recorded)
+                throw new InvalidOperationException(
+                    $"Ranked action '{action.Id}' could not be attached to its attempt.");
+        }
+    }
+
     private async Task<RankedAttemptView?> FinalizeRankedAsync(
         LabRunResource resource,
         RunView view,
@@ -1478,12 +1626,15 @@ public sealed class RunBroker
         if (resource is null) return false;
         var view = RunView.From(resource);
         if (view.DrillMode == "ranked")
+        {
+            await PersistRankedActionsAsync(resource, view, ct);
             await FinalizeRankedAsync(
                 resource,
                 view,
                 TerminalOutcome(view, RankedOutcomes.Expired),
                 "",
                 ct);
+        }
 
         try
         {
@@ -1508,12 +1659,15 @@ public sealed class RunBroker
         if (resource is null) return false;
         var view = RunView.From(resource);
         if (view.DrillMode == "ranked")
+        {
+            await PersistRankedActionsAsync(resource, view, ct);
             await FinalizeRankedAsync(
                 resource,
                 view,
                 TerminalOutcome(view, RankedOutcomes.Forfeited),
                 displayName,
                 ct);
+        }
 
         try
         {

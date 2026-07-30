@@ -173,6 +173,7 @@ public sealed record RunView(
     string RestartToken,
     IReadOnlyList<AcceptedDecision> AcceptedDecisions,
     IReadOnlyList<string> AvailableDecisions,
+    IReadOnlyList<RankedAction> RankedActions,
     // Active drill layered on this cluster ("" when the cluster is an open sandbox).
     string DrillId,
     string DrillTitle,
@@ -299,6 +300,7 @@ public sealed record RunView(
             : Math.Max(0, ((solvedAt ?? failedAt ?? DateTime.UtcNow) - stageStart.Value).TotalSeconds);
 
         var accepted = ReadAcceptedDecisions(r, definition, stageStart ?? drillStart ?? createdAt);
+        var rankedActions = ReadRankedActions(r, drillStart ?? createdAt);
         // Decisions are recorded per stage, so the same id can appear in more than one stage of a
         // cascade without one stage's answer pre-filling another's.
         var chosenHere = accepted
@@ -388,6 +390,7 @@ public sealed record RunView(
             r.Spec.RestartToken ?? "baseline",
             accepted,
             available,
+            rankedActions,
             definition is null ? "" : drillId,
             definition?.Title ?? "",
             definition?.Objective ?? "",
@@ -474,6 +477,52 @@ public sealed record RunView(
             .OrderBy(decision => decision.AcceptedAtMs)
             .ToArray();
     }
+
+    private static IReadOnlyList<RankedAction> ReadRankedActions(
+        LabRunResource resource,
+        DateTime? since)
+    {
+        if (resource.Metadata.Annotations is null) return [];
+
+        return resource.Metadata.Annotations
+            .Where(pair => pair.Key.StartsWith(
+                RunBroker.RankedActionAnnotationPrefix,
+                StringComparison.Ordinal))
+            .Select(pair =>
+            {
+                var parts = pair.Value.Split('|', 4);
+                var acceptedAt = parts.Length > 0 && DateTime.TryParse(
+                    parts[0],
+                    null,
+                    System.Globalization.DateTimeStyles.AdjustToUniversal |
+                    System.Globalization.DateTimeStyles.AssumeUniversal,
+                    out var parsed)
+                    ? parsed
+                    : since ?? DateTime.UtcNow;
+                var offset = since is null
+                    ? 0
+                    : Math.Max(0, (int)(acceptedAt - since.Value).TotalMilliseconds);
+                var stage = parts.Length > 3 && int.TryParse(parts[3], out var parsedStage)
+                    ? Math.Max(1, parsedStage)
+                    : 1;
+                return new RankedAction(
+                    pair.Key[RunBroker.RankedActionAnnotationPrefix.Length..],
+                    parts.Length > 1 ? parts[1] : "operator command",
+                    parts.Length > 2 ? parts[2] : "",
+                    offset,
+                    stage,
+                    acceptedAt);
+            })
+            .OrderBy(action => action.AcceptedAtMs)
+            .ToArray();
+    }
 }
 
 public sealed record AcceptedDecision(string Id, string Label, int AcceptedAtMs, int Stage);
+public sealed record RankedAction(
+    string Id,
+    string Command,
+    string ActionId,
+    int AcceptedAtMs,
+    int Stage,
+    DateTime AcceptedUtc);

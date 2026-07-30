@@ -32,7 +32,7 @@ public sealed record RankedDivision(
 /// <summary>
 /// Seasonless solo ELO. The incident is the opponent: its calibrated rating determines how much a
 /// clean solve is worth and how costly a failed call is. Time deliberately does not enter this
-/// calculation; it remains an independent per-scenario record.
+/// calculation; it remains an independent, global recovery-time ladder.
 /// </summary>
 public static class RankedRules
 {

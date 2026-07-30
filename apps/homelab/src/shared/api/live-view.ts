@@ -45,6 +45,14 @@ export interface RealRun {
     acceptedAtMs: number;
     stage: number;
   }[];
+  rankedActions?: {
+    id: string;
+    command: string;
+    actionId: string;
+    acceptedAtMs: number;
+    stage: number;
+    acceptedUtc: string;
+  }[];
   availableDecisions?: string[];
   // The drill currently running on this cluster ("" when it is an open sandbox).
   drillId?: string;
@@ -111,6 +119,15 @@ export interface LiveRunView extends RunView {
   /** Requests a second the generators are offering, served or not. */
   offeredRequestsPerSec: number;
   restartToken: string;
+  /** Server-recorded mutations for the current competitive match. */
+  rankedActions: {
+    id: string;
+    command: string;
+    actionId: string;
+    acceptedAtMs: number;
+    stage: number;
+    acceptedUtc: string;
+  }[];
   // Active drill running on this cluster ("" when the cluster is an open sandbox).
   drillId: string;
   drillTitle: string;
@@ -233,6 +250,7 @@ export function toLiveRunView(real: RealRun): LiveRunView {
     canaryReplicas: real.canaryReplicas ?? 0,
     offeredRequestsPerSec: real.offeredRequestsPerSec ?? 0,
     restartToken: real.restartToken ?? "baseline",
+    rankedActions: real.rankedActions ?? [],
     drillId,
     drillTitle: real.drillTitle ?? "",
     drillObjective: real.drillObjective ?? "",

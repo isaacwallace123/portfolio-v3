@@ -5,7 +5,7 @@ import {
 } from "@/shared/api/leaderboard-view";
 import { liveFetch } from "@/shared/api/live-server";
 
-// GET /api/live/leaderboard — ranked standings across the multi-stage drills.
+// GET /api/live/leaderboard — the single fastest-recovery ladder across ranked incidents.
 //
 // Public, unlike the rest of /api/live/*: a leaderboard nobody can read until they have an account
 // is not a leaderboard. A session is optional and only decides whether a row comes back marked as

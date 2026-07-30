@@ -215,6 +215,66 @@ public sealed class RankedStoreTests
         Assert.Single(standings, row => row.IsYou);
     }
 
+    [Fact]
+    public async Task OperatorActionsAreAppendOnlyIdempotentAndOwnerScoped()
+    {
+        await using var fixture = await RankedFixture.CreateAsync();
+        var attempt = await fixture.Store.BeginAsync(
+            "run-hl-log1234567",
+            "cascade-scale-release",
+            "owner-log",
+            "Sally",
+            DateTime.UtcNow,
+            CancellationToken.None);
+        var accepted = new DateTime(2026, 7, 30, 5, 0, 0, DateTimeKind.Utc);
+
+        var first = await fixture.Store.RecordActionAsync(
+            "action-entry-1",
+            attempt.Id,
+            attempt.RunId,
+            "owner-log",
+            "scale checkout 4",
+            "scale-4",
+            1,
+            accepted,
+            CancellationToken.None);
+        var retry = await fixture.Store.RecordActionAsync(
+            "action-entry-1",
+            attempt.Id,
+            attempt.RunId,
+            "owner-log",
+            "scale checkout 4",
+            "scale-4",
+            1,
+            accepted,
+            CancellationToken.None);
+        var wrongOwner = await fixture.Store.RecordActionAsync(
+            "action-entry-2",
+            attempt.Id,
+            attempt.RunId,
+            "owner-other",
+            "rollback checkout",
+            "release-stable",
+            1,
+            accepted.AddSeconds(1),
+            CancellationToken.None);
+
+        var actions = await fixture.Store.ActionsForAttemptAsync(
+            attempt.Id,
+            "owner-log",
+            CancellationToken.None);
+
+        Assert.True(first);
+        Assert.True(retry);
+        Assert.False(wrongOwner);
+        var action = Assert.Single(actions);
+        Assert.Equal("scale checkout 4", action.Command);
+        Assert.Equal("scale-4", action.ActionId);
+        Assert.Equal(accepted, action.AcceptedUtc);
+        Assert.Equal(1, await fixture.Db.RankedActions.CountAsync(
+            CancellationToken.None));
+    }
+
     private sealed class RankedFixture(
         SqliteConnection connection,
         HomeOpsDbContext db,

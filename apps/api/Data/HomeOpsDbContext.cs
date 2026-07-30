@@ -10,6 +10,7 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
     public DbSet<RankedAttempt> RankedAttempts => Set<RankedAttempt>();
     public DbSet<OperatorRating> OperatorRatings => Set<OperatorRating>();
     public DbSet<RatingLedgerEntry> RatingLedger => Set<RatingLedgerEntry>();
+    public DbSet<RankedActionEntry> RankedActions => Set<RankedActionEntry>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -72,6 +73,19 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
             e.Property(r => r.Outcome).HasMaxLength(24);
             e.HasIndex(r => r.AttemptId).IsUnique();
             e.HasIndex(r => r.OwnerKey);
+        });
+
+        builder.Entity<RankedActionEntry>(e =>
+        {
+            e.ToTable("RankedActions");
+            e.Property(a => a.Id).HasMaxLength(64);
+            e.Property(a => a.AttemptId).HasMaxLength(64);
+            e.Property(a => a.RunId).HasMaxLength(64);
+            e.Property(a => a.OwnerKey).HasMaxLength(64);
+            e.Property(a => a.Command).HasMaxLength(128);
+            e.Property(a => a.ActionId).HasMaxLength(64);
+            e.HasIndex(a => new { a.AttemptId, a.AcceptedUtc });
+            e.HasIndex(a => a.OwnerKey);
         });
     }
 
@@ -164,6 +178,21 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
               CREATE UNIQUE INDEX IF NOT EXISTS "IX_RatingLedger_AttemptId"
                   ON "RatingLedger" ("AttemptId");
               CREATE INDEX IF NOT EXISTS "IX_RatingLedger_OwnerKey" ON "RatingLedger" ("OwnerKey");
+
+              CREATE TABLE IF NOT EXISTS "RankedActions" (
+                  "Id" character varying(64) NOT NULL CONSTRAINT "PK_RankedActions" PRIMARY KEY,
+                  "AttemptId" character varying(64) NOT NULL,
+                  "RunId" character varying(64) NOT NULL,
+                  "OwnerKey" character varying(64) NOT NULL,
+                  "Command" character varying(128) NOT NULL,
+                  "ActionId" character varying(64) NOT NULL,
+                  "Stage" integer NOT NULL,
+                  "AcceptedUtc" timestamp with time zone NOT NULL
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedActions_Attempt_Accepted"
+                  ON "RankedActions" ("AttemptId", "AcceptedUtc");
+              CREATE INDEX IF NOT EXISTS "IX_RankedActions_OwnerKey"
+                  ON "RankedActions" ("OwnerKey");
               """
             : """
               CREATE TABLE IF NOT EXISTS "DrillResults" (
@@ -242,6 +271,21 @@ public sealed class HomeOpsDbContext(DbContextOptions<HomeOpsDbContext> options)
               CREATE UNIQUE INDEX IF NOT EXISTS "IX_RatingLedger_AttemptId"
                   ON "RatingLedger" ("AttemptId");
               CREATE INDEX IF NOT EXISTS "IX_RatingLedger_OwnerKey" ON "RatingLedger" ("OwnerKey");
+
+              CREATE TABLE IF NOT EXISTS "RankedActions" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_RankedActions" PRIMARY KEY,
+                  "AttemptId" TEXT NOT NULL,
+                  "RunId" TEXT NOT NULL,
+                  "OwnerKey" TEXT NOT NULL,
+                  "Command" TEXT NOT NULL,
+                  "ActionId" TEXT NOT NULL,
+                  "Stage" INTEGER NOT NULL,
+                  "AcceptedUtc" TEXT NOT NULL
+              );
+              CREATE INDEX IF NOT EXISTS "IX_RankedActions_Attempt_Accepted"
+                  ON "RankedActions" ("AttemptId", "AcceptedUtc");
+              CREATE INDEX IF NOT EXISTS "IX_RankedActions_OwnerKey"
+                  ON "RankedActions" ("OwnerKey");
               """, ct);
     }
 }

@@ -129,8 +129,8 @@ public static class RunEndpoints
             });
         }).RequireScope(ApiScopes.RunsRead);
 
-        // Best homelab operator. Ranked drills only — see DrillResultStore for why breadth outranks
-        // a single fast cascade.
+        // One secondary competitive view: fastest verified recovery by operator. ELO remains the
+        // default and authoritative seasonless ladder.
         app.MapGet("/v1/leaderboard", async (
             HttpContext ctx, DrillResultStore results, int? limit, CancellationToken ct) =>
         {
@@ -260,6 +260,16 @@ public static class RunEndpoints
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
+        app.MapPost("/v1/ranked/{runId}/commands", async (
+            string runId, RankedCommandRequest req, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
+        {
+            var result = await broker.SubmitRankedCommandAsync(
+                runId, req.Command ?? "", Owner(ctx), ct);
+            return result.Run is not null
+                ? Results.Ok(result.Run)
+                : Results.Json(new { error = result.Error }, statusCode: result.Status);
+        }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
+
         // Buy one more window before the cluster expires. Allowed once per cluster.
         app.MapPost("/v1/runs/{runId}/renew", async (
             string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
@@ -325,5 +335,6 @@ public static class RunEndpoints
 
 record CreateRunRequest(string? ScenarioId);
 record DecisionRequest(string? DecisionId);
+record RankedCommandRequest(string? Command);
 record DrillRequest(string? DrillId, string? Mode, string? LearningUnitId);
 record PracticeActionRequest(string? ActionId);

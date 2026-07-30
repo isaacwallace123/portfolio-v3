@@ -59,7 +59,7 @@ export function LaunchScreen({
         </h1>
         <p className={styles.lede}>
           {ranked
-            ? "Prepare an isolated Kubernetes arena on the live homelab. The control plane draws a multi-stage incident and applies every decision to the running workload. Every verdict moves your seasonless ELO; clean recoveries also record an official time."
+            ? "Prepare an isolated Kubernetes arena on the live homelab. The control plane draws a multi-stage incident and applies every allowlisted operator command to the running workload. Measured recovery moves your seasonless ELO; verified recoveries also record an official time."
             : "Provision a disposable Kubernetes workspace on the live homelab — an isolated namespace running a checkout API, Postgres, Redis, an Envoy gateway and a k6 load generator. Operate it freely, or run a practice drill and work a real incident."}
         </p>
         <ul className={styles.included}>
@@ -78,7 +78,7 @@ export function LaunchScreen({
           <li>
             <Timer size={15} />{" "}
             {ranked
-              ? "One wrong move ends the attempt; every verdict moves your rating"
+              ? "Operate through an audited command console; measured outcomes decide the match"
               : "Self-destructs after 15 minutes, extendable once"}
           </li>
         </ul>

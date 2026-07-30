@@ -59,6 +59,7 @@ function run(over: Partial<LiveRunView> = {}): LiveRunView {
     canaryReplicas: 0,
     offeredRequestsPerSec: 800,
     restartToken: "baseline",
+    rankedActions: [],
     drillId: "checkout-traffic-spike",
     drillTitle: "Keep checkout alive",
     drillObjective: "Serve the offered load.",

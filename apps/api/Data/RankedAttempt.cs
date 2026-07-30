@@ -51,3 +51,20 @@ public sealed class RatingLedgerEntry
     public int AfterRating { get; set; }
     public DateTime CreatedUtc { get; set; }
 }
+
+/// <summary>
+/// Append-only competitive operator audit. The same id is first stamped onto the LabRun annotation
+/// and then copied here, so a transient database failure can be retried from later snapshots without
+/// duplicating an action.
+/// </summary>
+public sealed class RankedActionEntry
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string AttemptId { get; set; } = "";
+    public string RunId { get; set; } = "";
+    public string OwnerKey { get; set; } = "";
+    public string Command { get; set; } = "";
+    public string ActionId { get; set; } = "";
+    public int Stage { get; set; }
+    public DateTime AcceptedUtc { get; set; }
+}

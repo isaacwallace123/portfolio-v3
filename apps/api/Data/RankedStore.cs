@@ -49,6 +49,15 @@ public sealed record RankedStandingView(
     int Losses,
     int CurrentStreak);
 
+public sealed record RankedActionView(
+    string Id,
+    string AttemptId,
+    string RunId,
+    string Command,
+    string ActionId,
+    int Stage,
+    DateTime AcceptedUtc);
+
 /// <summary>
 /// The transactional boundary for competitive results. A final attempt, its rating mutation, and
 /// its ledger row commit together, so two API replicas judging the same frame cannot rate it twice.
@@ -240,6 +249,81 @@ public sealed class RankedStore(HomeOpsDbContext db, ILogger<RankedStore> log)
             .FirstOrDefaultAsync(ct);
         return attempt is null ? null : View(attempt);
     }
+
+    public async Task<bool> RecordActionAsync(
+        string id,
+        string attemptId,
+        string runId,
+        string owner,
+        string command,
+        string actionId,
+        int stage,
+        DateTime acceptedUtc,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(id) ||
+            string.IsNullOrWhiteSpace(attemptId) ||
+            string.IsNullOrWhiteSpace(owner))
+            return false;
+
+        if (await db.RankedActions.AsNoTracking().AnyAsync(a => a.Id == id, ct))
+            return true;
+
+        var attemptExists = await db.RankedAttempts
+            .AsNoTracking()
+            .AnyAsync(
+                attempt =>
+                    attempt.Id == attemptId &&
+                    attempt.RunId == runId &&
+                    attempt.OwnerKey == owner,
+                ct);
+        if (!attemptExists) return false;
+
+        db.RankedActions.Add(new RankedActionEntry
+        {
+            Id = id[..Math.Min(id.Length, 64)],
+            AttemptId = attemptId,
+            RunId = runId,
+            OwnerKey = owner,
+            Command = command[..Math.Min(command.Length, 128)],
+            ActionId = actionId[..Math.Min(actionId.Length, 64)],
+            Stage = Math.Max(1, stage),
+            AcceptedUtc = Utc(acceptedUtc),
+        });
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException ex)
+        {
+            log.LogDebug(ex, "Ranked action {ActionEntryId} was already recorded.", id);
+            db.ChangeTracker.Clear();
+            return await db.RankedActions
+                .AsNoTracking()
+                .AnyAsync(a => a.Id == id, ct);
+        }
+    }
+
+    public async Task<IReadOnlyList<RankedActionView>> ActionsForAttemptAsync(
+        string attemptId,
+        string owner,
+        CancellationToken ct) =>
+        await db.RankedActions
+            .AsNoTracking()
+            .Where(action =>
+                action.AttemptId == attemptId &&
+                action.OwnerKey == owner)
+            .OrderBy(action => action.AcceptedUtc)
+            .Select(action => new RankedActionView(
+                action.Id,
+                action.AttemptId,
+                action.RunId,
+                action.Command,
+                action.ActionId,
+                action.Stage,
+                action.AcceptedUtc))
+            .ToArrayAsync(ct);
 
     public async Task<RankedProfileView> ProfileAsync(string owner, CancellationToken ct)
     {

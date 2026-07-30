@@ -22,15 +22,8 @@ interface RawEntry {
   achievedUtc?: string;
 }
 
-interface RawDrillBoard {
-  drillId?: string;
-  title?: string;
-  entries?: RawEntry[];
-}
-
 export interface RawLeaderboard {
-  overall?: RawEntry[];
-  byDrill?: RawDrillBoard[];
+  entries?: RawEntry[];
 }
 
 function toEntry(raw: RawEntry, index: number): LeaderboardEntry {
@@ -48,16 +41,6 @@ function toEntry(raw: RawEntry, index: number): LeaderboardEntry {
 
 export function toLeaderboardView(raw: RawLeaderboard): LeaderboardView {
   return {
-    overall: (raw.overall ?? []).map(toEntry),
-    byDrill: (raw.byDrill ?? [])
-      // A board with no id cannot be keyed or linked to a drill, so it is not a board.
-      .filter((d): d is RawDrillBoard & { drillId: string } =>
-        Boolean(d.drillId),
-      )
-      .map((d) => ({
-        drillId: d.drillId,
-        title: d.title?.trim() || d.drillId,
-        entries: (d.entries ?? []).map(toEntry),
-      })),
+    entries: (raw.entries ?? []).map(toEntry),
   };
 }

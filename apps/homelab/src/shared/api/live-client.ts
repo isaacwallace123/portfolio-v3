@@ -196,6 +196,18 @@ export async function practiceAction(
   return asJson(res);
 }
 
+export async function rankedCommand(
+  runId: string,
+  command: string,
+): Promise<LiveRunView> {
+  const res = await fetch(`/api/live/ranked/${runId}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command }),
+  });
+  return asJson(res);
+}
+
 /** One drill in the catalog, with what the field has actually done on it. */
 export interface DrillCatalogEntry {
   id: string;
@@ -237,8 +249,7 @@ export interface LeaderboardEntry {
 }
 
 export interface LeaderboardView {
-  overall: LeaderboardEntry[];
-  byDrill: { drillId: string; title: string; entries: LeaderboardEntry[] }[];
+  entries: LeaderboardEntry[];
 }
 
 export type RankedOutcome =
@@ -292,12 +303,22 @@ export interface RankedStanding {
   currentStreak: number;
 }
 
+export interface RankedActionAudit {
+  id: string;
+  attemptId: string;
+  runId: string;
+  command: string;
+  actionId: string;
+  stage: number;
+  acceptedUtc: string;
+}
+
 export async function fetchDrills(): Promise<DrillCatalog> {
   const res = await fetch("/api/live/drills", { cache: "no-store" });
   return asJson(res);
 }
 
-export async function fetchLeaderboard(): Promise<LeaderboardView> {
+export async function fetchTimeStandings(): Promise<LeaderboardView> {
   const res = await fetch("/api/live/leaderboard", { cache: "no-store" });
   return asJson(res);
 }
@@ -313,6 +334,19 @@ export async function fetchRankedStandings(): Promise<RankedStanding[]> {
   });
   const body = await asJson<{ standings: RankedStanding[] }>(res);
   return body.standings;
+}
+
+export async function fetchRankedActions(
+  attemptId: string,
+): Promise<RankedActionAudit[]> {
+  const res = await fetch(`/api/live/ranked/attempts/${attemptId}/actions`, {
+    cache: "no-store",
+  });
+  const body = await asJson<{
+    attemptId: string;
+    actions: RankedActionAudit[];
+  }>(res);
+  return body.actions;
 }
 
 // A drill runs ON the provisioned cluster: it sets an objective and clock and unlocks decisions

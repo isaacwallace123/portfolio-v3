@@ -33,4 +33,16 @@ describe("the unified Ranked destination", () => {
     );
     expect(workbench).toContain("<RankedHub");
   });
+
+  it("defaults to one ELO ladder with a secondary time switch", () => {
+    const hub = read("widgets/leaderboard/ui/RankedHub.tsx");
+    expect(hub).toContain('useState<BoardMode>("elo")');
+    expect(hub).toContain("> ELO");
+    expect(hub).toContain("> Time");
+    expect(hub).toContain("<RatingBoard");
+    expect(hub).toContain("<TimeBoard");
+    expect(hub).not.toContain("<Podium");
+    expect(hub).not.toContain("<BoardTable");
+    expect(hub).not.toContain("byDrill");
+  });
 });

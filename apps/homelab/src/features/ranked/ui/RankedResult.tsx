@@ -104,7 +104,7 @@ export function RankedResult({
       <p className={styles.resultEyebrow}>
         {won ? "Incident contained" : "Attempt ended"}
       </p>
-      <h2>{won ? "Clean recovery" : "Wrong call"}</h2>
+      <h2>{won ? "Verified recovery" : "Attempt failed"}</h2>
       <p className={styles.resultScenario}>{run.drillTitle}</p>
 
       <div className={styles.ratingChange} aria-live="polite">
@@ -174,6 +174,23 @@ export function RankedResult({
         </div>
       </div>
 
+      <div className={styles.actionLog}>
+        <header>
+          <span>Operational timeline</span>
+          <b>{run.rankedActions.length}</b>
+        </header>
+        {run.rankedActions.length === 0 ? (
+          <p>No operator mutations were recorded.</p>
+        ) : (
+          run.rankedActions.map((action) => (
+            <div key={action.id}>
+              <time>{clock(action.acceptedAtMs)}</time>
+              <code>{action.command}</code>
+            </div>
+          ))
+        )}
+      </div>
+
       {won && scenario && (
         <div className={styles.speedCompare}>
           <span>
@@ -207,8 +224,8 @@ export function RankedResult({
 
       <p className={styles.resultNote}>
         {won
-          ? "Your rating rewards the result. Your time records how efficiently you got there."
-          : "The action was applied to the live cluster, so you can still inspect its impact before resetting."}
+          ? "The measured objective held through verification. Rating rewards that result; official time stays a separate speed record."
+          : "The cluster stayed measurable after every action, so the timeline remains available for review before resetting."}
       </p>
 
       <button
