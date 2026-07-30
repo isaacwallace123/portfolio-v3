@@ -30,6 +30,10 @@ public sealed class LabRunResource
 public sealed class LabRunMetadata
 {
     [JsonPropertyName("name")] public string Name { get; set; } = "";
+    // The API server's optimistic-concurrency token. Echoing it back in a patch turns that patch
+    // into a compare-and-set: the ranked launch commits its activation against the version it
+    // verified, so two replicas cannot both believe they are the one starting the match.
+    [JsonPropertyName("resourceVersion")] public string? ResourceVersion { get; set; }
     [JsonPropertyName("creationTimestamp")] public DateTime? CreationTimestamp { get; set; }
     [JsonPropertyName("deletionTimestamp")] public DateTime? DeletionTimestamp { get; set; }
     [JsonPropertyName("annotations")] public Dictionary<string, string>? Annotations { get; set; }
