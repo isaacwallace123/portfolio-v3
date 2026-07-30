@@ -8,11 +8,13 @@ import {
   Info,
   Loader2,
   ArrowRight,
+  Radio,
   Terminal,
   Trophy,
   TriangleAlert,
 } from "lucide-react";
 import { ACADEMY_COURSE } from "../content/production-operations";
+import { ASSESSMENT_HREF } from "../model/assessment";
 import { useAcademyProgress } from "../model/useAcademyProgress";
 import { eligibility } from "../model/progress";
 import { CourseMap } from "./CourseMap";
@@ -139,10 +141,19 @@ export function AcademyDashboard() {
               Continue learning
               <ArrowRight size={15} aria-hidden />
             </Link>
-          ) : (
+          ) : state.assessmentComplete ? (
             <Link className={styles.primary} href="/practice/certificate">
               <Award size={15} aria-hidden />
               {certificate ? "View your certificate" : "Finish the course"}
+            </Link>
+          ) : (
+            /* Every segment is done and the assessment is not. "Finish the course" pointing at the
+               requirements page would send someone to a checklist to find out what the one
+               remaining item is; this is the item. */
+            <Link className={styles.primary} href={ASSESSMENT_HREF}>
+              <Radio size={15} aria-hidden />
+              Open the final assessment
+              <ArrowRight size={15} aria-hidden />
             </Link>
           )}
           <Link

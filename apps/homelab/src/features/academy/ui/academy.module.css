@@ -121,7 +121,15 @@
 /* Every interactive thing in the Academy, not just the buttons. The links — course-map segments,
    lesson rows, breadcrumbs, the sandbox and certificate cards — are the primary way through the
    course by keyboard, and the UA default ring is weak against this background. */
-:where(.primary, .secondary, .quiet, .unit, .option, .nextUp a):focus-visible,
+:where(
+  .primary,
+  .secondary,
+  .quiet,
+  .unit,
+  .option,
+  .blueprintLink,
+  .nextUp a
+):focus-visible,
 :where(.crumbs, .pathHead) a:focus-visible {
   outline: 2px solid var(--mint);
   outline-offset: 3px;
@@ -1196,6 +1204,283 @@
   line-height: 1.7;
 }
 
+/* ── Final assessment ──────────────────────────────────────────────────────
+ *
+ * The page a learner reads before the last thing they do in the course. It borrows the continue
+ * card's weight for the launch control and then goes quiet: the blueprint and the rules are
+ * reference material, and reference material that competes with the one button is reference
+ * material nobody reads. */
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.assessCard {
+  margin: 40px 0 0;
+  padding: 30px 32px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line-2);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+}
+/* Unlocked and unattempted is the one state this page is trying to produce, so it is the one that
+   gets the accent. A locked card that glows is a card that promises something it cannot do. */
+.assessCard[data-stage="first-attempt"],
+.assessCard[data-stage="retry"] {
+  border-color: color-mix(in srgb, var(--mint) 26%, var(--line));
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--mint) 9%, transparent),
+      transparent 62%
+    ),
+    color-mix(in srgb, var(--surface) 84%, transparent);
+}
+.assessCardHead h2 {
+  margin: 12px 0 8px;
+  max-width: 30ch;
+  font-size: 25px;
+  font-weight: 560;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+}
+.assessCardHead p {
+  margin: 0;
+  max-width: 66ch;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.72;
+}
+.assessCardHead .statusTag {
+  justify-self: start;
+}
+
+/* The recorded attempt, in the monospace the rest of the site uses for anything measured. */
+.assessFacts {
+  margin: 20px 0 0;
+  padding: 16px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 34px;
+  border-top: 1px solid var(--line);
+}
+.assessFacts div {
+  display: grid;
+  gap: 5px;
+}
+.assessFacts dt {
+  color: var(--ink-dim);
+  font:
+    700 8.5px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.assessFacts dd {
+  margin: 0;
+  color: var(--ink);
+  font:
+    600 13px/1 ui-monospace,
+    monospace;
+}
+
+/* ── The rules ─────────────────────────────────────────────────────────── */
+.ruleList {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 1px;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--line);
+}
+.rule {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 16px 18px;
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+}
+.rule svg {
+  margin-top: 3px;
+  color: var(--mint);
+}
+.rule b {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 580;
+}
+.rule small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+/* ── Blueprint ─────────────────────────────────────────────────────────── */
+.blueprint {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--line);
+}
+.blueprintRow {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+  padding: 16px 18px;
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+}
+.blueprintIndex {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  color: var(--ink-dim);
+  font:
+    700 12px/1 ui-monospace,
+    monospace;
+}
+.blueprintRow[data-demonstrated="true"] .blueprintIndex {
+  color: var(--mint);
+  border-color: color-mix(in srgb, var(--mint) 48%, transparent);
+}
+.blueprintBody {
+  display: grid;
+  gap: 6px;
+}
+.blueprintHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+}
+.blueprintHead b {
+  font-size: 14px;
+  font-weight: 580;
+}
+.blueprintLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--ink-dim);
+  font-size: 11.5px;
+}
+.blueprintLink:hover {
+  color: var(--mint);
+}
+.blueprintBody p {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+.blueprintMark {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  color: var(--ink-dim);
+  font:
+    600 9.5px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.blueprintRow[data-demonstrated="true"] .blueprintMark {
+  color: var(--mint);
+}
+
+/* A short stagger down the seven rows, once, on arrival. It exists to make the blueprint read as
+   an ordered path rather than a table; it is switched off wholesale below, and the client hook
+   that sets `data-animate` starts at false so the settled state is what server-renders. */
+.blueprint[data-animate="true"] .blueprintRow {
+  animation: blueprint-in var(--dur-base) cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+@keyframes blueprint-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* ── Certificate standing ──────────────────────────────────────────────── */
+.assessCertificate {
+  padding: 26px 28px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+}
+.assessCertificateLede {
+  margin: 0;
+  max-width: 66ch;
+  color: var(--ink-mid);
+  font-size: 13.5px;
+  line-height: 1.72;
+}
+.remaining {
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 9px;
+  list-style: none;
+}
+.remaining li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  color: var(--ink-mid);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.remaining li svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--amber);
+}
+.remaining b {
+  font-weight: 570;
+}
+.remaining em {
+  margin-left: 9px;
+  color: var(--ink-dim);
+  font:
+    600 11px/1 ui-monospace,
+    monospace;
+  font-style: normal;
+}
+.assessDisclaimer {
+  margin: 22px 0 0;
+  max-width: 74ch;
+  color: var(--ink-dim);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
 /* Print: the certificate, on paper, and nothing else on the page. */
 @media print {
   .shell {
@@ -1283,4 +1568,51 @@
     align-items: flex-start;
     gap: 10px;
   }
+  /* The blueprint's status column drops under the body rather than squeezing the prose to a few
+     words a line, and the index circle keeps the row scannable at the narrowest width. */
+  .blueprintRow {
+    grid-template-columns: 26px minmax(0, 1fr);
+    row-gap: 8px;
+  }
+  .blueprintMark {
+    grid-column: 2;
+    margin-top: 0;
+  }
+  .blueprintIndex {
+    width: 26px;
+    height: 26px;
+    font-size: 11px;
+  }
+  .assessCard,
+  .assessCertificate {
+    padding: 22px 18px;
+  }
+  .assessFacts {
+    gap: 12px 22px;
+  }
+}
+
+/* Reduced motion. The blueprint stagger is decoration over content that is already complete
+   without it, so it is removed rather than shortened — for the OS preference and for the site's
+   own toggle, which is a separate signal and has to be handled separately. */
+@media (prefers-reduced-motion: reduce) {
+  .blueprint[data-animate="true"] .blueprintRow {
+    animation: none;
+  }
+}
+:global(html[data-reduce-motion])
+  .blueprint[data-animate="true"]
+  .blueprintRow {
+  animation: none;
+}
+
+/* Reduced transparency: the Academy's surfaces are mixed with the page behind them, which is what
+   the preference asks not to happen. Opaque surface, no gradient wash. */
+:global(html[data-reduce-transparency]) .assessCard,
+:global(html[data-reduce-transparency]) .assessCard[data-stage="first-attempt"],
+:global(html[data-reduce-transparency]) .assessCard[data-stage="retry"],
+:global(html[data-reduce-transparency]) .assessCertificate,
+:global(html[data-reduce-transparency]) .rule,
+:global(html[data-reduce-transparency]) .blueprintRow {
+  background: var(--surface);
 }
