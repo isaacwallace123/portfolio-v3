@@ -1,4 +1,7 @@
 using static IsaacWallace.Api.Runs.DrillKit;
+// So a drill can say `Offered(4)` in its brief and quote the rate the generators are actually
+// configured for, rather than a number typed out by hand next to a goal that computes its own.
+using static IsaacWallace.Api.Runs.LoadModel;
 
 namespace IsaacWallace.Api.Runs;
 
@@ -151,8 +154,13 @@ public static class ScenarioDefinitions
         new[]
         {
             // ══ Practice: one incident, one objective ═════════════════════════════════════════
+            // Every request rate a drill states is derived from LoadModel rather than written out.
+            // The catalog was authored when a generator offered 500/s; when the platform dropped to
+            // 400 the goals followed (they are computed) and the prose did not, so a stage briefed as
+            // "2000 requests a second" was scored against 1600 and the operator was reading a number
+            // the cluster never produced. Interpolating means the two cannot part company again.
             Drill("checkout-traffic-spike", "Keep checkout alive", "Practice · scaling",
-                "A real checkout workload takes 1000 requests a second on one replica. Find the capacity.",
+                $"A real checkout workload takes {Offered(2)} requests a second on one replica. Find the capacity.",
                 "operator", 90,
                 "Serve the offered load with p95 under 250 ms and errors under 1%.",
                 Stage("surge", "Absorb the surge",
@@ -161,8 +169,8 @@ public static class ScenarioDefinitions
                     [ServeAll(2), P95(250), Errors(1)],
                     [ScaleOut, CacheOn, Shrink,
                      GatewayOut.Wrong(
-                        "Wrong. At 1000 rps the gateway is fine — the queue is in the single checkout "
-                        + "replica behind it.")])),
+                        $"Wrong. At {Offered(2)} rps the gateway is fine — the queue is in the single "
+                        + "checkout replica behind it.")])),
 
             Drill("checkout-bad-release", "Ship a bad release", "Practice · releases",
                 "A candidate build regressed the pricing path. Trace it and get the stable release back.",
@@ -217,7 +225,7 @@ public static class ScenarioDefinitions
                         + "not help a fleet that is about to lose pods.")])),
 
             Drill("gateway-saturation", "The queue is at the front door", "Practice · gateway",
-                "2000 requests a second against a well-provisioned, cached backend that still cannot keep up.",
+                $"{Offered(4)} requests a second against a well-provisioned, cached backend that still cannot keep up.",
                 "expert", 100,
                 "Serve the offered load. The tier that is saturated is not the one you expect.",
                 Stage("gateway", "Find the real bottleneck",
@@ -234,7 +242,7 @@ public static class ScenarioDefinitions
                         + "already the constraint.")])),
 
             Drill("capacity-right-sizing", "Right-size the fleet", "Practice · cost",
-                "Six replicas for 500 requests a second. Cut the fleet to two and still hold the SLO.",
+                $"Six replicas for {Offered(1)} requests a second. Cut the fleet to two and still hold the SLO.",
                 "operator", 90,
                 "Run on at most two checkout replicas while serving the offered load inside the SLO.",
                 Stage("trim", "Cut the fleet in three",
@@ -253,7 +261,7 @@ public static class ScenarioDefinitions
                         + "more.")])),
 
             Drill("release-under-load", "It only breaks under load", "Practice · releases",
-                "The candidate passed every check at low traffic. At 1500 requests a second it does not.",
+                $"The candidate passed every check at low traffic. At {Offered(2)} requests a second it does not.",
                 "operator", 90,
                 "Get back to the stable release while serving the offered load.",
                 Stage("under-load", "Roll it back under traffic",
@@ -404,7 +412,7 @@ public static class ScenarioDefinitions
                         + "has just restarted.")])),
 
             Drill("front-and-back", "Both ends are tight", "Practice · capacity",
-                "1500 requests a second arriving at one gateway, in front of one checkout replica.",
+                $"{Offered(3)} requests a second arriving at one gateway, in front of one checkout replica.",
                 "expert", 110,
                 "Serve the offered load. Neither tier alone is enough.",
                 Stage("both-ends", "Widen both ends",
@@ -426,8 +434,8 @@ public static class ScenarioDefinitions
                     [.. Healthy(traffic: 2), Checkout(1)],
                     [ServeAll(2), P95(250), Errors(1)],
                     [ScaleOut, CacheOn, GatewayOut.Wrong(
-                        "Wrong. At 1000 rps the gateway is fine. The queue is in the single checkout "
-                        + "replica behind it."),
+                        $"Wrong. At {Offered(2)} rps the gateway is fine. The queue is in the single "
+                        + "checkout replica behind it."),
                      Shrink]),
                 Stage("shipped", "Undo what the scale-up shipped",
                     "Get back to the stable release while still serving the offered load.",
@@ -495,9 +503,9 @@ public static class ScenarioDefinitions
                      Shrink.Wrong(
                         "Wrong, and the fastest way to turn a surge into an outage.")],
                     handoff:
-                        "It is the last day of the month. Offered traffic just went from 500 to 2000 "
-                        + "requests a second — against the two replicas you very sensibly left yourself "
-                        + "an hour ago."),
+                        $"It is the last day of the month. Offered traffic just went from {Offered(1)} "
+                        + $"to {Offered(4)} requests a second — against the two replicas you very "
+                        + "sensibly left yourself an hour ago."),
                 Stage("migrate", "Migrate it under full load",
                     "Land checkout on the infra pool while still serving the offered load.",
                     [],
@@ -508,11 +516,15 @@ public static class ScenarioDefinitions
                      ScaleOut.Wrong(
                         "Wrong. Capacity is not the constraint — you have plenty of it. The worker "
                         + "underneath it is what is going away."),
+                     // Not "the gateway is not scheduled on the drained worker": the gateway has no
+                     // nodeSelector, so it may well be sitting on that worker, and the drills must not
+                     // assert placement the platform does not pin.
                      GatewayOut.Wrong(
-                        "Wrong tier. The gateway is not scheduled on the worker being drained.")],
+                        "Wrong tier. The gateway is not what is being drained, and widening it does not "
+                        + "help a fleet that is about to lose pods.")],
                     handoff:
                         "The apps worker has to be drained for firmware — now, not after month-end. Move "
-                        + "the fleet to infra while it is carrying 2000 requests a second.")),
+                        + $"the fleet to infra while it is carrying {Offered(4)} requests a second.")),
 
             Drill("cascade-recovery-regression", "Restore it, then prove it", "Ranked · cascade",
                 "A data recovery that pins you to the build that caused it, and a rollout that arrives all at once.",
@@ -549,7 +561,7 @@ public static class ScenarioDefinitions
                         "Wrong. The gateway is not the queue here — one checkout replica is."),
                      Shrink.Wrong(
                         "Wrong. Arrival rate does not care that you are waiting — the backlog grows for "
-                        + "as long as one replica cannot finish 1500 requests a second.")],
+                        + $"as long as one replica cannot finish {Offered(3)} requests a second.")],
                     handoff:
                         "The rollback restarted every replica at once, the fleet came back as one pod, "
                         + "and the traffic that queued behind the rollout is arriving together. This is "
@@ -585,7 +597,7 @@ public static class ScenarioDefinitions
                         + "rather than reducing them.")],
                     handoff:
                         "The move left the warm cache tier behind on the old pool, and traffic followed "
-                        + "you over — 1500 requests a second now, all of them missing. Note the "
+                        + $"you over — {Offered(3)} requests a second now, all of them missing. Note the "
                         + "objective: you have to stay on infra. Undoing the migration is not a fix.")),
 
             Drill("cascade-canary", "The canary earned its keep", "Ranked · cascade",
@@ -611,11 +623,12 @@ public static class ScenarioDefinitions
                      Shrink.Wrong(
                         "Wrong. Two replicas are already short of this traffic; one will not cover it."),
                      GatewayOut.Wrong(
-                        "Wrong. The gateway is comfortable at 1500 rps — the shortfall is behind it.")],
+                        $"Wrong. The gateway is comfortable at {Offered(3)} rps — the shortfall is "
+                        + "behind it.")],
                     handoff:
                         "Pulling the canary took a replica's worth of capacity out of the fleet, and the "
                         + "evening peak arrived while you were doing it. Two replicas are now carrying "
-                        + "1500 requests a second."),
+                        + $"{Offered(3)} requests a second."),
                 Stage("wrote", "Repair what it wrote",
                     "Catalogue recovered, serving the offered load, errors under 1%.",
                     [Catalogue("degraded")],
@@ -657,9 +670,9 @@ public static class ScenarioDefinitions
                         "Wrong. You widened the gateway for a reason; narrowing it now just moves the "
                         + "queue back to the front door.")],
                     handoff:
-                        "With the gateway widened, 2000 requests a second are reaching the backend for "
-                        + "the first time — and the cache tier evicted itself under the sudden miss "
-                        + "storm. The queue moved rather than disappeared."),
+                        $"With the gateway widened, {Offered(4)} requests a second are reaching the "
+                        + "backend for the first time — and the cache tier evicted itself under the "
+                        + "sudden miss storm. The queue moved rather than disappeared."),
                 Stage("bill", "Give the capacity back",
                     "Two replicas or fewer, still serving the offered load, errors under 1%.",
                     [Traffic(1)],
@@ -668,33 +681,33 @@ public static class ScenarioDefinitions
                         "Correct if you dropped it earlier — cheap requests are what make a small fleet "
                         + "safe."),
                      ScaleOut.Wrong(
-                        "Wrong. The objective is to spend less; six replicas for 500 requests a second is "
-                        + "the thing you were asked to stop doing."),
-Shrink.Wrong(
-                        "Wrong. One replica cannot hold the SLO even at 500 a second — the objective "
-                        + "says two, and two is not the same as as few as possible.")],
+                        $"Wrong. The objective is to spend less; six replicas for {Offered(1)} requests "
+                        + "a second is the thing you were asked to stop doing."),
+                     Shrink.Wrong(
+                        $"Wrong. One replica cannot hold the SLO even at {Offered(1)} a second — the "
+                        + "objective says two, and two is not the same as as few as possible.")],
                     handoff:
-                        "Peak is over — traffic is back to 500 a second and someone has noticed what the "
-                        + "weekend cost. Hand the capacity back without giving up the SLO.")),
+                        $"Peak is over — traffic is back to {Offered(1)} a second and someone has noticed "
+                        + "what the weekend cost. Hand the capacity back without giving up the SLO.")),
 
             Drill("cascade-full-sev", "Full sev, four moves", "Ranked · cascade",
                 "Peak traffic, a bad release, corrupt data, and a worker drain — in that order, on one cluster.",
                 "expert", 400,
-                "Four consecutive incidents at 2000 requests a second. The hardest thing in the catalog.",
-                Stage("peak", "Take 2000 a second on one replica",
+                $"Four consecutive incidents at {Offered(4)} requests a second. The hardest thing in the catalog.",
+                Stage("peak", $"Take {Offered(4)} a second on one replica",
                     "Serve the offered load with p95 under 400 ms and errors under 1%.",
                     [.. Healthy(traffic: 4), Checkout(1)],
                     [ServeAll(4), P95(400), Errors(1)],
                     [ScaleOut.Right("Correct, and not sufficient on its own at this rate."),
                      CacheOn.Right(
-                        "Correct. At 2000 rps you need the work to be cheaper, not just more widely "
-                        + "distributed."),
+                        $"Correct. At {Offered(4)} rps you need the work to be cheaper, not just more "
+                        + "widely distributed."),
                      GatewayOut.After(12).Right(
                         "Correct, and the one people miss. One Envoy tops out near 2000 rps — at peak the "
                         + "front door is a tier like any other."),
                      Shrink.Wrong(
-                        "Wrong. At 2000 requests a second one replica is not a consolidation, it is an "
-                        + "outage.")]),
+                        $"Wrong. At {Offered(4)} requests a second one replica is not a consolidation, "
+                        + "it is an outage.")]),
                 Stage("release", "The release you did not ship",
                     "Stable release, still serving the offered load.",
                     [Release("candidate")],

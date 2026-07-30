@@ -3,7 +3,7 @@
 import type { RefObject } from "react";
 import { AlertTriangle, Cpu, Loader2, MemoryStick } from "lucide-react";
 import type { RunComponent, RunPod } from "@/shared/api/live-client";
-import { COLUMNS, SERVICES, type ServiceId } from "../model/topology";
+import { COLUMNS, POOLED, SERVICES, type ServiceId } from "../model/topology";
 import type { EdgePath } from "../model/useClusterEdges";
 import { sampled } from "../lib/format";
 import styles from "../workbench.module.css";
@@ -68,8 +68,11 @@ function PodCard({
         </span>
         {/* Which worker pool this replica actually landed on. Measured, not requested — during an
             evacuation the fleet genuinely shows pods on both pools until the last one moves, which
-            is the thing the migration drills are about and was previously invisible. */}
-        {pod.pool && (
+            is the thing the migration drills are about and was previously invisible.
+
+            Only for the tiers the Worker pool control schedules (see POOLED). On the others the chip
+            was reporting a scheduler coincidence in the vocabulary of an operator decision. */}
+        {pod.pool && POOLED.includes(svc) && (
           <span
             className={`${styles.poolChip} ${pod.pool === "infra" ? styles.poolInfra : ""}`}
             title={`Scheduled on the ${pod.pool} worker pool`}
