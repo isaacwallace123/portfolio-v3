@@ -1,11 +1,14 @@
 "use client";
 
-import { memo } from "react";
+import { createElement, memo } from "react";
+import { ChevronDown } from "lucide-react";
+import type { ViewNode } from "../model/collapse";
 import type { FlowNodeBox } from "../model/layout";
+import { layerIcon } from "../model/layers";
 import s from "../topology.module.css";
 
 interface Props {
-  box: FlowNodeBox;
+  box: FlowNodeBox<ViewNode>;
   selected: boolean;
   /** Whether this box is the focus or one step from it — everything else is dimmed. */
   related: boolean;
@@ -13,9 +16,11 @@ interface Props {
   focusing: boolean;
   onSelect: (id: string) => void;
   onHover: (id: string | null) => void;
+  /** Opening a group replaces it with the components it stands for. */
+  onExpand: (layer: string) => void;
 }
 
-/** One box in the chart: status light, name, kind, and how many replicas are actually ready. */
+/** One box: either a collapsed layer, or a single component with its readiness. */
 function FlowNodeImpl({
   box,
   selected,
@@ -23,58 +28,107 @@ function FlowNodeImpl({
   focusing,
   onSelect,
   onHover,
+  onExpand,
 }: Props) {
-  const { node, x, y, w, h } = box;
-  const left = x - w / 2;
-  const top = y - h / 2;
-  const ready = node.desired > 0 && node.ready < node.desired;
+  const view = box.node;
+  const { x, y, w, h } = box;
+  const isGroup = view.kind === "group";
+  const status = isGroup ? view.status : view.node.status;
+  const label = isGroup ? view.label : view.node.label;
+  const desired = isGroup ? view.desired : view.node.desired;
+  const ready = isGroup ? view.ready : view.node.ready;
+  const short = desired > 0 && ready < desired;
+
+  // A group opens to show what it stands for; a component is only ever selected.
+  const activate = () => (isGroup ? onExpand(view.layer) : onSelect(view.id));
 
   return (
     <g
-      data-flow-node={node.id}
+      data-flow-node={view.id}
       className={s.node}
-      data-layer={node.layer}
+      data-layer={view.layer}
+      data-group={isGroup || undefined}
       data-selected={selected || undefined}
       data-dim={focusing && !related ? "" : undefined}
-      transform={`translate(${left} ${top})`}
-      onClick={() => onSelect(node.id)}
-      onMouseEnter={() => onHover(node.id)}
+      transform={`translate(${x - w / 2} ${y - h / 2})`}
+      onClick={activate}
+      onMouseEnter={() => onHover(view.id)}
       onMouseLeave={() => onHover(null)}
       tabIndex={0}
       role="button"
-      aria-pressed={selected}
-      aria-label={`${node.label} — ${node.kind}, ${node.status}`}
+      aria-label={
+        isGroup
+          ? `${label}, ${view.count} components, ${status}. Activate to expand.`
+          : `${label} — ${view.node.kind}, ${status}`
+      }
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onSelect(node.id);
+          activate();
         }
       }}
     >
       <rect className={s.nodeBox} width={w} height={h} rx={11} />
       {/* A colour bar on the leading edge reads as "which layer" without another legend lookup. */}
       <rect className={s.nodeSpine} width={4} height={h} rx={2} />
-      <circle
-        className={s.nodeStatus}
-        data-status={node.status}
-        cx={20}
-        cy={h / 2 - 7}
-        r={4}
-      />
-      {/* The name gets the full width; the kind and the replica count share the line below it, so
-          nothing has to be squeezed to make room for a number that is usually two characters. */}
+
+      {isGroup ? (
+        <g
+          className={s.nodeGlyph}
+          transform={`translate(14 ${h / 2 - 17})`}
+          aria-hidden="true"
+        >
+          {createElement(layerIcon(view.layer), { size: 13 })}
+        </g>
+      ) : (
+        <circle
+          className={s.nodeStatus}
+          data-status={status}
+          cx={20}
+          cy={h / 2 - 7}
+          r={4}
+        />
+      )}
+
       <text className={s.nodeLabel} x={32} y={h / 2 - 3}>
-        {truncate(node.label, LABEL_CHARS)}
+        {truncate(label, isGroup ? LABEL_CHARS - 3 : LABEL_CHARS)}
       </text>
       <text className={s.nodeMeta} x={32} y={h / 2 + 14}>
-        {truncate(node.kind, META_CHARS)}
-        {node.desired > 0 && (
-          <tspan className={s.nodeCount} data-short={ready || undefined}>
-            {`  ·  ${node.ready}/${node.desired}`}
+        {isGroup
+          ? `${view.count} components`
+          : truncate(view.node.kind, META_CHARS)}
+        {desired > 0 && (
+          <tspan className={s.nodeCount} data-short={short || undefined}>
+            {`  ·  ${ready}/${desired}`}
           </tspan>
         )}
       </text>
-      <title>{`${node.label} — ${node.kind}`}</title>
+
+      {isGroup && (
+        <>
+          {/* The worst state among the members, so a collapsed box never hides a problem. */}
+          <circle
+            className={s.nodeStatus}
+            data-status={status}
+            cx={w - 32}
+            cy={h / 2}
+            r={4}
+          />
+          <g
+            className={s.nodeChevron}
+            transform={`translate(${w - 24} ${h / 2 - 7})`}
+            aria-hidden="true"
+          >
+            <ChevronDown size={14} />
+          </g>
+        </>
+      )}
+
+      <title>
+        {isGroup
+          ? `${label} — ${view.count} components. Click to expand.`
+          : `${label} — ${view.node.kind}`}
+      </title>
     </g>
   );
 }

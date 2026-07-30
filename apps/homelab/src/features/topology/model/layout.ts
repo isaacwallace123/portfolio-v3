@@ -1,4 +1,8 @@
-import type { TopologyNode } from "@/shared/api/live-client";
+/** The minimum a thing needs to be placed: an identity, and a layer to tint its edges by. */
+export interface LayoutNode {
+  id: string;
+  layer: string;
+}
 
 /**
  * Layered flowchart layout (the Sugiyama method), top to bottom.
@@ -33,9 +37,9 @@ const DUMMY_W = 10;
 const PAD_X = 56;
 const PAD_Y = 56;
 
-export interface FlowNodeBox {
+export interface FlowNodeBox<T extends LayoutNode = LayoutNode> {
   id: string;
-  node: TopologyNode;
+  node: T;
   rank: number;
   /** Centre of the box. */
   x: number;
@@ -54,14 +58,18 @@ export interface FlowEdgeRoute {
   source: string;
   target: string;
   kind: string;
+  /** True when one connector stands for a pair that feed each other. */
+  bidirectional?: boolean;
+  /** How many real relationships this connector represents. */
+  weight?: number;
   /** Layer of the source node — edges are tinted by where they come from. */
   layer: string;
   /** Ordered points, source's bottom edge through any corridors to the target's top edge. */
   points: Point[];
 }
 
-export interface FlowLayout {
-  nodes: FlowNodeBox[];
+export interface FlowLayout<T extends LayoutNode = LayoutNode> {
+  nodes: FlowNodeBox<T>[];
   edges: FlowEdgeRoute[];
   width: number;
   height: number;
@@ -84,21 +92,23 @@ interface GraphEdge {
   source: string;
   target: string;
   kind: string;
+  bidirectional?: boolean;
+  weight?: number;
 }
 
-const EMPTY: FlowLayout = {
+const empty = <T extends LayoutNode>(): FlowLayout<T> => ({
   nodes: [],
   edges: [],
   width: 0,
   height: 0,
   rankCount: 0,
-};
+});
 
-export function layoutFlow(
-  nodes: TopologyNode[],
+export function layoutFlow<T extends LayoutNode>(
+  nodes: T[],
   allEdges: GraphEdge[],
-): FlowLayout {
-  if (nodes.length === 0) return EMPTY;
+): FlowLayout<T> {
+  if (nodes.length === 0) return empty<T>();
 
   const byId = new Map(nodes.map((n) => [n.id, n]));
   // Only edges whose endpoints both survived the current filter, and no self-loops: a self-loop has
@@ -126,7 +136,7 @@ export function layoutFlow(
  * feedback edge is a layout that will fall apart.
  */
 function assignRanks(
-  nodes: TopologyNode[],
+  nodes: LayoutNode[],
   edges: GraphEdge[],
 ): Map<string, number> {
   const indegree = new Map(nodes.map((n) => [n.id, 0]));
@@ -177,7 +187,7 @@ const MAX_RANK_WIDTH = 7;
 const MAX_DRIFT = 2;
 
 function balanceRanks(
-  nodes: TopologyNode[],
+  nodes: LayoutNode[],
   edges: GraphEdge[],
   rank: Map<string, number>,
 ) {
@@ -252,7 +262,7 @@ interface Chain {
 }
 
 function buildLayers(
-  nodes: TopologyNode[],
+  nodes: LayoutNode[],
   edges: GraphEdge[],
   rank: Map<string, number>,
 ) {
@@ -525,12 +535,12 @@ function placeHorizontally(layers: string[][], items: Map<string, Item>) {
 
 /* ── 5. emit ──────────────────────────────────────────────────────────────── */
 
-function emit(
-  byId: Map<string, TopologyNode>,
+function emit<T extends LayoutNode>(
+  byId: Map<string, T>,
   items: Map<string, Item>,
   layers: string[][],
   chains: Chain[],
-): FlowLayout {
+): FlowLayout<T> {
   const minX = Math.min(
     ...[...items.values()].map((item) => item.x - item.w / 2),
   );
@@ -542,7 +552,7 @@ function emit(
     return { x: item.x + shift, y: rankY(item.rank) };
   };
 
-  const boxes: FlowNodeBox[] = [];
+  const boxes: FlowNodeBox<T>[] = [];
   for (const item of items.values()) {
     if (!item.nodeId) continue;
     const node = byId.get(item.nodeId);
@@ -578,6 +588,8 @@ function emit(
       source: edge.source,
       target: edge.target,
       kind: edge.kind,
+      bidirectional: edge.bidirectional,
+      weight: edge.weight,
       layer: byId.get(edge.source)?.layer ?? "platform",
       points,
     }),

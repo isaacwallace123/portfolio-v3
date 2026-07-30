@@ -75,7 +75,7 @@ src/
   features/
     drill/                running a drill on a cluster
     topology/             the live architecture flowchart
-      model/              layout engine, inventory poll, viewport, layer palette
+      model/              layout engine, collapse model, inventory poll, viewport, palette
       ui/                 TopologyBoard + the chart, node, toolbar, inspector
       topology.module.css scoped styling — layer colours declared once
       index.ts            the slice's public surface
@@ -84,8 +84,15 @@ src/
 
 Each slice keeps its own `model/` (logic), `ui/` (presentation), scoped CSS, and an `index.ts` that
 is the only thing outside the slice may import. `features/topology` holds everything about reading
-the graph — ranking, crossing reduction, connector routing, pan and zoom — so `/topology` is a route
-shell and nothing more.
+the graph — ranking, crossing reduction, connector routing, collapsing, pan and zoom — so
+`/topology` is a route shell and nothing more.
+
+The topology page opens with one box per layer rather than all thirty-three components, because the
+full inventory cannot be drawn compactly. That was measured, not assumed: everything at once comes
+out 2050px wide with 83% of the connector ink running sideways, and dagre produces the same sprawl
+from the same graph — the limit is the shape of the system, not the layout engine. Collapsed it is
+782px across with eleven links and fits a panel at full size. `model/collapse.ts` rewrites the graph
+onto whichever boxes are currently open; the same layout engine runs either way.
 
 ```bash
 npm run dev -w apps/homelab
