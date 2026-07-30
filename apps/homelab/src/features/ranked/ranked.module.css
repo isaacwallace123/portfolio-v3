@@ -1287,3 +1287,674 @@
 :global(html[data-reduce-motion]) .ratingProgress i {
   transition: none;
 }
+
+/* Ranked launch: the arena does not exist competitively until all checks pass. */
+.launchPage {
+  position: relative;
+  min-height: calc(100vh - 72px);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 32px;
+  background-color: var(--base);
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--ink) 10%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 22px 22px;
+}
+.launchGlow {
+  position: absolute;
+  width: 620px;
+  height: 620px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--acid) 10%, transparent),
+    transparent 68%
+  );
+  filter: blur(10px);
+  pointer-events: none;
+}
+.launchCard {
+  position: relative;
+  width: min(680px, 100%);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--acid) 35%, var(--line));
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow:
+    0 32px 90px color-mix(in srgb, black 46%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--acid) 5%, transparent) inset;
+  backdrop-filter: blur(18px);
+}
+.launchHeader {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 16px;
+  padding: 24px;
+  border-bottom: 1px solid var(--line);
+}
+.launchMark {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--acid) 38%, var(--line));
+  border-radius: 13px;
+  color: var(--acid);
+  background: color-mix(in srgb, var(--acid) 9%, transparent);
+  box-shadow: 0 0 28px color-mix(in srgb, var(--acid) 10%, transparent);
+}
+.launchHeader p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 1px 0 8px;
+  color: var(--acid);
+  font:
+    700 9px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.launchHeader h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(22px, 4vw, 31px);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+}
+.launchHeader div > span {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink-dim);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.launchSteps {
+  display: grid;
+  padding: 10px 24px;
+}
+.launchSteps article {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 62px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  color: var(--ink-dim);
+}
+.launchSteps article:last-child {
+  border-bottom: 0;
+}
+.launchSteps article > i {
+  width: 31px;
+  height: 31px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink-dim);
+  background: var(--surface);
+}
+.launchSteps article > div {
+  display: grid;
+  gap: 4px;
+}
+.launchSteps article b {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.launchSteps article span {
+  font-size: 10px;
+}
+.launchSteps article[data-state="active"] > i {
+  color: var(--acid);
+  border-color: color-mix(in srgb, var(--acid) 42%, var(--line));
+  background: color-mix(in srgb, var(--acid) 8%, var(--surface));
+  box-shadow: 0 0 20px color-mix(in srgb, var(--acid) 8%, transparent);
+}
+.launchSteps article[data-state="active"] b {
+  color: var(--ink);
+}
+.launchSteps article[data-state="active"] > svg {
+  color: var(--acid);
+}
+.launchSteps article[data-state="done"] > i {
+  color: var(--mint);
+  border-color: color-mix(in srgb, var(--mint) 38%, var(--line));
+  background: color-mix(in srgb, var(--mint) 7%, var(--surface));
+}
+.launchSteps article[data-state="done"] b {
+  color: var(--ink);
+}
+.launchSteps article[data-state="done"] > svg {
+  color: var(--mint);
+  opacity: 0.45;
+}
+.launchTelemetry {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  margin: 0 24px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--line);
+  gap: 1px;
+}
+.launchTelemetry > div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 11px 12px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+.launchTelemetry span {
+  color: var(--ink-dim);
+  font:
+    700 8px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.launchTelemetry b,
+.launchTelemetry code {
+  overflow: hidden;
+  color: var(--ink);
+  font:
+    650 10px/1.3 ui-monospace,
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.launchFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 24px 22px;
+}
+.launchFooter p {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 10.5px;
+}
+.launchFooter .launchError {
+  color: var(--danger);
+}
+.launchFooter > div {
+  display: flex;
+  gap: 8px;
+}
+.launchFooter button {
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink-mid);
+  background: var(--surface);
+  font-size: 10px;
+  cursor: pointer;
+}
+.launchFooter .launchCancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+}
+.launchFooter button:hover {
+  color: var(--ink);
+  border-color: var(--line-2);
+}
+
+/* Ranked workspace: inset, floating tools over a full-canvas topology. */
+.arenaChrome {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+.matchClock {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 35px;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, var(--acid) 27%, var(--line));
+  border-radius: 11px;
+  color: var(--ink-mid);
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  box-shadow: 0 14px 36px color-mix(in srgb, black 25%, transparent);
+  backdrop-filter: blur(14px);
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+.matchClock svg {
+  color: var(--acid);
+}
+.matchClock span {
+  color: var(--ink);
+  font:
+    700 12px/1 ui-monospace,
+    monospace;
+  font-variant-numeric: tabular-nums;
+}
+.matchClock small {
+  color: var(--ink-dim);
+  font:
+    650 8px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.toolDock {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--line-2) 84%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  box-shadow:
+    0 22px 55px color-mix(in srgb, black 35%, transparent),
+    0 1px 0 color-mix(in srgb, white 3%, transparent) inset;
+  backdrop-filter: blur(16px);
+  transform: translateY(-50%);
+  pointer-events: auto;
+}
+.toolDock button {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--ink-dim);
+  background: transparent;
+  cursor: pointer;
+}
+.toolDock button:hover,
+.toolDock .toolActive {
+  color: var(--acid);
+  border-color: color-mix(in srgb, var(--acid) 26%, var(--line));
+  background: color-mix(in srgb, var(--acid) 8%, var(--surface));
+}
+.toolDock button::after {
+  content: attr(data-label);
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 10px);
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink-mid);
+  background: var(--panel);
+  box-shadow: 0 8px 24px color-mix(in srgb, black 30%, transparent);
+  font-size: 9px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(5px, -50%);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+  white-space: nowrap;
+}
+.toolDock button:hover::after,
+.toolDock button:focus-visible::after {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+.toolDock button > i {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 13px;
+  height: 13px;
+  display: grid;
+  place-items: center;
+  padding: 0 3px;
+  border-radius: 99px;
+  color: var(--on-accent);
+  background: var(--amber);
+  font:
+    800 7px/1 ui-monospace,
+    monospace;
+  font-style: normal;
+}
+.floatingPanel {
+  position: absolute;
+  top: 68px;
+  right: 72px;
+  bottom: 74px;
+  width: min(430px, calc(100% - 170px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--acid) 24%, var(--line));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel) 95%, transparent);
+  box-shadow:
+    0 30px 90px color-mix(in srgb, black 48%, transparent),
+    0 0 0 1px color-mix(in srgb, white 2%, transparent) inset;
+  backdrop-filter: blur(20px);
+  pointer-events: auto;
+  animation: ranked-panel-in 170ms ease-out;
+}
+@keyframes ranked-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(10px) scale(0.992);
+  }
+}
+.floatingPanelHeader {
+  min-height: 48px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px 0 15px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-2) 64%, transparent);
+}
+.floatingPanelHeader div {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.floatingPanelHeader span {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+}
+.floatingPanelHeader small {
+  overflow: hidden;
+  color: var(--ink-dim);
+  font:
+    650 8px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.floatingPanelHeader button {
+  width: 29px;
+  height: 29px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--ink-dim);
+  background: transparent;
+  cursor: pointer;
+}
+.floatingPanelHeader button:hover {
+  color: var(--ink);
+  border-color: var(--line);
+  background: var(--surface);
+}
+.missionPanel,
+.metricsPanel,
+.eventPanel,
+.changePanel {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  scrollbar-width: thin;
+}
+.missionPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.floatingPanel .console {
+  min-height: 0;
+  flex: 1;
+  border: 0;
+  border-radius: 0;
+}
+.metricsPanel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+.metricsSummary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--line);
+}
+.metricsSummary > div {
+  display: grid;
+  gap: 4px;
+  padding: 11px;
+  background: var(--surface);
+}
+.metricsSummary span {
+  color: var(--ink-dim);
+  font:
+    650 8px/1 ui-monospace,
+    monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.metricsSummary b {
+  color: var(--ink);
+  font:
+    700 11px/1.2 ui-monospace,
+    monospace;
+  font-variant-numeric: tabular-nums;
+}
+.serviceList {
+  display: grid;
+  gap: 6px;
+}
+.serviceList button {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink-dim);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+}
+.serviceList button:hover,
+.serviceList button[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--acid) 35%, var(--line));
+  background: color-mix(in srgb, var(--acid) 5%, var(--surface));
+}
+.serviceList button > i {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--acid);
+  background: color-mix(in srgb, var(--acid) 8%, transparent);
+}
+.serviceList button > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.serviceList b {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.serviceList small {
+  color: var(--ink-dim);
+  font-size: 8.5px;
+}
+.serviceList em {
+  color: var(--ink-mid);
+  font:
+    650 8.5px/1 ui-monospace,
+    monospace;
+  font-style: normal;
+  white-space: nowrap;
+}
+.eventPanel {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+}
+.eventPanel > p,
+.changePanel > p {
+  margin: 0;
+  padding: 18px;
+  border: 1px dashed var(--line-2);
+  border-radius: 11px;
+  color: var(--ink-dim);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.eventPanel article {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.eventPanel article > i {
+  width: 7px;
+  height: 7px;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: var(--mint);
+}
+.eventPanel article[data-warning="true"] > i {
+  background: var(--amber);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--amber) 45%, transparent);
+}
+.eventPanel article header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.eventPanel article b {
+  color: var(--ink);
+  font-size: 9.5px;
+}
+.eventPanel article span,
+.eventPanel article small {
+  color: var(--ink-dim);
+  font:
+    600 7.5px/1 ui-monospace,
+    monospace;
+  text-transform: uppercase;
+}
+.eventPanel article p {
+  margin: 5px 0 7px;
+  color: var(--ink-dim);
+  font-size: 9px;
+  line-height: 1.45;
+}
+.changePanel {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+}
+.changePanel article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+}
+.changePanel span,
+.changePanel small {
+  color: var(--ink-dim);
+  font:
+    650 8px/1 ui-monospace,
+    monospace;
+  text-transform: uppercase;
+}
+.changePanel code {
+  overflow: hidden;
+  color: var(--ink);
+  font:
+    600 9px/1.35 ui-monospace,
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .launchPage {
+    padding: 14px;
+  }
+  .launchHeader {
+    padding: 18px;
+  }
+  .launchSteps {
+    padding: 8px 18px;
+  }
+  .launchTelemetry {
+    grid-template-columns: 1fr;
+    margin: 0 18px;
+  }
+  .launchFooter {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 16px 18px 18px;
+  }
+  .toolDock {
+    top: auto;
+    right: 50%;
+    bottom: 12px;
+    flex-direction: row;
+    transform: translateX(50%);
+  }
+  .toolDock button::after {
+    display: none;
+  }
+  .floatingPanel {
+    top: 74px;
+    right: 12px;
+    bottom: 68px;
+    left: 12px;
+    width: auto;
+  }
+  .matchClock {
+    top: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floatingPanel {
+    animation: none;
+  }
+  .toolDock button::after {
+    transition: none;
+  }
+}

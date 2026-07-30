@@ -37,6 +37,27 @@ describe("the unified Ranked destination", () => {
     expect(workbench).toContain("<RankedHub");
   });
 
+  it("gates incident activation behind measured launch readiness", () => {
+    const workbench = read("widgets/cluster-workbench/ClusterWorkbench.tsx");
+    const hub = read("widgets/leaderboard/ui/RankedHub.tsx");
+    expect(workbench).toContain("rankedLaunchReadiness");
+    expect(workbench).toContain("<RankedLaunchScreen");
+    expect(workbench).toContain("launchReadiness.ready");
+    expect(workbench).toContain('startDrill(run.runId, "", "ranked")');
+    expect(hub).toContain("Start ranked");
+    expect(hub).not.toContain("startDrill(");
+  });
+
+  it("uses floating arena tools instead of a permanent ranked inspector", () => {
+    const arena = read("features/ranked/ui/RankedArena.tsx");
+    const workbench = read("widgets/cluster-workbench/ClusterWorkbench.tsx");
+    expect(arena).toContain("toolDock");
+    expect(arena).toContain("floatingPanel");
+    expect(arena).toContain('{ id: "console", label: "Console"');
+    expect(arena).toContain('{ id: "metrics", label: "Metrics"');
+    expect(workbench).toContain('surface !== "ranked" &&');
+  });
+
   it("defaults to one ELO ladder with a secondary time switch", () => {
     const hub = read("widgets/leaderboard/ui/RankedHub.tsx");
     expect(hub).toContain('useState<BoardMode>("elo")');

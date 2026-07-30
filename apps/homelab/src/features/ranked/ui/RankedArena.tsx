@@ -1,29 +1,36 @@
 "use client";
 
 import {
-  AlertTriangle,
+  Activity,
+  BellRing,
   Check,
   ChevronRight,
   CircleDot,
   Clock3,
+  Crosshair,
+  FileClock,
   Loader2,
   Search,
+  Server,
   Shield,
-  Square,
   Terminal,
+  X,
 } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import {
-  endDrill,
   rankedCommand,
   rankedInspect,
+  type ClusterEvent,
   type LiveRunView,
+  type LiveTrace,
+  type RunComponent,
 } from "@/shared/api/live-client";
 import { clock } from "@/shared/lib/format";
 import { COMMAND_HELP, parseConsoleCommand } from "../model/console";
 import styles from "../ranked.module.css";
 
 type Act = (key: string, fn: () => Promise<LiveRunView | void>) => void;
+type RankedTool = "mission" | "console" | "metrics" | "activity" | "changes";
 
 interface ConsoleEntry {
   id: number;
@@ -41,15 +48,34 @@ const QUICK_READS = [
   "trace latest",
 ] as const;
 
+const TOOLS = [
+  { id: "mission", label: "Mission", icon: Crosshair },
+  { id: "console", label: "Console", icon: Terminal },
+  { id: "metrics", label: "Metrics", icon: Activity },
+  { id: "activity", label: "Events", icon: BellRing },
+  { id: "changes", label: "Changes", icon: FileClock },
+] as const;
+
 export function RankedArena({
   run,
   busy,
   act,
+  components,
+  events,
+  trace,
+  selection,
+  onSelect,
 }: {
   run: LiveRunView;
   busy: string | null;
   act: Act;
+  components: RunComponent[];
+  events: ClusterEvent[];
+  trace: LiveTrace | null;
+  selection: string | null;
+  onSelect: (selection: string | null) => void;
 }) {
+  const [activeTool, setActiveTool] = useState<RankedTool | null>("mission");
   const [input, setInput] = useState("");
   const [entries, setEntries] = useState<ConsoleEntry[]>([
     {
@@ -57,13 +83,12 @@ export function RankedArena({
       tone: "system",
       lines: [
         "Connected to the isolated arena.",
-        "Investigate live evidence, then operate through the server allowlist. Type help for commands.",
+        "Investigate measured evidence, then operate through the audited allowlist. Type help for commands.",
       ],
     },
   ]);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  const [forfeit, setForfeit] = useState(false);
   const nextId = useRef(1);
   const transcript = useRef<HTMLDivElement>(null);
   const announcedStage = useRef(0);
@@ -89,6 +114,14 @@ export function RankedArena({
     const element = transcript.current;
     if (element) element.scrollTop = element.scrollHeight;
   }, [entries]);
+
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setActiveTool(null);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, []);
 
   const append = (
     command: string | undefined,
@@ -162,230 +195,364 @@ export function RankedArena({
       ? Math.min(1, run.drillHeldSeconds / run.drillHoldSeconds)
       : 0;
   const briefing = run.rankedBriefing;
+  const warningEvents = events.filter((event) => event.severity === "warning");
+  const selectedService = selection?.split(":")[0] ?? null;
+  const activeMeta = TOOLS.find((tool) => tool.id === activeTool);
 
   return (
-    <div className={styles.arena}>
-      <section className={styles.incident}>
-        <div className={styles.incidentTop}>
-          <span>
-            <Shield size={12} /> Rated incident
-          </span>
-          <b>
-            {clock(run.elapsedMs)} <small>elapsed</small>
-          </b>
-        </div>
-        <div className={styles.stageLine}>
-          <span>
-            Escalation {run.drillStage} / {run.drillStageCount}
-          </span>
-          <div>
-            {Array.from({ length: run.drillStageCount }, (_, index) => (
-              <i
-                key={index}
-                className={
-                  index + 1 < run.drillStage
-                    ? styles.stageDone
-                    : index + 1 === run.drillStage
-                      ? styles.stageLive
-                      : ""
-                }
-              />
-            ))}
-          </div>
-        </div>
-        <h2>{run.drillTitle}</h2>
-        <p>{run.drillStageObjective || run.drillObjective}</p>
-        {briefing && (
-          <>
-            <div className={styles.matchReceipt}>
-              <span>
-                Commitment <code>{briefing.seedCommitment.slice(0, 12)}</code>
-              </span>
-              <span>
-                Generator <b>v{briefing.generatorVersion}</b>
-              </span>
-              <span>
-                Cut for <b>{briefing.scenarioRating} ELO</b>
-              </span>
-              <span>
-                Hold <b>{briefing.verificationHoldSeconds}s</b>
-              </span>
-            </div>
-            <details className={styles.matchConstraints}>
-              <summary>Environment and match constraints</summary>
-              <p>{briefing.environment}</p>
-              <ul>
-                {briefing.constraints.map((constraint) => (
-                  <li key={constraint}>{constraint}</li>
-                ))}
-              </ul>
-            </details>
-          </>
-        )}
-      </section>
+    <div className={styles.arenaChrome}>
+      <div className={styles.matchClock} aria-label="Ranked match elapsed time">
+        <Clock3 size={13} />
+        <span>{clock(run.elapsedMs)}</span>
+        <small>match time</small>
+      </div>
 
-      <section className={styles.objectiveGrid}>
-        <header>
-          <span>
-            <CircleDot size={11} /> Measured objective
-          </span>
-          {allGoalsMet ? (
-            <b className={styles.verifying}>
-              <Loader2 size={11} className={styles.spin} /> verifying{" "}
-              {run.drillHeldSeconds}/{run.drillHoldSeconds}s
-            </b>
-          ) : (
-            <b>live</b>
-          )}
-        </header>
-        {run.drillGoals.map((goal) => (
-          <div key={goal.label} className={goal.met ? styles.goalMet : ""}>
-            {goal.met ? <Check size={12} /> : <Clock3 size={12} />}
-            <span>
-              <b>{goal.label}</b>
-              <small>
-                {goal.current} / {goal.target}
-              </small>
-            </span>
-          </div>
-        ))}
-        {allGoalsMet && (
-          <div className={styles.holdBar} aria-label="Verification progress">
-            <i style={{ width: `${holdProgress * 100}%` }} />
-          </div>
-        )}
-      </section>
-
-      <section className={styles.console}>
-        <header>
-          <span>
-            <Terminal size={12} /> Operator console
-          </span>
-          <em>allowlisted · audited</em>
-        </header>
-
-        <div className={styles.quickReads} aria-label="Investigation shortcuts">
-          {QUICK_READS.map((command) => (
-            <button
-              key={command}
-              type="button"
-              onClick={() => execute(command)}
-              disabled={busy !== null}
-            >
-              <Search size={10} /> {command.replace("inspect ", "")}
-            </button>
-          ))}
-        </div>
-
-        <div className={styles.transcript} ref={transcript} aria-live="polite">
-          {entries.map((entry) => (
-            <div
-              key={entry.id}
-              className={`${styles.consoleEntry} ${
-                entry.tone === "system"
-                  ? styles.consoleSystem
-                  : entry.tone === "accepted"
-                    ? styles.consoleAccepted
-                    : ""
-              }`}
-            >
-              {entry.command && (
-                <p>
-                  <ChevronRight size={11} /> {entry.command}
-                </p>
-              )}
-              {entry.lines.map((line, index) => (
-                <code key={`${entry.id}-${index}`}>{line}</code>
-              ))}
-            </div>
-          ))}
-        </div>
-
-        <form className={styles.commandLine} onSubmit={submit}>
-          <span>&gt;</span>
-          <input
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowUp") {
-                event.preventDefault();
-                const next = Math.min(
-                  commandHistory.length - 1,
-                  historyIndex + 1,
-                );
-                if (next >= 0) {
-                  setHistoryIndex(next);
-                  setInput(commandHistory[next] ?? "");
-                }
-              } else if (event.key === "ArrowDown") {
-                event.preventDefault();
-                const next = historyIndex - 1;
-                setHistoryIndex(next);
-                setInput(next >= 0 ? (commandHistory[next] ?? "") : "");
-              }
-            }}
-            placeholder="inspect metrics checkout"
-            autoComplete="off"
-            spellCheck={false}
-            aria-label="Ranked operator command"
-            disabled={busy !== null}
-          />
-          <button type="submit" disabled={busy !== null || !input.trim()}>
-            {busy?.startsWith("command:") || busy?.startsWith("inspect:") ? (
-              <Loader2 size={12} className={styles.spin} />
-            ) : (
-              "Run"
+      <nav className={styles.toolDock} aria-label="Ranked workspace tools">
+        {TOOLS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            data-label={label}
+            className={activeTool === id ? styles.toolActive : ""}
+            aria-label={label}
+            aria-pressed={activeTool === id}
+            onClick={() =>
+              setActiveTool((current) => (current === id ? null : id))
+            }
+          >
+            <Icon size={16} />
+            {id === "activity" && warningEvents.length > 0 && (
+              <i>{warningEvents.length}</i>
             )}
           </button>
-        </form>
-      </section>
+        ))}
+      </nav>
 
-      <section className={styles.actionLog}>
-        <header>
-          <span>Server action log</span>
-          <b>{run.rankedActions.length}</b>
-        </header>
-        {run.rankedActions.length === 0 ? (
-          <p>No cluster mutations accepted.</p>
-        ) : (
-          run.rankedActions
-            .slice()
-            .reverse()
-            .map((action) => (
-              <div key={action.id}>
-                <time>{clock(action.acceptedAtMs)}</time>
-                <code>{action.command}</code>
-              </div>
-            ))
-        )}
-      </section>
-
-      {forfeit ? (
-        <div className={styles.forfeitBox}>
-          <p>
-            <AlertTriangle size={12} /> This records a rated loss.
-          </p>
-          <div>
-            <button type="button" onClick={() => setForfeit(false)}>
-              Stay in match
-            </button>
+      {activeTool && activeMeta && (
+        <section
+          className={styles.floatingPanel}
+          data-tool={activeTool}
+          aria-label={`${activeMeta.label} panel`}
+        >
+          <header className={styles.floatingPanelHeader}>
+            <div>
+              <span>{activeMeta.label}</span>
+              <small>
+                {activeTool === "mission"
+                  ? `Escalation ${run.drillStage} of ${run.drillStageCount}`
+                  : activeTool === "console"
+                    ? "Allowlisted · audited"
+                    : activeTool === "metrics"
+                      ? "Measured cluster state"
+                      : activeTool === "activity"
+                        ? `${events.length} Kubernetes events`
+                        : `${run.rankedActions.length} accepted mutations`}
+              </small>
+            </div>
             <button
               type="button"
-              onClick={() => act("end", () => endDrill(run.runId))}
-              disabled={busy !== null}
+              onClick={() => setActiveTool(null)}
+              aria-label={`Close ${activeMeta.label}`}
             >
-              Confirm forfeit
+              <X size={15} />
             </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          type="button"
-          className={styles.forfeitButton}
-          onClick={() => setForfeit(true)}
-        >
-          <Square size={11} /> Forfeit match
-        </button>
+          </header>
+
+          {activeTool === "mission" && (
+            <div className={styles.missionPanel}>
+              <section className={styles.incident}>
+                <div className={styles.incidentTop}>
+                  <span>
+                    <Shield size={12} /> Rated incident
+                  </span>
+                  <b>live</b>
+                </div>
+                <div className={styles.stageLine}>
+                  <span>
+                    Escalation {run.drillStage} / {run.drillStageCount}
+                  </span>
+                  <div>
+                    {Array.from({ length: run.drillStageCount }, (_, index) => (
+                      <i
+                        key={index}
+                        className={
+                          index + 1 < run.drillStage
+                            ? styles.stageDone
+                            : index + 1 === run.drillStage
+                              ? styles.stageLive
+                              : ""
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+                <h2>{run.drillTitle}</h2>
+                <p>{run.drillStageObjective || run.drillObjective}</p>
+                {briefing && (
+                  <>
+                    <div className={styles.matchReceipt}>
+                      <span>
+                        Commitment{" "}
+                        <code>{briefing.seedCommitment.slice(0, 12)}</code>
+                      </span>
+                      <span>
+                        Generator <b>v{briefing.generatorVersion}</b>
+                      </span>
+                      <span>
+                        Cut for <b>{briefing.scenarioRating} ELO</b>
+                      </span>
+                      <span>
+                        Hold <b>{briefing.verificationHoldSeconds}s</b>
+                      </span>
+                    </div>
+                    <details className={styles.matchConstraints}>
+                      <summary>Environment and match constraints</summary>
+                      <p>{briefing.environment}</p>
+                      <ul>
+                        {briefing.constraints.map((constraint) => (
+                          <li key={constraint}>{constraint}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  </>
+                )}
+              </section>
+
+              <section className={styles.objectiveGrid}>
+                <header>
+                  <span>
+                    <CircleDot size={11} /> Measured objective
+                  </span>
+                  {allGoalsMet ? (
+                    <b className={styles.verifying}>
+                      <Loader2 size={11} className={styles.spin} /> verifying{" "}
+                      {run.drillHeldSeconds}/{run.drillHoldSeconds}s
+                    </b>
+                  ) : (
+                    <b>live</b>
+                  )}
+                </header>
+                {run.drillGoals.map((goal) => (
+                  <div
+                    key={goal.label}
+                    className={goal.met ? styles.goalMet : ""}
+                  >
+                    {goal.met ? <Check size={12} /> : <Clock3 size={12} />}
+                    <span>
+                      <b>{goal.label}</b>
+                      <small>
+                        {goal.current} / {goal.target}
+                      </small>
+                    </span>
+                  </div>
+                ))}
+                {allGoalsMet && (
+                  <div
+                    className={styles.holdBar}
+                    aria-label="Verification progress"
+                  >
+                    <i style={{ width: `${holdProgress * 100}%` }} />
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+
+          {activeTool === "console" && (
+            <section className={styles.console}>
+              <div
+                className={styles.quickReads}
+                aria-label="Investigation shortcuts"
+              >
+                {QUICK_READS.map((command) => (
+                  <button
+                    key={command}
+                    type="button"
+                    onClick={() => execute(command)}
+                    disabled={busy !== null}
+                  >
+                    <Search size={10} /> {command.replace("inspect ", "")}
+                  </button>
+                ))}
+              </div>
+
+              <div
+                className={styles.transcript}
+                ref={transcript}
+                aria-live="polite"
+              >
+                {entries.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className={`${styles.consoleEntry} ${
+                      entry.tone === "system"
+                        ? styles.consoleSystem
+                        : entry.tone === "accepted"
+                          ? styles.consoleAccepted
+                          : ""
+                    }`}
+                  >
+                    {entry.command && (
+                      <p>
+                        <ChevronRight size={11} /> {entry.command}
+                      </p>
+                    )}
+                    {entry.lines.map((line, index) => (
+                      <code key={`${entry.id}-${index}`}>{line}</code>
+                    ))}
+                  </div>
+                ))}
+              </div>
+
+              <form className={styles.commandLine} onSubmit={submit}>
+                <span>&gt;</span>
+                <input
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      const next = Math.min(
+                        commandHistory.length - 1,
+                        historyIndex + 1,
+                      );
+                      if (next >= 0) {
+                        setHistoryIndex(next);
+                        setInput(commandHistory[next] ?? "");
+                      }
+                    } else if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      const next = historyIndex - 1;
+                      setHistoryIndex(next);
+                      setInput(next >= 0 ? (commandHistory[next] ?? "") : "");
+                    }
+                  }}
+                  placeholder="inspect metrics checkout"
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-label="Ranked operator command"
+                  disabled={busy !== null}
+                />
+                <button type="submit" disabled={busy !== null || !input.trim()}>
+                  {busy?.startsWith("command:") ||
+                  busy?.startsWith("inspect:") ? (
+                    <Loader2 size={12} className={styles.spin} />
+                  ) : (
+                    "Run"
+                  )}
+                </button>
+              </form>
+            </section>
+          )}
+
+          {activeTool === "metrics" && (
+            <div className={styles.metricsPanel}>
+              <div className={styles.metricsSummary}>
+                <div>
+                  <span>Served / offered</span>
+                  <b>
+                    {run.telemetry.requestsPerSec} / {run.offeredRequestsPerSec}
+                    /s
+                  </b>
+                </div>
+                <div>
+                  <span>p95 latency</span>
+                  <b>{run.telemetry.p95LatencyMs}ms</b>
+                </div>
+                <div>
+                  <span>Error rate</span>
+                  <b>{run.telemetry.errorRatePct.toFixed(2)}%</b>
+                </div>
+                <div>
+                  <span>Latest trace</span>
+                  <b>{trace ? `${trace.durationMs}ms` : "Awaiting sample"}</b>
+                </div>
+              </div>
+              <div className={styles.serviceList}>
+                {components
+                  .filter((component) => component.desired > 0)
+                  .map((component) => (
+                    <button
+                      key={component.name}
+                      type="button"
+                      data-selected={selectedService === component.name}
+                      onClick={() =>
+                        onSelect(
+                          selectedService === component.name
+                            ? null
+                            : component.name,
+                        )
+                      }
+                    >
+                      <i>
+                        <Server size={13} />
+                      </i>
+                      <span>
+                        <b>{component.name}</b>
+                        <small>
+                          {component.ready}/{component.desired} replicas ready
+                        </small>
+                      </span>
+                      <em>
+                        {component.cpuMillicores}m · {component.memoryMiB}Mi
+                      </em>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {activeTool === "activity" && (
+            <div className={styles.eventPanel}>
+              {events.length === 0 ? (
+                <p>No Kubernetes events have been observed yet.</p>
+              ) : (
+                events
+                  .slice()
+                  .reverse()
+                  .slice(0, 30)
+                  .map((event) => (
+                    <article
+                      key={event.id}
+                      data-warning={event.severity === "warning"}
+                    >
+                      <i />
+                      <div>
+                        <header>
+                          <b>{event.reason}</b>
+                          <span>{event.objectKind}</span>
+                        </header>
+                        <p>{event.message}</p>
+                        <small>{event.source}</small>
+                      </div>
+                    </article>
+                  ))
+              )}
+            </div>
+          )}
+
+          {activeTool === "changes" && (
+            <div className={styles.changePanel}>
+              {run.rankedActions.length === 0 ? (
+                <p>
+                  No cluster mutations accepted. Your investigation reads do not
+                  alter the environment.
+                </p>
+              ) : (
+                run.rankedActions
+                  .slice()
+                  .reverse()
+                  .map((action) => (
+                    <article key={action.id}>
+                      <span>{clock(action.acceptedAtMs)}</span>
+                      <code>{action.command}</code>
+                      <small>stage {action.stage}</small>
+                    </article>
+                  ))
+              )}
+            </div>
+          )}
+        </section>
       )}
     </div>
   );
