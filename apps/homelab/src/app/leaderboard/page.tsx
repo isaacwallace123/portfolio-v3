@@ -4,7 +4,7 @@ import { Leaderboard } from "@/widgets/leaderboard";
 export const metadata: Metadata = {
   title: "Leaderboard",
   description:
-    "Ranked standings across the multi-stage incident drills: how many different cascades each operator has resolved, and how fast they resolved them.",
+    "Seasonless DevOps ELO standings and verified speed records from live multi-stage incident scenarios.",
   alternates: { canonical: "/leaderboard" },
 };
 

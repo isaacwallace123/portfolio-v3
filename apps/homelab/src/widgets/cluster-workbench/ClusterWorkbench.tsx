@@ -1,9 +1,26 @@
 "use client";
 
-import { useState } from "react";
-import { Gauge, Layers, Loader2, SlidersHorizontal } from "lucide-react";
-import { liveDecision } from "@/shared/api/live-client";
-import { DrillPanel, useDrillState } from "@/features/drill";
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowRight,
+  Gauge,
+  Layers,
+  Loader2,
+  Radio,
+  SlidersHorizontal,
+} from "lucide-react";
+import {
+  liveDecision,
+  startDrill,
+  type LiveRunView,
+} from "@/shared/api/live-client";
+import {
+  DrillPanel,
+  PracticeDrillPanel,
+  useCoaching,
+  useDrillState,
+} from "@/features/drill";
+import { RankedEntry, RankedResult } from "@/features/ranked";
 import { SCALABLE, type ServiceId } from "./model/topology";
 import { useClusterEdges } from "./model/useClusterEdges";
 import { useClusterRun } from "./model/useClusterRun";
@@ -18,6 +35,21 @@ import { RenewalModal } from "./ui/RenewalModal";
 import styles from "./workbench.module.css";
 
 type Tab = "drills" | "controls" | "activity";
+export type WorkbenchSurface = "practice" | "ranked";
+export interface PracticeAssignment {
+  drillId: string;
+  learningUnitId: string;
+  title: string;
+  description: string;
+  label: string;
+  /** Instructional presentation over the same practice scenario. Never the ranked mode. */
+  presentation?: "guided" | "assisted" | "assessment";
+  /** What the course says this drill assesses. Shown in the briefing. */
+  skills?: string[];
+  /** Where "back to the course" goes, and what the debrief recommends next. */
+  returnHref?: string;
+  nextUp?: { label: string; href: string; why: string };
+}
 
 const TABS: { id: Tab; icon: typeof Gauge; label: string }[] = [
   { id: "drills", icon: Gauge, label: "Drills" },
@@ -33,7 +65,16 @@ const RENEWAL_WINDOW_MS = 60_000;
  * controls and activity. Everything about fetching and mutating the cluster lives in
  * `useClusterRun`; everything about drawing it lives in `ui/`. This file is the wiring between them.
  */
-export default function ClusterWorkbench() {
+export default function ClusterWorkbench({
+  surface = "practice",
+  assignment,
+  onAssignmentResolved,
+}: {
+  surface?: WorkbenchSurface;
+  /** A course-owned launch target. It contains no Academy types, only a practice drill binding. */
+  assignment?: PracticeAssignment;
+  onAssignmentResolved?: (run: LiveRunView) => void;
+}) {
   const {
     status,
     platform,
@@ -65,6 +106,20 @@ export default function ClusterWorkbench() {
   // cluster graph needs the impact of a decision too — showing damage only in a side panel is what
   // made a wrong answer easy to click past.
   const drill = useDrillState(run, act, liveDecision);
+  // The Academy's teaching flow over the same drill state. Always constructed (hooks cannot be
+  // conditional) and only rendered for a course assignment, so the ranked and sandbox paths behave
+  // exactly as they did — this derives from the run, it does not mutate it.
+  const coaching = useCoaching(run, components, drill);
+  const notifiedSolve = useRef<string | null>(null);
+  const solvedKey =
+    run?.drillSolved && assignment && run.drillId === assignment.drillId
+      ? `${run.runId}:${run.drillId}:${run.elapsedMs}`
+      : null;
+  useEffect(() => {
+    if (!solvedKey || notifiedSolve.current === solvedKey || !run) return;
+    notifiedSolve.current = solvedKey;
+    onAssignmentResolved?.(run);
+  }, [onAssignmentResolved, run, solvedKey]);
 
   // Which cards exist, as a value rather than as an array identity. The poll hands back a fresh
   // components array every 1.2s even when nothing changed, and passing that in re-ran the layout
@@ -88,7 +143,7 @@ export default function ClusterWorkbench() {
   // ── first paint: still resolving the session ──────────────────────────────
   if (status === null) {
     return (
-      <div className={styles.shell}>
+      <div className={styles.shell} data-surface={surface}>
         <div className={styles.booting}>
           <Loader2 size={18} className={styles.spin} />
           <span>Looking for your cluster…</span>
@@ -105,6 +160,7 @@ export default function ClusterWorkbench() {
         busy={busy}
         error={error}
         expired={expired}
+        surface={surface}
         onProvision={provision}
       />
     );
@@ -114,6 +170,9 @@ export default function ClusterWorkbench() {
   const provisioning = run.status === "provisioning";
   // Controls and Activity shrink to icons while a drill is live, so the drill gets the column.
   const drillRunning = run.drillId.length > 0;
+  const activeSurface =
+    run.drillMode === "ranked" ? ("ranked" as const) : ("practice" as const);
+  const surfaceMismatch = drillRunning && activeSurface !== surface;
   const flowing = run.loadEnabled && run.telemetry.requestsPerSec > 0;
 
   // What the operator has asked for. Known the instant a control is used, whereas the Deployment's
@@ -167,7 +226,7 @@ export default function ClusterWorkbench() {
     renewalDeclinedFor !== run.runId;
 
   return (
-    <div className={styles.shell}>
+    <div className={styles.shell} data-surface={surface}>
       {/* Confetti is for a clean resolution. Firing it after a misstep congratulates the misstep. */}
       {run.drillSolved && run.drillWrongChosen === 0 && <Celebration />}
 
@@ -187,6 +246,7 @@ export default function ClusterWorkbench() {
         <div className={styles.canvas} ref={canvasRef}>
           <ClusterHud
             run={run}
+            surface={surface}
             components={components}
             trace={trace}
             drillTitle={run.drillId ? run.drillTitle : null}
@@ -227,37 +287,138 @@ export default function ClusterWorkbench() {
             />
           ) : (
             <div className={styles.panel}>
-              {/* While a drill is running it owns this column. A drill is the primary activity, not
-                  one of three equal tabs — sharing billing with a slider panel is part of why the
-                  objective, the handoff and the misstep report all fought for the same space. */}
-              <div className={styles.tabs}>
-                {TABS.map(({ id, icon: Icon, label }) => (
-                  <button
-                    key={id}
-                    className={tab === id ? styles.tabOn : ""}
-                    onClick={() => setTab(id)}
-                    title={label}
+              {surfaceMismatch ? (
+                <div className={styles.modeNotice}>
+                  <b>
+                    {activeSurface === "ranked"
+                      ? "Ranked attempt in progress"
+                      : "Practice drill in progress"}
+                  </b>
+                  <p>
+                    This live cluster already has a{" "}
+                    {activeSurface === "ranked" ? "competitive" : "training"}{" "}
+                    incident running. Continue it on the surface that owns its
+                    rules and results.
+                  </p>
+                  <a
+                    href={activeSurface === "ranked" ? "/ranked" : "/practice"}
                   >
-                    <Icon size={13} />
-                    {drillRunning && id !== "drills" ? "" : label}
-                  </button>
-                ))}
-              </div>
+                    Continue {activeSurface} <ArrowRight size={12} />
+                  </a>
+                </div>
+              ) : surface === "ranked" ? (
+                drill.phase.kind === "browsing" ? (
+                  <RankedEntry
+                    run={run}
+                    busy={busy}
+                    provisioning={provisioning}
+                    act={act}
+                  />
+                ) : drill.phase.kind === "solved" ||
+                  drill.phase.kind === "failed" ? (
+                  <RankedResult run={run} busy={busy} act={act} />
+                ) : (
+                  <DrillPanel
+                    run={run}
+                    busy={busy}
+                    provisioning={provisioning}
+                    act={act}
+                    state={drill}
+                  />
+                )
+              ) : (
+                <>
+                  {/* While a drill is running it owns this column. A drill is the primary activity,
+                      not one of three equal tabs. */}
+                  <div className={styles.tabs}>
+                    {TABS.map(({ id, icon: Icon, label }) => (
+                      <button
+                        key={id}
+                        className={tab === id ? styles.tabOn : ""}
+                        onClick={() => setTab(id)}
+                        title={label}
+                      >
+                        <Icon size={13} />
+                        {drillRunning && id !== "drills" ? "" : label}
+                      </button>
+                    ))}
+                  </div>
 
-              {tab === "drills" && (
-                <DrillPanel
-                  run={run}
-                  busy={busy}
-                  provisioning={provisioning}
-                  act={act}
-                  state={drill}
-                />
-              )}
-              {tab === "controls" && (
-                <ControlsPanel run={run} busy={busy} act={act} />
-              )}
-              {tab === "activity" && (
-                <ActivityPanel events={events} provisioning={provisioning} />
+                  {tab === "drills" && (
+                    <>
+                      {assignment && drill.phase.kind === "browsing" ? (
+                        <div className={styles.assignment}>
+                          <span>{assignment.label}</span>
+                          <h2>{assignment.title}</h2>
+                          <p>{assignment.description}</p>
+                          <div className={styles.assignmentFacts}>
+                            <span>Real disposable cluster</span>
+                            <span>Measured objective</span>
+                            <span>Unlimited retries</span>
+                          </div>
+                          <button
+                            type="button"
+                            className={styles.primary}
+                            disabled={busy !== null || provisioning}
+                            onClick={() =>
+                              act("start", () =>
+                                startDrill(
+                                  run.runId,
+                                  assignment.drillId,
+                                  "practice",
+                                  assignment.learningUnitId,
+                                ),
+                              )
+                            }
+                          >
+                            {busy === "start" ? (
+                              <Loader2 size={14} className={styles.spin} />
+                            ) : (
+                              <Radio size={14} />
+                            )}
+                            Launch capstone
+                          </button>
+                        </div>
+                      ) : assignment ? (
+                        /* A course assignment gets the Academy's teaching flow: brief, read the
+                           evidence, name the fault, act, read what it measured, verify, debrief.
+                           Same cluster, same allowlisted actions, same server-side judging. */
+                        <PracticeDrillPanel
+                          run={run}
+                          busy={busy}
+                          act={act}
+                          state={drill}
+                          coaching={coaching}
+                          presentation={assignment.presentation ?? "guided"}
+                          skills={assignment.skills ?? []}
+                          title={assignment.title}
+                          nextUp={assignment.nextUp ?? null}
+                          onBackToCourse={() => {
+                            window.location.href =
+                              assignment.returnHref ?? "/practice";
+                          }}
+                        />
+                      ) : (
+                        <DrillPanel
+                          run={run}
+                          busy={busy}
+                          provisioning={provisioning}
+                          act={act}
+                          state={drill}
+                        />
+                      )}
+                    </>
+                  )}
+                  {tab === "controls" && (
+                    <ControlsPanel run={run} busy={busy} act={act} />
+                  )}
+                  {tab === "activity" && (
+                    <ActivityPanel
+                      events={events}
+                      provisioning={provisioning}
+                    />
+                  )}
+                </>
               )}
             </div>
           )}

@@ -83,8 +83,8 @@ check: ## typecheck + build every web app, build the .NET services
 
 ci: lint format-check test check security k8s-validate ## run the complete local CI suite
 
-test: ## API integration tests (xunit) + cyberlab unit tests (vitest)
-	dotnet test tests/Auth.Tests/Auth.Tests.csproj
+test: ## .NET integration/unit tests (xunit) + cyberlab unit tests (vitest)
+	dotnet test IsaacWallace.sln
 	cd apps/cyberlab && npm run test
 	cd packages/lab-runtime && npm run test
 

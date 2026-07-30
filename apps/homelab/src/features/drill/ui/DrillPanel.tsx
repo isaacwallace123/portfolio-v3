@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { AlertTriangle, Check, Loader2, Square } from "lucide-react";
 import { endDrill, type LiveRunView } from "@/shared/api/live-client";
 import type { DrillState } from "../model/phase";
@@ -58,6 +59,8 @@ export function DrillPanel({
   const { drills, loading } = useDrillCatalog(run.drillSolved);
   const stat = drills.find((d) => d.id === run.drillId);
   const ranked = run.drillMode === "ranked";
+  const [forfeitFor, setForfeitFor] = useState<string | null>(null);
+  const confirmingForfeit = ranked && forfeitFor === run.drillId;
 
   switch (phase.kind) {
     case "browsing":
@@ -149,18 +152,51 @@ export function DrillPanel({
 
           <Ledger state={state} />
 
-          <button
-            className={styles.ghost}
-            onClick={() => act("end", () => endDrill(run.runId))}
-            disabled={busy !== null}
-          >
-            {busy === "end" ? (
-              <Loader2 size={12} className={styles.spin} />
-            ) : (
+          {confirmingForfeit ? (
+            <div className={styles.forfeitConfirm}>
+              <p>
+                <AlertTriangle size={12} />
+                Leaving now records a loss and lowers your rating.
+              </p>
+              <div>
+                <button
+                  className={styles.ghost}
+                  onClick={() => setForfeitFor(null)}
+                  disabled={busy !== null}
+                >
+                  Stay in match
+                </button>
+                <button
+                  className={styles.forfeit}
+                  onClick={() => {
+                    setForfeitFor(null);
+                    act("end", () => endDrill(run.runId));
+                  }}
+                  disabled={busy !== null}
+                >
+                  {busy === "end" ? (
+                    <Loader2 size={12} className={styles.spin} />
+                  ) : (
+                    <Square size={12} />
+                  )}
+                  Confirm forfeit
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              className={styles.ghost}
+              onClick={() =>
+                ranked
+                  ? setForfeitFor(run.drillId)
+                  : act("end", () => endDrill(run.runId))
+              }
+              disabled={busy !== null}
+            >
               <Square size={12} />
-            )}
-            End drill, keep cluster
-          </button>
+              {ranked ? "Forfeit match" : "End drill, keep cluster"}
+            </button>
+          )}
         </div>
       );
   }

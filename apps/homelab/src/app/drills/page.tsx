@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
-// Drills and the practice cluster are one surface now: a drill runs ON the cluster you provision.
-// The route is kept because it was linked, but it is not a page — so it stays out of the index
-// rather than competing with /practice for the same content.
+// Legacy entry point. Training drills live in Practice; competitive incidents live in /ranked.
 export const metadata: Metadata = {
   title: "Drills",
   description: "Incident drills run on the practice cluster.",

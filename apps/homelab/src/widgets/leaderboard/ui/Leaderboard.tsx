@@ -5,11 +5,12 @@ import { useLeaderboard } from "../model/useLeaderboard";
 import { BoardSkeleton } from "./BoardSkeleton";
 import { BoardTable } from "./BoardTable";
 import { Podium } from "./Podium";
+import { RatingBoard } from "./RatingBoard";
 import { SectionHead } from "./SectionHead";
 import styles from "../leaderboard.module.css";
 
 export function Leaderboard() {
-  const { board, error, loading } = useLeaderboard();
+  const { board, standings, error, loading } = useLeaderboard();
 
   return (
     <main className={styles.page}>
@@ -21,11 +22,10 @@ export function Leaderboard() {
           Best homelab <em>operator</em>
         </h1>
         <p className={styles.lede}>
-          Ranked runs draw a multi-stage cascade at random and time it from the
-          first signal to the last recovery. Standings use each operator&apos;s
-          best run of a drill, so practising one can only improve a place —
-          never dilute it. Overall rank goes to breadth first: how many
-          different cascades you have resolved, then how fast on average.
+          The seasonless ladder measures consistent incident resolution. Every
+          server-drawn cascade moves ELO; successful recoveries also keep an
+          independent official time, so reliability and speed stay visible
+          without becoming the same score.
         </p>
       </div>
 
@@ -36,20 +36,24 @@ export function Leaderboard() {
       </p>
       {loading && <BoardSkeleton />}
 
-      {board && (
+      {board && standings && (
         <>
           <SectionHead
-            title="Overall standings"
-            note="Ranked by cascades resolved, then by average time across them."
+            title="Operator ladder"
+            note="Seasonless ELO across every completed, failed, forfeited, or expired match."
+          />
+          <RatingBoard entries={standings} />
+
+          <SectionHead
+            title="Speed records"
+            note="Successful recoveries only. Time never changes ELO."
           />
           <Podium entries={board.overall} />
 
-          {/* The podium already carries the top three; a full table only earns its space once the
-              standings run deeper than it. */}
           {board.overall.length > PODIUM_PLACES.length && (
             <BoardTable
-              title="Full standings"
-              note="Every ranked operator, in order."
+              title="Overall speed"
+              note="Breadth of cascades resolved, then average official time."
               entries={board.overall}
               overall
             />
@@ -57,7 +61,7 @@ export function Leaderboard() {
 
           <SectionHead
             title="Cascade records"
-            note="The fastest ranked resolution held for each drill."
+            note="Fastest verified resolution for each live scenario."
           />
           <div className={styles.grid}>
             {board.byDrill.map((drill, i) => (

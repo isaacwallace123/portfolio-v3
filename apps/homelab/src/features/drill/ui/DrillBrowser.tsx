@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, Layers, Loader2, Trophy, Zap } from "lucide-react";
+import { ChevronRight, Layers, Loader2, Zap } from "lucide-react";
 import {
   startDrill,
   type DrillCatalogEntry,
@@ -63,7 +63,7 @@ function DrillRow({
   );
 }
 
-/** No drill running: pick one to layer over the cluster that is already up, or draw a ranked one. */
+/** No drill running: pick one to layer over the practice cluster that is already up. */
 export function DrillBrowser({
   run,
   busy,
@@ -90,28 +90,6 @@ export function DrillBrowser({
         operator decisions. Nothing is reprovisioned — the workload stays up,
         and every time you record counts towards the drill&apos;s average.
       </p>
-
-      {/* Ranked is the drawn run: you do not get to pick the cascade you are timed on. */}
-      <button
-        className={styles.rankedCard}
-        onClick={() => act("ranked", () => startDrill(run.runId, "", "ranked"))}
-        disabled={locked || cascades.length === 0}
-      >
-        <span className={styles.rankedIcon}>
-          {busy === "ranked" ? (
-            <Loader2 size={18} className={styles.spin} />
-          ) : (
-            <Trophy size={18} />
-          )}
-        </span>
-        <span>
-          <b>Start a ranked run</b>
-          <small>
-            One multi-stage cascade, drawn at random and timed. One wrong move
-            ends the attempt — your time only counts if you get it clean.
-          </small>
-        </span>
-      </button>
 
       {loading && (
         <p className={styles.hint}>

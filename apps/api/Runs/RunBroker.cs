@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json.Serialization;
 using IsaacWallace.Api.Data;
+using IsaacWallace.Api.Learning;
+using IsaacWallace.Api.Ranked;
 using k8s;
 using k8s.Autorest;
 using Microsoft.Extensions.Options;
@@ -20,6 +22,8 @@ public sealed class RunBroker
     private readonly TraceScraper _traces;
     private readonly PlatformInventory _inventory;
     private readonly DrillResultStore _results;
+    private readonly RankedStore _ranked;
+    private readonly LearningProgressStore _learning;
     private readonly ILogger<RunBroker> _log;
 
     public RunBroker(
@@ -29,6 +33,8 @@ public sealed class RunBroker
         TraceScraper traces,
         PlatformInventory inventory,
         DrillResultStore results,
+        RankedStore ranked,
+        LearningProgressStore learning,
         ILogger<RunBroker> log)
     {
         _k8s = k8s;
@@ -37,6 +43,8 @@ public sealed class RunBroker
         _traces = traces;
         _inventory = inventory;
         _results = results;
+        _ranked = ranked;
+        _learning = learning;
         _log = log;
     }
 
@@ -132,7 +140,12 @@ public sealed class RunBroker
             : null;
     }
 
-    public async Task<BrokerResult> SubmitDecisionAsync(string runId, string decisionId, string owner, CancellationToken ct)
+    public async Task<BrokerResult> SubmitDecisionAsync(
+        string runId,
+        string decisionId,
+        string owner,
+        string displayName,
+        CancellationToken ct)
     {
         var resource = await GetOwnedResourceAsync(runId, owner, ct);
         if (resource is null)
@@ -174,14 +187,15 @@ public sealed class RunBroker
         // damage, and being able to watch what a wrong call does to a live workload is the entire
         // teaching value — but the attempt stops counting from here. Practice drills are unaffected:
         // that is where you are meant to be wrong.
+        var decisionAt = DateTime.UtcNow;
         var annotations = new Dictionary<string, string>
         {
-            [annotationKey] = DateTime.UtcNow.ToString("O"),
+            [annotationKey] = decisionAt.ToString("O"),
         };
         var ranked = resource.Metadata.Annotations?.GetValueOrDefault(DrillModeAnnotation) == "ranked";
         if (ranked && !decision.IsCorrect)
         {
-            annotations[DrillFailedAnnotation] = DateTime.UtcNow.ToString("O");
+            annotations[DrillFailedAnnotation] = decisionAt.ToString("O");
             annotations[DrillFailedMoveAnnotation] = decision.Id;
         }
 
@@ -195,8 +209,16 @@ public sealed class RunBroker
         {
             var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
                 patch, LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
+            var updatedResource = Parse(updated);
             await WriteThroughReplicasAsync(runId, decision.SpecPatch, ct);
-            return BrokerResult.Accepted(RunView.From(Parse(updated)));
+            if (ranked && !decision.IsCorrect)
+                await TryFinalizeRankedAsync(
+                    updatedResource,
+                    RunView.From(updatedResource),
+                    RankedOutcomes.Failed,
+                    displayName,
+                    ct);
+            return BrokerResult.Accepted(RunView.From(updatedResource));
         }
         catch (HttpOperationException ex)
         {
@@ -212,11 +234,20 @@ public sealed class RunBroker
     // In ranked mode the drill is drawn rather than chosen, from the multi-stage pool only. Picking
     // your own drill and having the time count would rank familiarity; drawing one ranks operators.
     public async Task<BrokerResult> StartDrillAsync(
-        string runId, string drillId, string mode, string owner, CancellationToken ct)
+        string runId,
+        string drillId,
+        string mode,
+        string learningUnitId,
+        string owner,
+        string displayName,
+        CancellationToken ct)
     {
         var resource = await GetOwnedResourceAsync(runId, owner, ct);
         if (resource is null)
             return BrokerResult.Fail(404, "No such run.");
+        var current = RunView.From(resource);
+        if (current.DrillId.Length > 0)
+            return BrokerResult.Fail(409, "End the current incident before starting another.");
 
         var ranked = string.Equals(mode, "ranked", StringComparison.OrdinalIgnoreCase);
         if (ranked && drillId.Length == 0)
@@ -225,7 +256,8 @@ public sealed class RunBroker
                 // Never redraw the drill this cluster just ran: the point of a draw is that you do
                 // not know what is coming, and back-to-back repeats are the one outcome that
                 // reliably ruins that.
-                .Where(d => d.Id != (resource.Spec.DrillId ?? ""))
+                .Where(d => d.Id != resource.Metadata.Annotations?
+                    .GetValueOrDefault(LastRankedDrillAnnotation))
                 .ToArray();
             if (pool.Length == 0) return BrokerResult.Fail(409, "No ranked drills are available.");
             drillId = pool[RandomNumberGenerator.GetInt32(pool.Length)].Id;
@@ -237,9 +269,61 @@ public sealed class RunBroker
         if (ranked && !drill.IsRanked)
             return BrokerResult.Fail(409, "Only multi-stage drills can be run ranked.");
 
+        CourseManifest? learningCourse = null;
+        if (!string.IsNullOrWhiteSpace(learningUnitId))
+        {
+            if (ranked)
+                return BrokerResult.Fail(409, "Academy progress cannot be attached to ranked play.");
+
+            learningCourse = CourseManifests.All.Values.FirstOrDefault(
+                course => course.Contains(learningUnitId));
+            var unitDrillId = learningUnitId.StartsWith("assessment:", StringComparison.Ordinal)
+                ? learningUnitId["assessment:".Length..]
+                : learningUnitId.StartsWith("drill:", StringComparison.Ordinal)
+                    ? learningUnitId.Split(':').Last()
+                    : "";
+            if (learningCourse is null || !string.Equals(unitDrillId, drillId, StringComparison.Ordinal))
+                return BrokerResult.Fail(409, "That Academy unit does not match this drill.");
+        }
+
         // Clear the previous drill's state so its decisions unlock again and, crucially, so its
         // completion does not carry over — a recorded solve is a fact about one drill, not the run.
-        var now = DateTime.UtcNow.ToString("O");
+        var startedAt = DateTime.UtcNow;
+        RankedAttemptView? rankedAttempt = null;
+        if (ranked)
+        {
+            try
+            {
+                // A previous start can fail after its DB row is opened but before Kubernetes
+                // accepts the annotation. If this cluster has no drill, that active row cannot
+                // represent a playable match; seal it as void before opening the replacement.
+                var orphan = await _ranked.ActiveForOwnerAsync(owner, ct);
+                if (orphan is not null)
+                    await _ranked.FinalizeAsync(
+                        orphan.Id,
+                        owner,
+                        RankedOutcomes.Void,
+                        0,
+                        0,
+                        "",
+                        displayName,
+                        ct);
+
+                rankedAttempt = await _ranked.BeginAsync(
+                    runId, drill.Id, owner, displayName, startedAt, ct);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BrokerResult.Fail(409, ex.Message);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Could not open a ranked attempt for {RunId}.", runId);
+                return BrokerResult.Fail(503, "Ranked results are unavailable right now.");
+            }
+        }
+
+        var now = startedAt.ToString("O");
         var annotations = new Dictionary<string, string?>
         {
             ["homeops.isaacwallace.dev/drill-started"] = now,
@@ -251,7 +335,13 @@ public sealed class RunBroker
             [DrillFailedMoveAnnotation] = null,
             [DrillGoalsMetSinceAnnotation] = null,
             [DrillRecordedAnnotation] = null,
+            [RankedAttemptIdAnnotation] = rankedAttempt?.Id,
+            [LearningCourseAnnotation] = learningCourse?.CourseId,
+            [LearningCourseVersionAnnotation] = learningCourse?.CourseVersion.ToString(CultureInfo.InvariantCulture),
+            [LearningUnitAnnotation] = learningCourse is null ? null : learningUnitId,
         };
+        if (ranked)
+            annotations[LastRankedDrillAnnotation] = drill.Id;
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
             if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal))
                 annotations[key] = null; // null removes the annotation in a merge patch
@@ -268,16 +358,42 @@ public sealed class RunBroker
 
         var started = await PatchRunAsync(
             runId, new { metadata = new { annotations }, spec }, $"start drill {drillId}", ct);
+        // Do not void on an ambiguous Kubernetes response: the patch may have landed before the
+        // connection failed. If it did, snapshots will finalize this attempt normally; if it did
+        // not, the next ranked start performs the orphan cleanup above.
         await WriteThroughReplicasAsync(runId, setup, ct);
         return started;
     }
 
     // End the active drill and return the cluster to open-sandbox baseline.
-    public async Task<BrokerResult> EndDrillAsync(string runId, string owner, CancellationToken ct)
+    public async Task<BrokerResult> EndDrillAsync(
+        string runId,
+        string owner,
+        string displayName,
+        CancellationToken ct)
     {
         var resource = await GetOwnedResourceAsync(runId, owner, ct);
         if (resource is null)
             return BrokerResult.Fail(404, "No such run.");
+        var view = RunView.From(resource);
+        if (view.DrillMode == "ranked")
+        {
+            try
+            {
+                await FinalizeRankedAsync(
+                    resource,
+                    view,
+                    TerminalOutcome(view, RankedOutcomes.Forfeited),
+                    displayName,
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Could not forfeit ranked attempt on {RunId}.", runId);
+                return BrokerResult.Fail(
+                    503, "The ranked result could not be sealed. Try again.");
+            }
+        }
 
         var annotations = new Dictionary<string, string?>
         {
@@ -289,6 +405,10 @@ public sealed class RunBroker
             [DrillStageStartedAnnotation] = null,
             [DrillModeAnnotation] = null,
             [DrillRecordedAnnotation] = null,
+            [RankedAttemptIdAnnotation] = null,
+            [LearningCourseAnnotation] = null,
+            [LearningCourseVersionAnnotation] = null,
+            [LearningUnitAnnotation] = null,
         };
         foreach (var key in resource.Metadata.Annotations?.Keys ?? Enumerable.Empty<string>())
             if (key.StartsWith(DecisionAnnotationPrefix, StringComparison.Ordinal))
@@ -947,6 +1067,11 @@ public sealed class RunBroker
     // than inferred, so a reload lands on the same verdict and a second api replica agrees with it.
     public const string DrillFailedAnnotation = "homeops.isaacwallace.dev/drill-failed-at";
     public const string DrillFailedMoveAnnotation = "homeops.isaacwallace.dev/drill-failed-move";
+    public const string RankedAttemptIdAnnotation = "homeops.isaacwallace.dev/ranked-attempt-id";
+    public const string LastRankedDrillAnnotation = "homeops.isaacwallace.dev/last-ranked-drill";
+    public const string LearningCourseAnnotation = "homeops.isaacwallace.dev/learning-course";
+    public const string LearningCourseVersionAnnotation = "homeops.isaacwallace.dev/learning-course-version";
+    public const string LearningUnitAnnotation = "homeops.isaacwallace.dev/learning-unit";
 
     /// <summary>How long the objective must hold continuously before a stage counts as resolved.</summary>
     public static readonly TimeSpan GoalHold = TimeSpan.FromSeconds(15);
@@ -979,9 +1104,19 @@ public sealed class RunBroker
         // Nothing further is judged once the attempt is decided, either way. A failed ranked run
         // keeps measuring and drawing — the point is to watch what the wrong move did — but it can
         // no longer advance a stage or record a time.
-        if (annotations?.ContainsKey(DrillSolvedAnnotation) == true ||
-            annotations?.ContainsKey(DrillFailedAnnotation) == true)
+        if (annotations?.ContainsKey(DrillSolvedAnnotation) == true)
+        {
+            await TryRecordAcademyAsync(resource, view, displayName, ct);
+            await TryFinalizeRankedAsync(
+                resource, view, RankedOutcomes.Completed, displayName, ct);
             return new DrillEvaluation(goals, resource);
+        }
+        if (annotations?.ContainsKey(DrillFailedAnnotation) == true)
+        {
+            await TryFinalizeRankedAsync(
+                resource, view, RankedOutcomes.Failed, displayName, ct);
+            return new DrillEvaluation(goals, resource);
+        }
 
         var heldSince = annotations?.GetValueOrDefault(DrillGoalsMetSinceAnnotation);
         var now = DateTime.UtcNow;
@@ -1122,8 +1257,148 @@ public sealed class RunBroker
             CompletedUtc = solvedAt,
         }, ct);
 
+        await TryRecordAcademyAsync(updated ?? resource, RunView.From(updated ?? resource), displayName, ct);
+
+        if (mode == "ranked")
+        {
+            try
+            {
+                await FinalizeRankedAsync(
+                    updated ?? resource,
+                    RunView.From(updated ?? resource),
+                    RankedOutcomes.Completed,
+                    displayName,
+                    ct,
+                    elapsedMs,
+                    drill.Stages.Count);
+            }
+            catch (Exception ex)
+            {
+                // The solve itself is already durable on the LabRun. Snapshot evaluation retries
+                // finalization, so a brief database outage cannot erase the operator's result.
+                _log.LogError(ex, "Could not finalize ranked solve on {RunId}.", view.RunId);
+            }
+        }
+
         return updated;
     }
+
+    private async Task TryRecordAcademyAsync(
+        LabRunResource resource,
+        RunView view,
+        string displayName,
+        CancellationToken ct)
+    {
+        var annotations = resource.Metadata.Annotations;
+        var unitId = annotations?.GetValueOrDefault(LearningUnitAnnotation) ?? "";
+        var courseId = annotations?.GetValueOrDefault(LearningCourseAnnotation) ?? "";
+        var versionText = annotations?.GetValueOrDefault(LearningCourseVersionAnnotation) ?? "";
+        if (unitId.Length == 0 ||
+            !int.TryParse(versionText, CultureInfo.InvariantCulture, out var version))
+            return;
+
+        var course = CourseManifests.Find(courseId, version);
+        if (course is null || !course.Contains(unitId)) return;
+
+        var solvedAt = ParseAnnotationTime(
+            annotations?.GetValueOrDefault(DrillSolvedAnnotation));
+        if (solvedAt is null) return;
+        var startedAt = ParseAnnotationTime(resource.Spec.DrillStartedAt) ?? solvedAt.Value;
+        var elapsedMs = (long)Math.Max(0, (solvedAt.Value - startedAt).TotalMilliseconds);
+
+        try
+        {
+            await _learning.CompleteClusterUnitAsync(
+                view.Owner,
+                course,
+                unitId,
+                new UnitCompletion(
+                    UnitType: unitId.StartsWith("assessment:", StringComparison.Ordinal)
+                        ? "assessment"
+                        : "drill",
+                    Score: null,
+                    ElapsedMs: elapsedMs,
+                    Clean: view.DrillWrongChosen == 0,
+                    Mastered: false,
+                    RunId: view.RunId,
+                    Presentation: unitId.StartsWith("assessment:", StringComparison.Ordinal)
+                        ? "assessment"
+                        : "guided",
+                    Missteps: view.DrillWrongChosen),
+                ct);
+        }
+        catch (Exception ex)
+        {
+            // The solve remains stamped on the LabRun. Every later snapshot retries this write.
+            _log.LogError(
+                ex,
+                "Could not record Academy unit {UnitId} for {RunId} ({DisplayName}).",
+                unitId,
+                view.RunId,
+                displayName);
+        }
+    }
+
+    private async Task TryFinalizeRankedAsync(
+        LabRunResource resource,
+        RunView view,
+        string outcome,
+        string displayName,
+        CancellationToken ct)
+    {
+        if (view.DrillMode != "ranked") return;
+        try
+        {
+            await FinalizeRankedAsync(resource, view, outcome, displayName, ct);
+        }
+        catch (Exception ex)
+        {
+            // Terminal state stays on the cluster and is observed again on the next snapshot.
+            _log.LogError(
+                ex,
+                "Could not finalize ranked attempt on {RunId} as {Outcome}.",
+                view.RunId,
+                outcome);
+        }
+    }
+
+    private async Task<RankedAttemptView?> FinalizeRankedAsync(
+        LabRunResource resource,
+        RunView view,
+        string outcome,
+        string displayName,
+        CancellationToken ct,
+        long? elapsedMs = null,
+        int? stageReached = null)
+    {
+        if (view.DrillMode != "ranked") return null;
+
+        var attemptId = resource.Metadata.Annotations?
+            .GetValueOrDefault(RankedAttemptIdAnnotation);
+        if (string.IsNullOrWhiteSpace(attemptId))
+        {
+            var active = await _ranked.ActiveForRunAsync(view.RunId, view.Owner, ct);
+            attemptId = active?.Id;
+        }
+        if (string.IsNullOrWhiteSpace(attemptId)) return null;
+
+        return await _ranked.FinalizeAsync(
+            attemptId,
+            view.Owner,
+            outcome,
+            elapsedMs ?? view.DrillElapsedMs,
+            stageReached ?? view.DrillStage,
+            view.DrillFailedMove,
+            displayName,
+            ct);
+    }
+
+    private static string TerminalOutcome(RunView view, string interruptedOutcome) =>
+        view.DrillSolved
+            ? RankedOutcomes.Completed
+            : view.DrillFailed
+                ? RankedOutcomes.Failed
+                : interruptedOutcome;
 
     private static DateTime? ParseAnnotationTime(string? value) =>
         !string.IsNullOrEmpty(value) &&
@@ -1199,6 +1474,17 @@ public sealed class RunBroker
     // Owner-free teardown used by the TTL reaper (the platform, not a user, is acting).
     public async Task<bool> DeleteExpiredAsync(string runId, CancellationToken ct)
     {
+        var resource = await GetResourceAsync(runId, ct);
+        if (resource is null) return false;
+        var view = RunView.From(resource);
+        if (view.DrillMode == "ranked")
+            await FinalizeRankedAsync(
+                resource,
+                view,
+                TerminalOutcome(view, RankedOutcomes.Expired),
+                "",
+                ct);
+
         try
         {
             await _k8s.CustomObjects.DeleteClusterCustomObjectAsync(
@@ -1211,10 +1497,24 @@ public sealed class RunBroker
         }
     }
 
-    public async Task<bool> DeleteRunAsync(string runId, string owner, CancellationToken ct)
+    public async Task<bool> DeleteRunAsync(
+        string runId,
+        string owner,
+        string displayName,
+        CancellationToken ct)
     {
         // Only the owner can tear a cluster down. The reaper uses DeleteExpiredAsync instead.
-        if (await GetOwnedResourceAsync(runId, owner, ct) is null) return false;
+        var resource = await GetOwnedResourceAsync(runId, owner, ct);
+        if (resource is null) return false;
+        var view = RunView.From(resource);
+        if (view.DrillMode == "ranked")
+            await FinalizeRankedAsync(
+                resource,
+                view,
+                TerminalOutcome(view, RankedOutcomes.Forfeited),
+                displayName,
+                ct);
+
         try
         {
             await _k8s.CustomObjects.DeleteClusterCustomObjectAsync(

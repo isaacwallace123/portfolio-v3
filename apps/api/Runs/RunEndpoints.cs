@@ -244,7 +244,8 @@ public static class RunEndpoints
 
         app.MapPost("/v1/runs/{runId}/decisions", async (string runId, DecisionRequest req, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
-            var result = await broker.SubmitDecisionAsync(runId, req.DecisionId ?? "", Owner(ctx), ct);
+            var result = await broker.SubmitDecisionAsync(
+                runId, req.DecisionId ?? "", Owner(ctx), OwnerName(ctx), ct);
             return result.Run is not null
                 ? Results.Ok(result.Run)
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
@@ -275,7 +276,13 @@ public static class RunEndpoints
             string runId, DrillRequest req, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
             var result = await broker.StartDrillAsync(
-                runId, req.DrillId ?? "", req.Mode ?? "practice", Owner(ctx), ct);
+                runId,
+                req.DrillId ?? "",
+                req.Mode ?? "practice",
+                req.LearningUnitId ?? "",
+                Owner(ctx),
+                OwnerName(ctx),
+                ct);
             return result.Run is not null
                 ? Results.Ok(result.Run)
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
@@ -284,7 +291,7 @@ public static class RunEndpoints
         // End the active drill; the cluster stays up as an open sandbox.
         app.MapDelete("/v1/runs/{runId}/drill", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
-            var result = await broker.EndDrillAsync(runId, Owner(ctx), ct);
+            var result = await broker.EndDrillAsync(runId, Owner(ctx), OwnerName(ctx), ct);
             return result.Run is not null
                 ? Results.Ok(result.Run)
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
@@ -310,7 +317,7 @@ public static class RunEndpoints
 
         app.MapDelete("/v1/runs/{runId}", async (string runId, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
-            var deleted = await broker.DeleteRunAsync(runId, Owner(ctx), ct);
+            var deleted = await broker.DeleteRunAsync(runId, Owner(ctx), OwnerName(ctx), ct);
             return deleted ? Results.Ok(new { ok = true }) : Results.NotFound(new { error = "No such run." });
         }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
     }
@@ -318,5 +325,5 @@ public static class RunEndpoints
 
 record CreateRunRequest(string? ScenarioId);
 record DecisionRequest(string? DecisionId);
-record DrillRequest(string? DrillId, string? Mode);
+record DrillRequest(string? DrillId, string? Mode, string? LearningUnitId);
 record PracticeActionRequest(string? ActionId);

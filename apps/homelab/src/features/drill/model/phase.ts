@@ -163,8 +163,16 @@ function derivePhase(
   if (misstep)
     return { kind: "misstep", move: misstep, record: recordFor(misstep.id) };
 
+  // Ranked reveals the server-drawn opening incident before handing over the controls. Keep that
+  // reveal inside the first observation window: a reload later in the match must not put another
+  // briefing in front of a clock that is already running.
+  const rankedReveal =
+    run.drillMode === "ranked" &&
+    run.drillStage === 1 &&
+    run.drillStageElapsedSeconds < 10;
+
   // The handoff explains what the last fix just caused; it is read before the next stage is worked.
-  if (run.drillStageHandoff && ackedStage !== attempt)
+  if ((run.drillStageHandoff || rankedReveal) && ackedStage !== attempt)
     return { kind: "briefing" };
 
   const met = run.drillGoals.filter((g) => g.met).length;

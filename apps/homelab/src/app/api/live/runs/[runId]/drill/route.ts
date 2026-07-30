@@ -29,7 +29,7 @@ export async function POST(
   const g = await guard(req, { runId });
   if (!g.ok) return g.response;
 
-  let body: { drillId?: string; mode?: string } = {};
+  let body: { drillId?: string; mode?: string; learningUnitId?: string } = {};
   try {
     body = await req.json();
   } catch {
@@ -43,9 +43,14 @@ export async function POST(
     `/v1/runs/${runId}/drill`,
     {
       method: "POST",
-      body: JSON.stringify({ drillId: String(body.drillId ?? ""), mode }),
+      body: JSON.stringify({
+        drillId: String(body.drillId ?? ""),
+        mode,
+        learningUnitId: String(body.learningUnitId ?? ""),
+      }),
     },
     g.caller.owner,
+    g.caller.displayName,
   );
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) return jsonNoStore(payload, res.status);
@@ -64,6 +69,7 @@ export async function DELETE(
     `/v1/runs/${runId}/drill`,
     { method: "DELETE" },
     g.caller.owner,
+    g.caller.displayName,
   );
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) return jsonNoStore(payload, res.status);

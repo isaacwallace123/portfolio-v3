@@ -1,0 +1,313 @@
+/* Teaching diagrams.
+ *
+ * Every visual here is deterministic and illustrative — fixed example values, never a reading of
+ * anyone's cluster. The frame that wraps them says so on screen, because a diagram that looks like
+ * a measurement and is not one teaches the wrong lesson twice.
+ *
+ * Each diagram is required to be complete and legible with animation off: reduced motion renders
+ * the settled state, not the first frame of an animation that will never run. */
+
+.frame {
+  display: grid;
+  gap: 14px;
+  padding: 20px 20px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+}
+
+.frameHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.frameHead h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+}
+.illustrative {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  color: var(--ink-dim);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font:
+    600 9px/1.4 ui-monospace,
+    monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.caption {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.stage {
+  overflow-x: auto;
+  padding: 4px 0;
+}
+.stage svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-width: 520px;
+}
+
+/* ── SVG vocabulary, declared once ─────────────────────────────────────── */
+.tierBox {
+  fill: color-mix(in srgb, var(--surface-2) 70%, transparent);
+  stroke: var(--line-2);
+  stroke-width: 1;
+}
+.tierBoxHot {
+  fill: color-mix(in srgb, var(--red) 16%, transparent);
+  stroke: color-mix(in srgb, var(--red) 62%, transparent);
+  stroke-width: 1.4;
+}
+.tierBoxIdle {
+  fill: color-mix(in srgb, var(--surface-2) 34%, transparent);
+  stroke: var(--line);
+  stroke-dasharray: 3 3;
+}
+.tierName {
+  fill: var(--ink);
+  font-size: 11px;
+  font-weight: 620;
+}
+.tierRole {
+  fill: var(--ink-dim);
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.tierValue {
+  fill: var(--mint);
+  font:
+    700 12px/1 ui-monospace,
+    monospace;
+}
+.tierValueHot {
+  fill: var(--red);
+  font:
+    700 12px/1 ui-monospace,
+    monospace;
+}
+.tierValueIdle {
+  fill: var(--ink-dim);
+  font:
+    700 12px/1 ui-monospace,
+    monospace;
+}
+.link {
+  fill: none;
+  stroke: var(--line-2);
+  stroke-width: 1.4;
+}
+.linkLive {
+  fill: none;
+  stroke: color-mix(in srgb, var(--mint) 55%, transparent);
+  stroke-width: 1.6;
+}
+.linkStarved {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 4;
+}
+.axis {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.tick {
+  fill: var(--ink-dim);
+  font:
+    600 8.5px/1 ui-monospace,
+    monospace;
+}
+.label {
+  fill: var(--ink-mid);
+  font-size: 10px;
+}
+.labelStrong {
+  fill: var(--ink);
+  font-size: 10.5px;
+  font-weight: 620;
+}
+.mono {
+  fill: var(--ink);
+  font:
+    700 11px/1 ui-monospace,
+    monospace;
+}
+.monoDim {
+  fill: var(--ink-dim);
+  font:
+    600 10px/1 ui-monospace,
+    monospace;
+}
+.monoBad {
+  fill: var(--red);
+  font:
+    700 11px/1 ui-monospace,
+    monospace;
+}
+.monoWarn {
+  fill: var(--amber);
+  font:
+    700 11px/1 ui-monospace,
+    monospace;
+}
+
+.packet {
+  fill: var(--acid);
+}
+.packetQueued {
+  fill: var(--amber);
+}
+.packetDropped {
+  fill: var(--red);
+}
+
+.barTrack {
+  fill: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+.barOffered {
+  fill: color-mix(in srgb, var(--ink-mid) 42%, transparent);
+}
+.barServed {
+  fill: var(--mint);
+}
+.barShort {
+  fill: color-mix(in srgb, var(--red) 42%, transparent);
+}
+
+.podReady {
+  fill: color-mix(in srgb, var(--mint) 26%, transparent);
+  stroke: var(--mint);
+  stroke-width: 1.2;
+}
+.podPending {
+  fill: color-mix(in srgb, var(--amber) 14%, transparent);
+  stroke: color-mix(in srgb, var(--amber) 70%, transparent);
+  stroke-width: 1.2;
+  stroke-dasharray: 3 2.5;
+}
+.podCandidate {
+  fill: color-mix(in srgb, var(--amber) 22%, transparent);
+  stroke: var(--amber);
+  stroke-width: 1.2;
+}
+.podFailing {
+  fill: color-mix(in srgb, var(--red) 22%, transparent);
+  stroke: var(--red);
+  stroke-width: 1.2;
+}
+.podGone {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+.podText {
+  fill: var(--ink);
+  font:
+    700 8px/1 ui-monospace,
+    monospace;
+}
+
+/* ── The control a guided block drives ─────────────────────────────────── */
+.control {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-2) 44%, transparent);
+}
+.controlHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink-mid);
+  font-size: 11.5px;
+}
+.controlHead b {
+  color: var(--mint);
+  font:
+    700 15px/1 ui-monospace,
+    monospace;
+}
+.control input[type="range"] {
+  width: 100%;
+  accent-color: var(--mint);
+  cursor: pointer;
+}
+.observe {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.observe b {
+  color: var(--ink);
+  font-weight: 620;
+}
+
+/* ── Readout strip under a diagram ─────────────────────────────────────── */
+.readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.readout span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink-dim);
+  font-size: 10px;
+}
+.readout b {
+  color: var(--ink);
+  font:
+    700 11.5px/1 ui-monospace,
+    monospace;
+}
+.readout[data-tone="bad"] b,
+.readout span[data-tone="bad"] b {
+  color: var(--red);
+}
+.readout span[data-tone="warn"] b {
+  color: var(--amber);
+}
+.readout span[data-tone="good"] b {
+  color: var(--mint);
+}
+
+/* Motion is opt-in per element and always describes something. `animate` is resolved in JS from
+ * both `prefers-reduced-motion` and the site's own `data-reduce-motion`, so these only ever run
+ * when the learner has not asked otherwise. */
+.pulse {
+  animation: academy-pulse 2.4s ease-in-out infinite;
+}
+@keyframes academy-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}

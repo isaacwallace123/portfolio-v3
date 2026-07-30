@@ -20,6 +20,7 @@ export function LaunchScreen({
   busy,
   error,
   expired,
+  surface,
   onProvision,
 }: {
   status: LiveStatus;
@@ -28,32 +29,38 @@ export function LaunchScreen({
   error: string | null;
   /** The previous cluster hit its time limit — say so rather than silently offering another. */
   expired: boolean;
+  surface: "practice" | "ranked";
   onProvision: () => void;
 }) {
+  const ranked = surface === "ranked";
   const slots = platform?.slotsAvailable ?? null;
   const signInUrl = `${AUTH_URL}/login?returnUrl=${encodeURIComponent(
-    `${HOMELAB_URL}/practice`,
+    `${HOMELAB_URL}/${surface}`,
   )}`;
 
   const label = () => {
     if (busy === "provision") return "Provisioning…";
     if (!status.enabled) return "Live control offline";
     if (slots === 0) return "All cluster slots busy";
-    return "Provision cluster";
+    return ranked ? "Prepare ranked arena" : "Provision cluster";
   };
 
   return (
-    <div className={styles.shell}>
+    <div className={styles.shell} data-surface={surface}>
       <div className={styles.empty}>
         <p className={styles.kicker}>
-          <Radio size={14} /> Real cluster control
+          <Radio size={14} />{" "}
+          {ranked ? "Real cluster competition" : "Real cluster control"}
         </p>
-        <h1>Build a cluster. Then break it.</h1>
+        <h1>
+          {ranked
+            ? "Your next incident runs for real."
+            : "Build a cluster. Then break it."}
+        </h1>
         <p className={styles.lede}>
-          Provision a disposable Kubernetes workspace on the live homelab — an
-          isolated namespace running a checkout API, Postgres, Redis, an Envoy
-          gateway and a k6 load generator. Operate it freely, or run a drill on
-          it and work a real incident.
+          {ranked
+            ? "Prepare an isolated Kubernetes arena on the live homelab. The control plane draws a multi-stage incident and applies every decision to the running workload. Every verdict moves your seasonless ELO; clean recoveries also record an official time."
+            : "Provision a disposable Kubernetes workspace on the live homelab — an isolated namespace running a checkout API, Postgres, Redis, an Envoy gateway and a k6 load generator. Operate it freely, or run a practice drill and work a real incident."}
         </p>
         <ul className={styles.included}>
           <li>
@@ -65,17 +72,21 @@ export function LaunchScreen({
             workload
           </li>
           <li>
-            <Lock size={15} /> Private to your account — one cluster at a time
+            <Lock size={15} /> Private to your account — one{" "}
+            {ranked ? "arena" : "cluster"} at a time
           </li>
           <li>
-            <Timer size={15} /> Self-destructs after 15 minutes, extendable once
+            <Timer size={15} />{" "}
+            {ranked
+              ? "One wrong move ends the attempt; every verdict moves your rating"
+              : "Self-destructs after 15 minutes, extendable once"}
           </li>
         </ul>
 
         {expired && (
           <p className={styles.expiredNote}>
             <Timer size={14} /> Your last cluster reached its time limit and was
-            destroyed. Provision another to pick up where you left off.
+            destroyed. Prepare another to pick up where you left off.
           </p>
         )}
 
@@ -94,7 +105,8 @@ export function LaunchScreen({
           </button>
         ) : (
           <a className={styles.primary} href={signInUrl}>
-            <Lock size={16} /> Sign in to provision
+            <Lock size={16} /> Sign in to{" "}
+            {ranked ? "enter ranked" : "provision"}
           </a>
         )}
 

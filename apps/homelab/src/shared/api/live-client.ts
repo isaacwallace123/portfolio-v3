@@ -241,6 +241,57 @@ export interface LeaderboardView {
   byDrill: { drillId: string; title: string; entries: LeaderboardEntry[] }[];
 }
 
+export type RankedOutcome =
+  "active" | "completed" | "failed" | "forfeited" | "expired" | "void";
+
+export interface RankedAttempt {
+  id: string;
+  runId: string;
+  drillId: string;
+  scenarioVersion: number;
+  scenarioRating: number;
+  outcome: RankedOutcome;
+  startedUtc: string;
+  completedUtc: string | null;
+  elapsedMs: number;
+  stageReached: number;
+  failedMove: string;
+  preRating: number;
+  expectedScore: number;
+  ratingDelta: number;
+  postRating: number;
+}
+
+export interface RankedProfile {
+  rating: number;
+  peakRating: number;
+  ladderRank: number | null;
+  ratedOperators: number;
+  division: string;
+  divisionFloor: number;
+  divisionCeiling: number | null;
+  divisionProgress: number;
+  gamesPlayed: number;
+  wins: number;
+  losses: number;
+  currentStreak: number;
+  bestStreak: number;
+  provisionalGamesRemaining: number;
+  recentAttempts: RankedAttempt[];
+}
+
+export interface RankedStanding {
+  rank: number;
+  displayName: string;
+  isYou: boolean;
+  rating: number;
+  division: string;
+  gamesPlayed: number;
+  wins: number;
+  losses: number;
+  currentStreak: number;
+}
+
 export async function fetchDrills(): Promise<DrillCatalog> {
   const res = await fetch("/api/live/drills", { cache: "no-store" });
   return asJson(res);
@@ -249,6 +300,19 @@ export async function fetchDrills(): Promise<DrillCatalog> {
 export async function fetchLeaderboard(): Promise<LeaderboardView> {
   const res = await fetch("/api/live/leaderboard", { cache: "no-store" });
   return asJson(res);
+}
+
+export async function fetchRankedProfile(): Promise<RankedProfile> {
+  const res = await fetch("/api/live/ranked/profile", { cache: "no-store" });
+  return asJson(res);
+}
+
+export async function fetchRankedStandings(): Promise<RankedStanding[]> {
+  const res = await fetch("/api/live/ranked/leaderboard", {
+    cache: "no-store",
+  });
+  const body = await asJson<{ standings: RankedStanding[] }>(res);
+  return body.standings;
 }
 
 // A drill runs ON the provisioned cluster: it sets an objective and clock and unlocks decisions
@@ -260,11 +324,12 @@ export async function startDrill(
   runId: string,
   drillId: string,
   mode: "practice" | "ranked" = "practice",
+  learningUnitId = "",
 ): Promise<LiveRunView> {
   const res = await fetch(`/api/live/runs/${runId}/drill`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ drillId, mode }),
+    body: JSON.stringify({ drillId, mode, learningUnitId }),
   });
   return asJson(res);
 }

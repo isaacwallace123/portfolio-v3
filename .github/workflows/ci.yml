@@ -55,9 +55,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "9.0.x"
-      # builds the auth service, the general-API stub, and the test project
+      # Build both services and run every .NET test project in the solution.
       - run: dotnet build IsaacWallace.sln
-      - run: dotnet test tests/Auth.Tests/Auth.Tests.csproj
+      - run: dotnet test IsaacWallace.sln --no-build
 
   web:
     name: ${{ matrix.app }} — lint + typecheck + build
@@ -79,6 +79,8 @@ jobs:
       - run: npm run lint -w apps/${{ matrix.app }}
       - run: npm run format:check -w apps/${{ matrix.app }}
       - run: npm run typecheck -w apps/${{ matrix.app }}
+      - if: matrix.app == 'homelab'
+        run: npm run test -w apps/homelab
       - run: npm run build -w apps/${{ matrix.app }}
 
   shared:

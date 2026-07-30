@@ -17,16 +17,22 @@ export function StageBrief({
   run: LiveRunView;
   onContinue: () => void;
 }) {
+  const openingDraw = run.drillMode === "ranked" && run.drillStage === 1;
+
   return (
     <div className={styles.brief}>
       <StageTrack run={run} />
 
       <p className={styles.briefEyebrow}>
-        <AlertTriangle size={12} /> New incident
+        <AlertTriangle size={12} />{" "}
+        {openingDraw ? "Scenario drawn" : "New incident"}
       </p>
       <h3>{run.drillStageTitle}</h3>
 
-      <p className={styles.handoff}>{run.drillStageHandoff}</p>
+      <p className={styles.handoff}>
+        {run.drillStageHandoff ||
+          "The control plane has committed this live workload and started the official clock. Read the objective, then take command."}
+      </p>
 
       <p className={styles.briefLabel}>Objective</p>
       <p className={styles.briefObjective}>
@@ -34,7 +40,8 @@ export function StageBrief({
       </p>
 
       <button className={styles.primary} onClick={onContinue}>
-        Work the incident <ArrowRight size={14} />
+        {openingDraw ? "Enter match" : "Work the incident"}{" "}
+        <ArrowRight size={14} />
       </button>
     </div>
   );

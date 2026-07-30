@@ -2,14 +2,17 @@
 
 Interactive public application for `homelab.isaacwallace.dev`.
 
-HomeOps has four surfaces:
+HomeOps has five surfaces:
 
 - `/` — live, sanitized cluster overview backed by the Kubernetes API and metrics-server.
 - `/topology` — the allowlisted homelab inventory grouped by layer, with live readiness, aggregate
   resource use, and GitOps state. Point at a component to trace what it depends on.
-- `/practice` — a disposable application workspace that can be scaled, restarted, moved between
-  worker pools, switched between stable/regressed releases, loaded with k6, cached, reset, and torn
-  down. Drills run **on** that workspace, so `/drills` redirects here.
+- `/practice` — HomeOps Academy: a structured production-operations course with interactive
+  lessons, knowledge checkpoints, account-backed progress, and unranked real-cluster capstones.
+- `/practice/sandbox` — the open disposable application workspace, with no course objective,
+  progress, or ranking.
+- `/ranked` — a dedicated competitive surface for server-drawn, one-shot cascades on the same real
+  Kubernetes arena engine, with seasonless ELO and independent official times.
 - `/leaderboard` — ranked standings across the multi-stage drills.
 
 All displayed platform and workload values come from the live control plane. Architectural edges in
@@ -21,22 +24,28 @@ invented in the browser.
 The frontend never speaks to Kubernetes. It speaks the public run-controller contract
 (`docs/public-operations-arena.md` in the homelab repo), served here as same-origin BFF routes:
 
-| Endpoint                                  | Auth               | Purpose                                                                |
-| :---------------------------------------- | :----------------- | :--------------------------------------------------------------------- |
-| `GET /api/live/status`                    | public             | What this visitor may do: live configured, signed in, cluster they own |
-| `GET /api/live/platform`                  | public (throttled) | Sanitized node readiness and run capacity                              |
-| `GET /api/live/overview`                  | public (throttled) | Aggregate live nodes, workloads, pods, resources, GitOps, and capacity |
-| `GET /api/live/topology`                  | public (throttled) | Allowlisted component graph with live readiness and metrics            |
-| `GET /api/live/leaderboard`               | public (throttled) | Ranked standings; a session only marks a row as yours                  |
-| `GET /api/live/drills`                    | session            | Drill catalog with the field's stats and the caller's own              |
-| `POST /api/live/runs`                     | session            | Provision the caller's practice cluster (5/hour)                       |
-| `GET /api/live/runs/{runId}/snapshot`     | session + owner    | One frame of the caller's cluster: run, telemetry, components, events  |
-| `POST /api/live/runs/{runId}/drill`       | session + owner    | Start a drill on the caller's cluster (`DELETE` ends it)               |
-| `POST /api/live/runs/{runId}/decisions`   | session + owner    | Apply an allowlisted operator decision                                 |
-| `POST /api/live/runs/{runId}/renew`       | session + owner    | Buy one more window before expiry (once per cluster)                   |
-| `GET /api/live/runs/{runId}/report`       | session + owner    | After-action report for a completed drill                              |
-| `POST /api/live/practice/{runId}/actions` | session + owner    | Apply one allowlisted practice reconciliation                          |
-| `DELETE /api/live/runs/{runId}`           | session + owner    | Tear the caller's cluster down                                         |
+| Endpoint                                   | Auth               | Purpose                                                                |
+| :----------------------------------------- | :----------------- | :--------------------------------------------------------------------- |
+| `GET /api/live/status`                     | public             | What this visitor may do: live configured, signed in, cluster they own |
+| `GET /api/live/platform`                   | public (throttled) | Sanitized node readiness and run capacity                              |
+| `GET /api/live/overview`                   | public (throttled) | Aggregate live nodes, workloads, pods, resources, GitOps, and capacity |
+| `GET /api/live/topology`                   | public (throttled) | Allowlisted component graph with live readiness and metrics            |
+| `GET /api/live/leaderboard`                | public (throttled) | Ranked standings; a session only marks a row as yours                  |
+| `GET /api/live/ranked/leaderboard`         | public (throttled) | Seasonless ELO ladder; a session only marks a row as yours             |
+| `GET /api/live/ranked/profile`             | signed in          | Rating, division, progression, and the caller's recent match ledger    |
+| `GET /api/live/learning/progress`          | signed in          | Current Academy course and unit progress                               |
+| `POST /api/live/learning/units/{id}/*`     | signed in          | Start or complete coursework; cluster units are broker-owned           |
+| `POST /api/live/learning/certificate`      | signed in          | Issue once after server-side eligibility checks                        |
+| `GET /api/live/learning/certificates/{id}` | public (throttled) | Verify an opaque certificate identifier                                |
+| `GET /api/live/drills`                     | session            | Drill catalog with the field's stats and the caller's own              |
+| `POST /api/live/runs`                      | session            | Provision the caller's practice cluster (5/hour)                       |
+| `GET /api/live/runs/{runId}/snapshot`      | session + owner    | One frame of the caller's cluster: run, telemetry, components, events  |
+| `POST /api/live/runs/{runId}/drill`        | session + owner    | Start a drill on the caller's cluster (`DELETE` ends it)               |
+| `POST /api/live/runs/{runId}/decisions`    | session + owner    | Apply an allowlisted operator decision                                 |
+| `POST /api/live/runs/{runId}/renew`        | session + owner    | Buy one more window before expiry (once per cluster)                   |
+| `GET /api/live/runs/{runId}/report`        | session + owner    | After-action report for a completed drill                              |
+| `POST /api/live/practice/{runId}/actions`  | session + owner    | Apply one allowlisted practice reconciliation                          |
+| `DELETE /api/live/runs/{runId}`            | session + owner    | Tear the caller's cluster down                                         |
 
 Every route above goes through `shared/api/guard.ts`. "session" means the visitor's SSO cookie is
 replayed server-side against the auth service before anything happens; "owner" means the API itself
@@ -47,6 +56,32 @@ Kubernetes read upstream.
 These routes are the production path: they proxy server-side to `api.isaacwallace.dev`, which creates
 Crossplane `LabRun` resources and reads measured Envoy, metrics-server, and OpenTelemetry signals.
 The browser never receives the scoped API key or a Kubernetes credential.
+
+### Ranked scoring
+
+Ranked is seasonless. An operator starts at 1000 and plays against the fixed rating of the
+server-drawn scenario. The standard ELO expected-score formula determines the result:
+
+- the first ten rated matches use K=40; established operators use K=24;
+- five matches are presented as placements, but they are ordinary durable rating updates rather
+  than a hidden or disposable provisional score;
+- completion is a win; a wrong operational move is a loss;
+- forfeiting or allowing the cluster to expire is a loss with a minimum 12-point penalty (subject
+  to the global 100-point floor), so hard scenarios cannot be cheaply dodged until an easier draw
+  appears;
+- time never enters the rating calculation. Successful matches also write an independent official
+  time used by the speed boards;
+- rating, attempt outcome, and the append-only ledger mutation commit in one serializable
+  transaction. Repeated terminal observations return the existing result instead of scoring twice.
+
+### Academy progress
+
+Academy learning state is separate from live cluster state and Ranked rating. Lessons and
+checkpoints may be completed without provisioning infrastructure. A capstone launch binds its
+course unit to an unranked practice drill, and only the run broker records that unit after the live
+objective has held against measured telemetry. The LabRun id is the idempotency key, so repeated
+snapshot polls cannot record the same solve twice. Certificates are account-backed, issued once per
+course version, and publicly verifiable by an opaque random identifier.
 
 ### Production runtime (Crossplane)
 
@@ -73,7 +108,9 @@ src/
   app/                    routes — a shell, metadata, and the one thing it renders
   widgets/                page-level compositions (cluster-workbench, leaderboard, HomeOverview)
   features/
+    academy/              course content, progress rules, lessons, visuals, and certificates
     drill/                running a drill on a cluster
+    ranked/               rating profile, match entry, and authoritative result presentation
     topology/             the live architecture map
       model/              grouped layout, inventory poll, viewport, layer palette
       ui/                 TopologyBoard + the map, component, toolbar, inspector

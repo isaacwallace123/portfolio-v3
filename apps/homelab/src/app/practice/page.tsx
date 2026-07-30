@@ -1,13 +1,16 @@
 import type { Metadata } from "next";
-import ClusterWorkbench from "@/widgets/cluster-workbench";
+import { AcademyDashboard } from "@/features/academy";
 
+// /practice is the Academy now. The open cluster workspace moved to /practice/sandbox, where it is
+// one clearly separate option rather than the whole surface — a visitor should be able to start
+// learning without provisioning anything.
 export const metadata: Metadata = {
-  title: "Practice cluster",
+  title: "Academy",
   description:
-    "Provision a disposable Kubernetes workspace on the live homelab — an isolated namespace with a checkout API, Postgres, Redis, an Envoy gateway and a k6 load generator — then scale it, cache it, break it, and run a timed incident drill on it.",
+    "HomeOps Academy: a structured course in production operations. Short lessons, animated explanations, knowledge checks, and capstone incidents resolved on real disposable Kubernetes clusters.",
   alternates: { canonical: "/practice" },
 };
 
 export default function PracticePage() {
-  return <ClusterWorkbench />;
+  return <AcademyDashboard />;
 }
