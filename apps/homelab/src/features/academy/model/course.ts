@@ -272,6 +272,38 @@ export function segmentChecks(segment: LearningSegment): KnowledgeCheck[] {
   );
 }
 
+/**
+ * Human titles for the drills the curriculum points at.
+ *
+ * Learner-facing text must never show a slug. "You will prove this in checkout-traffic-spike" reads
+ * like a config value leaked into a lesson; "in Keep checkout alive" reads like a course. The API
+ * catalog owns these titles, but reaching them needs a signed-in fetch, and a lesson has to render
+ * before anyone has provisioned anything — so they are mirrored here and the content test asserts
+ * the mirror still matches `ScenarioDefinitions.cs`.
+ */
+export const DRILL_TITLES: Record<string, string> = {
+  "checkout-traffic-spike": "Keep checkout alive",
+  "checkout-bad-release": "Ship a bad release",
+  "catalogue-data-recovery": "Recover the data tier",
+  "worker-evacuation": "Evacuate a worker",
+  "gateway-saturation": "The queue is at the front door",
+  "capacity-right-sizing": "Right-size the fleet",
+  "release-under-load": "It only breaks under load",
+  "catalogue-cache-mask": "Stop hiding the corruption",
+  "pool-return": "Come back from maintenance",
+  "double-fault": "Two things are wrong",
+  "canary-catch": "Catch it in the canary",
+  "canary-and-fleet": "The canary was the least of it",
+  "canary-first": "Test it the safe way",
+  "cold-start-storm": "Everything restarted at once",
+  "front-and-back": "Both ends are tight",
+};
+
+/** The drill's title, falling back to a readable form of the id rather than to the id itself. */
+export function drillTitle(drillId: string): string {
+  return DRILL_TITLES[drillId] ?? drillId.replaceAll("-", " ");
+}
+
 /** Every real drill a segment touches, capstone first. Used to map a finished drill back to the
  *  segment it belongs to without a second lookup table. */
 export function segmentDrillIds(segment: LearningSegment): string[] {

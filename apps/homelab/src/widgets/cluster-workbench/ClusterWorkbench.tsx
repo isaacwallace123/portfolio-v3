@@ -106,10 +106,13 @@ export default function ClusterWorkbench({
   // cluster graph needs the impact of a decision too — showing damage only in a side panel is what
   // made a wrong answer easy to click past.
   const drill = useDrillState(run, act, liveDecision);
-  // The Academy's teaching flow over the same drill state. Always constructed (hooks cannot be
-  // conditional) and only rendered for a course assignment, so the ranked and sandbox paths behave
-  // exactly as they did — this derives from the run, it does not mutate it.
-  const coaching = useCoaching(run, components, drill);
+  // Keep the hook order stable while skipping Academy-only derivations in Ranked and the sandbox.
+  const coaching = useCoaching(
+    run,
+    components,
+    drill,
+    surface === "practice" && assignment !== undefined,
+  );
   const notifiedSolve = useRef<string | null>(null);
   const solvedKey =
     run?.drillSolved && assignment && run.drillId === assignment.drillId

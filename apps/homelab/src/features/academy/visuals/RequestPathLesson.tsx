@@ -2,6 +2,7 @@
 
 import { Fragment } from "react";
 import { useLoopedProgress } from "../model/motion";
+import { Stage } from "./Stage";
 import styles from "./visuals.module.css";
 
 // The request path, and what happens to it as demand rises.
@@ -106,7 +107,7 @@ export function RequestPathLesson({
   };
 
   return (
-    <div className={styles.stage}>
+    <Stage>
       <svg
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
         role="img"
@@ -215,7 +216,7 @@ export function RequestPathLesson({
           {constrained !== null && ` · ${offered - served}/s waiting or shed`}
         </text>
       </svg>
-    </div>
+    </Stage>
   );
 }
 

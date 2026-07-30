@@ -53,6 +53,16 @@
 .step[data-state="current"] .stepLabel {
   color: var(--mint);
 }
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 /* ── Briefing ──────────────────────────────────────────────────────────── */
 .briefing {
@@ -594,5 +604,44 @@
 @keyframes coaching-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
+
+/* ── Narrow panel ──────────────────────────────────────────────────────── */
+/* Below 1100px the workbench drops to one column and this panel goes full-width, so the pressure
+   is at the small end rather than the large one: a 360px phone has to hold a six-step strip and a
+   three-column before/after table. */
+@media (max-width: 560px) {
+  .flow {
+    padding: 14px 12px;
+    gap: 12px;
+  }
+  /* The step labels ellipsise to nothing long before this; the bars alone still say where you are,
+     and `aria-current` carries it for anyone not reading them. */
+  .stepLabel {
+    display: none;
+  }
+  .beforeAfterHead,
+  .beforeAfterRow {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+  .briefFacts > div {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+  }
+  .briefFacts b {
+    text-align: left;
+  }
+  .delta {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 2px;
   }
 }

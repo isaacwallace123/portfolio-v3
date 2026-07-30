@@ -24,6 +24,8 @@ export {
   assessmentUnitId,
   checkpointUnitId,
   courseUnits,
+  drillTitle,
+  DRILL_TITLES,
   drillUnitId,
   findLesson,
   findSegment,

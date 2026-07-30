@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useLoopedProgress } from "../model/motion";
+import { Stage } from "./Stage";
 import styles from "./visuals.module.css";
 
 // Releases, data, scheduling and verification.
@@ -18,7 +19,7 @@ export function ReleaseTracks({ animate }: { animate: boolean }) {
   const candidate = 2;
 
   return (
-    <div className={styles.stage}>
+    <Stage>
       <svg
         viewBox="0 0 640 200"
         role="img"
@@ -107,7 +108,7 @@ export function ReleaseTracks({ animate }: { animate: boolean }) {
           replica share — there is no separate percentage to set.
         </text>
       </svg>
-    </div>
+    </Stage>
   );
 }
 
@@ -117,7 +118,7 @@ export function CacheFlow({ animate }: { animate: boolean }) {
   const t = useLoopedProgress(3000, animate);
 
   return (
-    <div className={styles.stage}>
+    <Stage>
       <svg
         viewBox="0 0 640 200"
         role="img"
@@ -211,7 +212,7 @@ export function CacheFlow({ animate }: { animate: boolean }) {
             );
           })}
       </svg>
-    </div>
+    </Stage>
   );
 }
 
@@ -257,7 +258,7 @@ export function DrainMigration({
   const outage = serving === 0;
 
   return (
-    <div className={styles.stage}>
+    <Stage>
       <svg
         viewBox="0 0 640 212"
         role="img"
@@ -354,7 +355,7 @@ export function DrainMigration({
             : "The remaining replicas absorb the traffic, so the same operation is a non-event."}
         </text>
       </svg>
-    </div>
+    </Stage>
   );
 }
 
@@ -377,7 +378,7 @@ export function CanarySplit({
   const t = useLoopedProgress(2800, animate);
 
   return (
-    <div className={styles.stage}>
+    <Stage>
       <svg
         viewBox="0 0 640 208"
         role="img"
@@ -481,7 +482,7 @@ export function CanarySplit({
           against a 1% objective
         </text>
       </svg>
-    </div>
+    </Stage>
   );
 }
 
@@ -519,13 +520,17 @@ export function GoalHold({ animate }: { animate: boolean }) {
   const allMet = !broke && visibleTick >= 2;
 
   const conditions = [
-    { label: "Served ≥ 640/s", value: allMet ? "648/s" : "512/s", met: allMet },
+    {
+      label: "Served ≥ 640/s",
+      value: allMet ? "648/s" : "512/s",
+      met: allMet,
+    },
     { label: "p95 < 250 ms", value: broke ? "268 ms" : "164 ms", met: !broke },
     { label: "Errors < 1%", value: "0.3%", met: true },
   ];
 
   return (
-    <div className={styles.stage}>
+    <Stage>
       <svg
         viewBox="0 0 640 208"
         role="img"
@@ -590,6 +595,6 @@ export function GoalHold({ animate }: { animate: boolean }) {
             : "Every condition satisfied, and counting. A single bad sample sends this back to zero."}
         </text>
       </svg>
-    </div>
+    </Stage>
   );
 }

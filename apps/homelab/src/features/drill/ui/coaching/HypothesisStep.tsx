@@ -1,6 +1,6 @@
 "use client";
 
-import { Crosshair } from "lucide-react";
+import { ArrowRight, Crosshair } from "lucide-react";
 import type { HypothesisOption } from "../../model/coaching";
 import styles from "../../coaching.module.css";
 
@@ -17,12 +17,15 @@ import styles from "../../coaching.module.css";
  */
 export function HypothesisStep({
   options,
-  chosen,
-  onChoose,
+  selected,
+  onSelect,
+  onConfirm,
 }: {
   options: HypothesisOption[];
-  chosen: string | null;
-  onChoose: (option: HypothesisOption) => void;
+  /** The pick being considered. Local to this step until it is confirmed. */
+  selected: HypothesisOption | null;
+  onSelect: (option: HypothesisOption) => void;
+  onConfirm: () => void;
 }) {
   return (
     <>
@@ -35,21 +38,39 @@ export function HypothesisStep({
         </span>
       </div>
 
-      <div className={styles.hypotheses}>
+      {/* Selecting and committing are two steps. Advancing on the first click would swap the panel
+          out from under someone still comparing the options, and it would mean the choice they are
+          about to operate on was never actually shown back to them. */}
+      <div
+        className={styles.hypotheses}
+        role="radiogroup"
+        aria-label="Where is the fault?"
+      >
         {options.map((option) => (
           <button
             key={option.id}
             type="button"
+            role="radio"
             className={styles.hypothesis}
-            data-chosen={chosen === option.id}
-            onClick={() => onChoose(option)}
-            aria-pressed={chosen === option.id}
+            data-chosen={selected?.id === option.id}
+            onClick={() => onSelect(option)}
+            aria-checked={selected?.id === option.id}
           >
             <b>{option.label}</b>
             <small>If you are right: {option.predicts}</small>
           </button>
         ))}
       </div>
+
+      <button
+        type="button"
+        className={styles.advance}
+        disabled={selected === null}
+        onClick={onConfirm}
+      >
+        {selected === null ? "Choose a hypothesis" : "Open the controls"}
+        {selected !== null && <ArrowRight size={13} aria-hidden />}
+      </button>
     </>
   );
 }

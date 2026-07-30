@@ -51,15 +51,48 @@
   line-height: 1.65;
 }
 
+/* Diagrams have a floor below which their labels stop being readable, so on a narrow screen they
+   scroll rather than shrink into illegibility. A scrollable region must be reachable by keyboard
+   (hence `tabindex` on the element) and must say that it scrolls — an unannounced clipped diagram
+   reads as a broken one. */
 .stage {
   overflow-x: auto;
   padding: 4px 0;
+  scrollbar-width: thin;
+}
+.stage:focus-visible {
+  outline: 2px solid var(--mint);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
 }
 .stage svg {
   display: block;
   width: 100%;
   height: auto;
-  min-width: 520px;
+  min-width: 480px;
+}
+.scrollHint {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--ink-dim);
+  font:
+    600 10px/1.4 ui-monospace,
+    monospace;
+  letter-spacing: 0.05em;
+}
+/* Shown only where the diagram cannot fit: 480px of diagram plus the frame's own padding. */
+@media (max-width: 560px) {
+  .scrollHint {
+    display: flex;
+  }
+  .frame {
+    padding: 16px 14px 14px;
+  }
+  .frameHead h4 {
+    font-size: 14px;
+  }
 }
 
 /* ── SVG vocabulary, declared once ─────────────────────────────────────── */

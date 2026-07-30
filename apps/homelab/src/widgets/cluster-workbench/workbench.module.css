@@ -957,6 +957,9 @@
     display: none;
   }
 }
+:global(html[data-reduce-motion]) .celebration {
+  display: none;
+}
 
 /* ── completed drill panel ───────────────────────────────────────────────── */
 
