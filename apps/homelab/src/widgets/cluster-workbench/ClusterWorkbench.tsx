@@ -33,6 +33,8 @@ import { useClusterRun } from "./model/useClusterRun";
 import { ActivityPanel } from "./ui/ActivityPanel";
 import { Celebration } from "./ui/Celebration";
 import { ClusterGraph } from "./ui/ClusterGraph";
+import { GraphZoomControls } from "./ui/GraphZoomControls";
+import { useGraphViewport } from "./model/useGraphViewport";
 import { ClusterHud } from "./ui/ClusterHud";
 import { ControlsPanel } from "./ui/ControlsPanel";
 import { InspectorPanel } from "./ui/InspectorPanel";
@@ -145,16 +147,32 @@ export default function ClusterWorkbench({
     .map((c) => `${c.name}:${c.pods.map((p) => p.name).join("|")}`)
     .join(",");
 
-  // Re-measured whenever the set of cards changes, which is what moves the edges.
-  const { canvasRef, cardRefs, paths } = useClusterEdges([
-    cardSignature,
-    run?.runId,
-    run?.telemetry.apiReplicas,
-    run?.loadGenerators,
-    // The gateway and canary are scalable tiers now, so their replica counts move cards too.
-    run?.gatewayReplicas,
-    run?.canaryReplicas,
-  ]);
+  const {
+    view,
+    viewportRef,
+    getScale,
+    zoomIn,
+    zoomOut,
+    reset: resetView,
+    moved: viewMoved,
+    handlers: viewportHandlers,
+  } = useGraphViewport();
+
+  // Re-measured whenever the set of cards changes, which is what moves the edges — and on zoom,
+  // because the measurement divides the current scale back out of the screen boxes it reads.
+  const { worldRef, cardRefs, paths } = useClusterEdges(
+    [
+      cardSignature,
+      run?.runId,
+      run?.telemetry.apiReplicas,
+      run?.loadGenerators,
+      // The gateway and canary are scalable tiers now, so their replica counts move cards too.
+      run?.gatewayReplicas,
+      run?.canaryReplicas,
+      view.scale,
+    ],
+    getScale,
+  );
 
   // ── first paint: still resolving the session ──────────────────────────────
   if (status === null) {
@@ -318,7 +336,6 @@ export default function ClusterWorkbench({
           className={`${styles.canvas} ${
             surface === "ranked" ? styles.rankedCanvas : ""
           }`}
-          ref={canvasRef}
         >
           <ClusterHud
             run={run}
@@ -337,18 +354,41 @@ export default function ClusterWorkbench({
             onDismissError={() => setError(null)}
           />
 
-          <ClusterGraph
-            components={components}
-            paths={paths}
-            flowing={flowing}
-            selected={selected}
-            onSelect={setSelected}
-            cardRefs={cardRefs}
-            intendedPods={intendedPods}
-            blockedReason={blockedReason}
-            impactTiers={drill.impact
-              .filter((i) => i.degrading)
-              .map((i) => i.tier)}
+          {/* The frame the graph is looked at through. It clips; the world inside it moves. */}
+          <div
+            className={styles.viewport}
+            ref={viewportRef}
+            {...viewportHandlers}
+          >
+            <div
+              className={styles.world}
+              ref={worldRef}
+              style={{
+                transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+              }}
+            >
+              <ClusterGraph
+                components={components}
+                paths={paths}
+                flowing={flowing}
+                selected={selected}
+                onSelect={setSelected}
+                cardRefs={cardRefs}
+                intendedPods={intendedPods}
+                blockedReason={blockedReason}
+                impactTiers={drill.impact
+                  .filter((i) => i.degrading)
+                  .map((i) => i.tier)}
+              />
+            </div>
+          </div>
+
+          <GraphZoomControls
+            scale={view.scale}
+            moved={viewMoved}
+            onZoomIn={zoomIn}
+            onZoomOut={zoomOut}
+            onReset={resetView}
           />
 
           {surface === "ranked" &&

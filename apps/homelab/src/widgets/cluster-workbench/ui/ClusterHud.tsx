@@ -127,7 +127,11 @@ export function ClusterHud({
       </div>
 
       {(converging || busy) && (
-        <div className={styles.hudTopCenter} aria-live="polite">
+        <div
+          className={styles.hudTopCenter}
+          data-surface={surface}
+          aria-live="polite"
+        >
           <span className={styles.convergeChip}>
             <Loader2 size={12} className={styles.spin} />
             {converging ? (

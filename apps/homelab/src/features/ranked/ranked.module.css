@@ -1765,6 +1765,9 @@
   min-height: 0;
   flex: 1;
   overflow-y: auto;
+  /* A floating panel is a fixed-width surface. Anything that does not fit across is a layout bug to
+     be fixed at the item, not something to hand the operator a second scrollbar for. */
+  overflow-x: hidden;
   padding: 12px;
   scrollbar-width: thin;
 }
@@ -1887,12 +1890,18 @@
 }
 .eventPanel article {
   display: grid;
-  grid-template-columns: auto 1fr;
+  /* minmax(0, 1fr), not 1fr: a grid item's automatic minimum size is its content, so a Kubernetes
+     event carrying an image digest — one unbroken 100-character token — pushed the column wider
+     than the panel and turned the whole thing into a horizontal scroller. */
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 9px;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);
+}
+.eventPanel article > div {
+  min-width: 0;
 }
 .eventPanel article > i {
   width: 7px;
@@ -1911,9 +1920,21 @@
   justify-content: space-between;
   gap: 8px;
 }
+.eventPanel article header {
+  min-width: 0;
+}
 .eventPanel article b {
+  min-width: 0;
+  overflow: hidden;
   color: var(--ink);
   font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The object kind is a short fixed vocabulary (Pod, Deployment); it should never be what gives way
+   when a reason is long. */
+.eventPanel article header > span {
+  flex: none;
 }
 .eventPanel article span,
 .eventPanel article small {
@@ -1928,6 +1949,15 @@
   color: var(--ink-dim);
   font-size: 9px;
   line-height: 1.45;
+  /* anywhere rather than break-word: an image reference has no spaces to break at, and the message
+     is the part of an event worth reading in full rather than truncating. */
+  overflow-wrap: anywhere;
+}
+.eventPanel article small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .changePanel {
   display: grid;
