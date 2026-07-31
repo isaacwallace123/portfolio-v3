@@ -129,11 +129,14 @@ public static class RankedScenarioGenerator
 
         return new RankedScenarioPlan(
             seed,
-            // The incident is cut FOR this operator's rating, so the rating it is worth is that
-            // rating. An ELO ladder against an environment is honest exactly when the environment is
-            // tuned to the player: a clean solve at your own level is an even-money result, and the
-            // difficulty curve above is what makes that claim true rather than decorative.
-            ScenarioRating: seed.PlayerRating,
+            // The incident is cut FOR this operator's rating, so by default the rating it is worth
+            // is that rating. An ELO ladder against an environment is honest exactly when the
+            // environment is tuned to the player: a clean solve at your own level is an even-money
+            // result, and the difficulty curve above is what makes that claim true rather than
+            // decorative. Family calibration can then move the PRICE off that default without
+            // touching the cut — see RankedScenarioSeed.CalibratedRating for why the two must not
+            // be the same number.
+            ScenarioRating: seed.ScenarioRating,
             Title: "Generated incident",
             Objective:
                 "Return the platform to its objective and hold it there. The incident is generated "
@@ -329,9 +332,14 @@ public static class RankedScenarioGenerator
         bool leaveHeadroomForEscalation)
     {
         var target = (int)Math.Round(Lerp(window.Min, window.Max, difficulty));
-        // The escalation phase raises the load, so a primary phase already at the ceiling would have
-        // nowhere to escalate to.
-        if (leaveHeadroomForEscalation && target > window.Min && target == window.Max) target--;
+        // A second act that arrives at the same offered load is not an escalation.
+        //
+        // This used to reserve headroom only when the primary already sat at the top of the window,
+        // which is a narrow band of the curve — everywhere else both phases computed the identical
+        // generator count from the identical window and difficulty, and the escalation's handover
+        // note announced a step up that the load never took. Reserving a generator whenever the
+        // window has one to give makes the claim true wherever it can be.
+        if (leaveHeadroomForEscalation && target > window.Min) target--;
         var generators = ClampToWindow(target, window);
 
         // Cache reachability decides whether the uncached ceiling applies at all. It is reachable if

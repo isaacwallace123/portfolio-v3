@@ -88,12 +88,63 @@ describe("the unified Ranked destination", () => {
     expect(arena).toContain("floatingPanel");
     expect(arena).toContain('{ id: "console", label: "Console"');
     expect(arena).toContain('{ id: "metrics", label: "Metrics"');
-    expect(arena).toContain("aria-expanded={activeTool === id}");
+    expect(arena).toContain("aria-expanded={panelOpen && activeTool === id}");
     expect(arena).toContain("aria-controls={panelId}");
     expect(arena).toContain("onKeyDown={closeOnEscape}");
-    expect(arena).toContain("toolButtons.current[closing]?.focus()");
+    expect(arena).toContain("toolButtons.current[activeTool]?.focus()");
     expect(arena).toContain('"withheld"');
     expect(workbench).toContain('surface !== "ranked" &&');
+  });
+
+  it("opens on the console, and keeps its transcript across a close", () => {
+    const arena = read("features/ranked/ui/RankedArena.tsx");
+    // The console is the only way to change anything on this surface — the practice controls
+    // column is not rendered here — so the operate loop cannot start behind a closed panel.
+    expect(arena).toContain('useState<RankedTool>("console")');
+    // Hidden, not unmounted: closing a panel to look at the graph is not a reason to lose the
+    // record of the shift.
+    expect(arena).toContain("hidden={!panelOpen}");
+    expect(arena).not.toContain("setActiveTool(null)");
+  });
+
+  it("plays Ranked and the Academy through one shared operator console", () => {
+    const arena = read("features/ranked/ui/RankedArena.tsx");
+    const academy = read("features/drill/ui/PracticeDrillPanel.tsx");
+    const console_ = read("widgets/operator-console/ui/OperatorConsole.tsx");
+    // One component, one vocabulary. A course that taught different words from the ones a rated
+    // match accepts would be teaching a dialect.
+    expect(arena).toContain("<OperatorConsole");
+    expect(academy).toContain("<OperatorConsole");
+    expect(console_).toContain("parseConsoleCommand");
+    // The split is server-side: audited for a rated attempt, free for a learner.
+    expect(arena).toContain("rankedCommand(");
+    expect(academy).toContain("practiceCommand(");
+  });
+
+  it("says why the control plane refused, in the console that asked", () => {
+    const console_ = read("widgets/operator-console/ui/OperatorConsole.tsx");
+    expect(console_).toContain("Refused (${cause.status}): ${cause.message}");
+    expect(console_).toContain('"refused"');
+  });
+
+  it("drops the launch once the match it produced is over", () => {
+    const workbench = read("widgets/cluster-workbench/ClusterWorkbench.tsx");
+    const launch = read("features/ranked/model/useRankedLaunch.ts");
+    // Without this the hook keeps reporting an active launch after a forfeit, a teardown, or a
+    // return to the queue — and the page's fallback for "a launch with no incident on it" is the
+    // provisioning screen, so ending a match sent the operator to watch a cluster start up.
+    expect(launch).toContain("const clear = useCallback");
+    expect(workbench).toContain("const { clear: clearLaunch } = rankedLaunch;");
+    expect(workbench).toContain("rankedMatchRun.current = run.runId;");
+    expect(workbench).toContain("clearLaunch();");
+  });
+
+  it("answers an accepted command with a judged frame, not a bare run", () => {
+    const route = read("app/api/live/ranked/[runId]/commands/route.ts");
+    // RunView carries no goals; the snapshot handler is where they are judged and attached. Sending
+    // the command's own view back emptied the measured objective on every accepted command.
+    expect(route).toContain("/v1/runs/${runId}/snapshot");
+    expect(route).not.toContain("/v1/runs/${runId}/telemetry");
   });
 
   it("defaults to one ELO ladder with a secondary time switch", () => {

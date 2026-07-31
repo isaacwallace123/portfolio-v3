@@ -48,6 +48,14 @@ public static class RankedMatchmaker
                     continue;
                 }
 
+                // Calibration prices the incident; it does not cut it.
+                //
+                // Feeding the adjustment back into the generator's own input made the correction
+                // self-reinforcing: a family the field completes often was rated lower AND drawn
+                // easier — fewer faults, more of the panel lit, looser thresholds — which raised the
+                // completion rate that produced the adjustment, and the loop ran to the clamp
+                // instead of settling. The draw stays keyed on the operator's rating, so difficulty
+                // still tracks ELO exactly; only what a clean solve is worth moves.
                 var adjustment = baseline.FamilyList
                     .Select(family =>
                         calibrationAdjustments?.GetValueOrDefault(family) ?? 0)
@@ -55,10 +63,10 @@ public static class RankedMatchmaker
                     .Average();
                 var calibratedRating = RankedScenarioSeed.Quantize(
                     (int)Math.Round(playerRating + adjustment));
-                var calibratedSeed = seed with { PlayerRating = calibratedRating };
                 var plan = calibratedRating == seed.PlayerRating
                     ? baseline
-                    : RankedScenarioGenerator.Generate(calibratedSeed);
+                    : RankedScenarioGenerator.Generate(
+                        seed with { CalibratedRating = calibratedRating });
 
                 if (relaxed == 0 && plan.Families.Any(excluded.Contains)) continue;
                 return new RankedDraw(plan, considered, relaxed > 0);

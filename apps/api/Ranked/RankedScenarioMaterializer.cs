@@ -19,7 +19,25 @@ public static class RankedScenarioMaterializer
 
     public static ScenarioDefinition ToDefinition(RankedScenarioPlan plan)
     {
-        var stages = plan.Phases.Select(phase => ToStage(plan, phase)).ToArray();
+        // A phase inherits the state every phase before it was resolved to.
+        //
+        // Containment is a thing you hold, not a checkpoint you pass. Judging a second act only
+        // against its own fault meant the stable release, the recovered catalogue, or the evacuated
+        // pool that ended phase one stopped being an objective the moment phase two opened — so an
+        // operator could roll back onto the bad build while working the escalation and the platform
+        // would still call it a verified recovery.
+        //
+        // Only the faults' STATE goals carry. The capacity triple belongs to the phase that set the
+        // load, and dragging an earlier phase's throughput target into a heavier one would judge the
+        // new load against the old bar.
+        var inherited = new List<DrillGoal>();
+        var stages = new List<DrillStage>();
+        foreach (var phase in plan.Phases)
+        {
+            stages.Add(ToStage(phase, inherited));
+            inherited.AddRange(FaultGoals(phase));
+        }
+
         return new ScenarioDefinition(
             plan.DrillId,
             plan.Title,
@@ -37,7 +55,13 @@ public static class RankedScenarioMaterializer
             Rated: true);
     }
 
-    private static DrillStage ToStage(RankedScenarioPlan plan, RankedScenarioPhase phase)
+    /// <summary>The state targets a phase's own faults add, beyond the capacity triple.</summary>
+    private static IEnumerable<DrillGoal> FaultGoals(RankedScenarioPhase phase) =>
+        phase.Faults.SelectMany(fault => RankedFaultModules.Module(fault.ModuleId).Goals);
+
+    private static DrillStage ToStage(
+        RankedScenarioPhase phase,
+        IReadOnlyList<DrillGoal> inherited)
     {
         var goals = new List<DrillGoal>
         {
@@ -52,8 +76,8 @@ public static class RankedScenarioMaterializer
             P95(phase.Objectives.P95CeilingMs),
             Errors(phase.Objectives.ErrorCeilingPct),
         };
-        foreach (var fault in phase.Faults)
-            goals.AddRange(RankedFaultModules.Module(fault.ModuleId).Goals);
+        goals.AddRange(FaultGoals(phase));
+        goals.AddRange(inherited);
 
         return new DrillStage(
             phase.Id,

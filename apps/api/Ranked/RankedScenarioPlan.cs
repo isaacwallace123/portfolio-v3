@@ -45,23 +45,54 @@ public sealed record RankedScenarioSeed(string SeedId, int GeneratorVersion, int
     private static readonly Regex SeedIdPattern =
         new("^[a-f0-9]{32}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    /// <summary>
+    /// What a clean solve of this incident is WORTH, when that differs from the rating it was CUT
+    /// for. Null — the ordinary case — means the two are the same number.
+    ///
+    /// They have to be separable. Family calibration moves an incident's ELO value away from the
+    /// operator's rating as the field's results come in, and folding that into the rating the
+    /// generator reads made the correction feed itself: a family people beat often was rated lower
+    /// AND cut easier, which raised the completion rate, which lowered it again, all the way to the
+    /// clamp. Difficulty follows the operator; price follows the evidence.
+    /// </summary>
+    public int? CalibratedRating { get; init; }
+
+    /// <summary>The rating this incident is priced at — the number ELO is settled against.</summary>
+    public int ScenarioRating => CalibratedRating ?? PlayerRating;
+
     // The LabRun's spec.drillId is what carries a generated match through Kubernetes, and the XRD
     // constrains it to a DNS-label shape (^[a-z0-9]([-a-z0-9]*[a-z0-9])?$, 63 characters). So the
     // token is lowercase hex and dashes and nothing else: 4 + 1 + 1 + 1 + 4 + 1 + 32 = 44 characters
-    // at the widest rating. It fits without a schema change, which is the reason the whole seed lives
-    // in the id rather than only a database key — a run's own spec is enough to rebuild its plan.
+    // at the widest rating, or 49 with a calibrated price alongside it. It fits without a schema
+    // change, which is the reason the whole seed lives in the id rather than only a database key —
+    // a run's own spec is enough to rebuild its plan.
     private const string TokenPrefix = "rgen";
 
+    // Two shapes, and the short one is not legacy: an uncalibrated family is the common case, and a
+    // token that says the same number twice would be noise. A three-part token reads as "cut for and
+    // priced at the same rating", which is exactly what it means.
     private static readonly Regex TokenPattern = new(
-        @"^rgen-(?<version>[0-9]{1,3})-(?<rating>[0-9]{3,4})-(?<seed>[a-f0-9]{32})$",
+        @"^rgen-(?<version>[0-9]{1,3})-(?<rating>[0-9]{3,4})(-(?<priced>[0-9]{3,4}))?-(?<seed>[a-f0-9]{32})$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>The drill id a generated match runs under. Self-describing by design: the token IS
-    /// the seed, so any component holding a LabRun can rebuild the plan it is running.</summary>
-    public string Token =>
-        string.Create(
-            CultureInfo.InvariantCulture,
-            $"{TokenPrefix}-{GeneratorVersion}-{Quantize(PlayerRating)}-{SeedId}");
+    /// the seed, so any component holding a LabRun can rebuild the plan it is running — including
+    /// what it was priced at, which no amount of regeneration could recover on its own.</summary>
+    public string Token
+    {
+        get
+        {
+            var cut = Quantize(PlayerRating);
+            var priced = Quantize(ScenarioRating);
+            return priced == cut
+                ? string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{TokenPrefix}-{GeneratorVersion}-{cut}-{SeedId}")
+                : string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{TokenPrefix}-{GeneratorVersion}-{cut}-{priced}-{SeedId}");
+        }
+    }
 
     /// <summary>
     /// A public receipt for the active match. It proves the later seed reveal was committed before
@@ -83,7 +114,21 @@ public sealed record RankedScenarioSeed(string SeedId, int GeneratorVersion, int
         if (version < 1 || version > CurrentVersion) return false;
         if (rating < MinRating || rating > MaxRating) return false;
 
-        seed = new RankedScenarioSeed(match.Groups["seed"].Value, version, rating);
+        int? priced = null;
+        if (match.Groups["priced"].Success)
+        {
+            priced = int.Parse(match.Groups["priced"].Value, CultureInfo.InvariantCulture);
+            if (priced < MinRating || priced > MaxRating) return false;
+            // The long form exists only to say something the short form cannot. Accepting a token
+            // that spells out a price equal to the cut would give one plan two ids, and two ids is
+            // two seeds as far as the matchmaker's uniqueness set is concerned.
+            if (priced == rating) return false;
+        }
+
+        seed = new RankedScenarioSeed(match.Groups["seed"].Value, version, rating)
+        {
+            CalibratedRating = priced,
+        };
         return true;
     }
 
@@ -95,7 +140,10 @@ public sealed record RankedScenarioSeed(string SeedId, int GeneratorVersion, int
         GeneratorVersion <= CurrentVersion &&
         PlayerRating >= MinRating &&
         PlayerRating <= MaxRating &&
-        PlayerRating == Quantize(PlayerRating);
+        PlayerRating == Quantize(PlayerRating) &&
+        ScenarioRating >= MinRating &&
+        ScenarioRating <= MaxRating &&
+        ScenarioRating == Quantize(ScenarioRating);
 
     public static int Quantize(int rating) =>
         Math.Clamp(rating - (rating % RatingStep), MinRating, MaxRating);

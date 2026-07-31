@@ -190,6 +190,24 @@ export function useRankedLaunch({
     void activated.current(launch.runId);
   }, [launch]);
 
+  /**
+   * Forget the launch, because the match it produced is over.
+   *
+   * A launch ends on the cluster, not on this connection. Forfeiting, tearing the arena down, or
+   * returning to the queue clears the launch upstream, while the stream that last said `active`
+   * finished at that word — so nothing was ever going to tell this hook. It kept reporting an
+   * active launch, and the page's fallback for "a launch exists but no incident is running on it"
+   * is the provisioning screen: after a forfeit the operator was sent to watch a cluster start up
+   * that was already up, or already collected.
+   */
+  const clear = useCallback(() => {
+    closeStream();
+    setLaunch(null);
+    setAdvancing(false);
+    setError(null);
+    handedOff.current = null;
+  }, [closeStream]);
+
   const cancel = useCallback(async () => {
     if (!enabled || cancelling || !launch || launch.active) return;
     closeStream();
@@ -221,5 +239,6 @@ export function useRankedLaunch({
     start: () => drive({ start: true }),
     retry: () => drive({ retry: true, start: true }),
     cancel,
+    clear,
   };
 }
