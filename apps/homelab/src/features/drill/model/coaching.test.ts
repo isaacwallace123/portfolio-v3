@@ -50,6 +50,11 @@ function run(over: Partial<LiveRunView> = {}): LiveRunView {
     podCount: 6,
     cpuMillicores: 900,
     memoryMiB: 512,
+    measuredTelemetry: {
+      requestsPerSec: 610,
+      p95LatencyMs: 930,
+      errorRatePct: 0.4,
+    },
     releaseTrack: "stable",
     dataState: "healthy",
     targetPool: "apps",

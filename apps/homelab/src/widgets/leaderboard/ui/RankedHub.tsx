@@ -24,7 +24,6 @@ import { AUTH_URL, HOMELAB_URL } from "@iw/core";
 import {
   fetchDrills,
   fetchRankedProfile,
-  startDrill,
   type DrillCatalogEntry,
   type LivePlatformStatus,
   type LiveRunView,
@@ -38,7 +37,6 @@ import { RatingBoard } from "./RatingBoard";
 import { TimeBoard } from "./TimeBoard";
 import styles from "../leaderboard.module.css";
 
-type Act = (key: string, fn: () => Promise<LiveRunView | void>) => void;
 type BoardMode = "elo" | "time";
 
 export function RankedHub({
@@ -49,8 +47,8 @@ export function RankedHub({
   provisioning,
   expired,
   error,
-  onProvision,
-  act,
+  launching,
+  onLaunch,
 }: {
   status: LiveStatus;
   platform: LivePlatformStatus | null;
@@ -59,8 +57,8 @@ export function RankedHub({
   provisioning: boolean;
   expired: boolean;
   error: string | null;
-  onProvision: () => void;
-  act: Act;
+  launching: boolean;
+  onLaunch: () => void;
 }) {
   const boardState = useLeaderboard();
   const [boardMode, setBoardMode] = useState<BoardMode>("elo");
@@ -110,14 +108,15 @@ export function RankedHub({
   const poolLoading = eligible === null;
   const poolSize = eligible?.length ?? 0;
   const hasArena = run !== null;
-  const actionBusy = busy !== null || provisioning;
-  const actionLocked = hasArena
-    ? actionBusy ||
-      poolLoading ||
-      poolSize === 0 ||
-      ledgerError !== null ||
-      poolError !== null
-    : actionBusy || !status.enabled || slots === 0;
+  const actionBusy = busy !== null || launching;
+  const actionLocked =
+    actionBusy ||
+    poolLoading ||
+    poolSize === 0 ||
+    ledgerError !== null ||
+    poolError !== null ||
+    !status.enabled ||
+    (!hasArena && slots === 0);
   const recent =
     profile?.recentAttempts
       .filter(
@@ -132,19 +131,13 @@ export function RankedHub({
   )}`;
 
   const actionLabel = () => {
-    if (busy === "provision" || provisioning) return "Preparing arena…";
-    if (busy === "ranked") return "Drawing incident…";
+    if (launching) return "Opening secure launch…";
+    if (busy === "provision") return "Preparing arena…";
+    if (provisioning) return "Resume arena setup";
+    if (busy === "ranked") return "Activating incident…";
     if (!status.enabled) return "Live control offline";
     if (!hasArena && slots === 0) return "All arena slots busy";
-    return hasArena ? "Enter ranked match" : "Prepare ranked arena";
-  };
-
-  const play = () => {
-    if (!run) {
-      onProvision();
-      return;
-    }
-    act("ranked", () => startDrill(run.runId, "", "ranked"));
+    return hasArena ? "Resume ranked launch" : "Start ranked";
   };
 
   const fastest = boardState.times?.entries[0] ?? null;
@@ -216,7 +209,7 @@ export function RankedHub({
               <button
                 type="button"
                 className={styles.queueAction}
-                onClick={play}
+                onClick={onLaunch}
                 disabled={actionLocked}
               >
                 {actionBusy ? (

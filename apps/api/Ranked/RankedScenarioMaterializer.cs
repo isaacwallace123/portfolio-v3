@@ -160,7 +160,17 @@ public static class RankedScenarioCatalog
         var plan = TryPlan(drillId);
         if (plan is null) return null;
 
-        var definition = RankedScenarioMaterializer.ToDefinition(plan);
+        ScenarioDefinition definition;
+        try
+        {
+            definition = RankedScenarioMaterializer.ToDefinition(plan);
+        }
+        catch (ArgumentException)
+        {
+            // Catalog drift must make an old generated token unknown, not turn every snapshot of
+            // an in-flight match into a 500.
+            return null;
+        }
         if (Definitions.Count >= CacheCeiling) Definitions.Clear();
         Definitions[drillId] = definition;
         return definition;

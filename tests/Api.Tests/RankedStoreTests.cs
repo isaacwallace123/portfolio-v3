@@ -586,6 +586,58 @@ public sealed class RankedStoreTests
             family => Assert.True(context.FamilyAdjustments[family] < 0));
     }
 
+    /// <summary>
+    /// The guarantee the ranked launch leans on for exactly-once activation: an operator may hold
+    /// one active attempt, and the second request to ask for one is refused inside the serializable
+    /// transaction rather than winning a race for a second row.
+    /// </summary>
+    [Fact]
+    public async Task ASecondActiveAttemptForTheSameOperatorIsRefused()
+    {
+        await using var fixture = await RankedFixture.CreateAsync();
+        var first = await fixture.Store.BeginAsync(
+            "run-hl-onlyone1",
+            "cascade-scale-release",
+            "owner-single",
+            "Ada",
+            DateTime.UtcNow,
+            CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Store.BeginAsync(
+            "run-hl-onlyone2",
+            "cascade-scale-release",
+            "owner-single",
+            "Ada",
+            DateTime.UtcNow,
+            CancellationToken.None));
+
+        var only = Assert.Single(await fixture.Db.RankedAttempts.ToListAsync());
+        Assert.Equal(first.Id, only.Id);
+        Assert.Equal(RankedOutcomes.Active, only.Outcome);
+
+        // Sealing the first one void is rating-neutral and frees the operator to launch again.
+        await fixture.Store.FinalizeAsync(
+            first.Id,
+            "owner-single",
+            RankedOutcomes.Void,
+            0,
+            0,
+            "",
+            "Ada",
+            CancellationToken.None);
+        var second = await fixture.Store.BeginAsync(
+            "run-hl-onlyone2",
+            "cascade-scale-release",
+            "owner-single",
+            "Ada",
+            DateTime.UtcNow,
+            CancellationToken.None);
+
+        Assert.NotEqual(first.Id, second.Id);
+        Assert.Empty(await fixture.Db.RatingLedger.ToListAsync());
+        Assert.Empty(await fixture.Db.OperatorRatings.ToListAsync());
+    }
+
     [Fact]
     public async Task DifferentOwnersMayReceiveTheSameOpaqueSeed()
     {

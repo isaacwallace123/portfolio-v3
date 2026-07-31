@@ -37,6 +37,51 @@ describe("the unified Ranked destination", () => {
     expect(workbench).toContain("<RankedHub");
   });
 
+  it("drives the owner-scoped server launch instead of starting a drill", () => {
+    const workbench = read("widgets/cluster-workbench/ClusterWorkbench.tsx");
+    const launch = read("features/ranked/model/useRankedLaunch.ts");
+    const client = read("shared/api/live-client.ts");
+    const route = read("app/api/live/ranked/launch/route.ts");
+    const hub = read("widgets/leaderboard/ui/RankedHub.tsx");
+    expect(workbench).toContain("useRankedLaunch");
+    expect(workbench).toContain("<RankedLaunchScreen");
+    expect(launch).toContain("advanceRankedLaunch");
+    expect(launch).toContain("fetchRankedLaunch");
+    expect(launch).toContain("cancelRankedLaunch");
+    expect(route).toContain('"/v1/ranked/launch"');
+    expect(route).toContain("g.caller.owner");
+    expect(route).toContain('? "provision"');
+    expect(route).toContain('? "cancel"');
+    expect(route).toContain(': "launch"');
+    expect(route).not.toContain("runId");
+    expect(client).toContain("AbortSignal.timeout(15_000)");
+    expect(hub).toContain("Start ranked");
+    expect(hub).not.toContain("startDrill(");
+  });
+
+  it("renders launch time separately while match time remains paused", () => {
+    const screen = read("features/ranked/ui/RankedLaunchScreen.tsx");
+    expect(screen).toContain("launchElapsedSeconds");
+    expect(screen).toContain("Match clock");
+    expect(screen).toContain("00:00 · paused");
+    expect(screen).toContain("launch.checks.map");
+  });
+
+  it("uses floating arena tools instead of a permanent ranked inspector", () => {
+    const arena = read("features/ranked/ui/RankedArena.tsx");
+    const workbench = read("widgets/cluster-workbench/ClusterWorkbench.tsx");
+    expect(arena).toContain("toolDock");
+    expect(arena).toContain("floatingPanel");
+    expect(arena).toContain('{ id: "console", label: "Console"');
+    expect(arena).toContain('{ id: "metrics", label: "Metrics"');
+    expect(arena).toContain("aria-expanded={activeTool === id}");
+    expect(arena).toContain("aria-controls={panelId}");
+    expect(arena).toContain("onKeyDown={closeOnEscape}");
+    expect(arena).toContain("toolButtons.current[closing]?.focus()");
+    expect(arena).toContain('"withheld"');
+    expect(workbench).toContain('surface !== "ranked" &&');
+  });
+
   it("defaults to one ELO ladder with a secondary time switch", () => {
     const hub = read("widgets/leaderboard/ui/RankedHub.tsx");
     expect(hub).toContain('useState<BoardMode>("elo")');
