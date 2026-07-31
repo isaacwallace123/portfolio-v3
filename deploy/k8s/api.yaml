@@ -42,7 +42,7 @@ spec:
         node-role.kubernetes.io/apps: "true"
       containers:
         - name: api
-          image: ghcr.io/isaacwallace123/portfolio-api:b1e2379
+          image: ghcr.io/isaacwallace123/portfolio-api:5663d8c
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
