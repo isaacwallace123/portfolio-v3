@@ -1228,8 +1228,8 @@ public sealed class RunBroker
             {
                 annotations = new Dictionary<string, string>
                 {
-                    ["homeops.isaacwallace.dev/practice-action"] = actionId,
-                    ["homeops.isaacwallace.dev/practice-action-at"] = DateTime.UtcNow.ToString("O"),
+                    [PracticeActionAnnotation] = actionId,
+                    [PracticeActionAtAnnotation] = DateTime.UtcNow.ToString("O"),
                 },
             },
             spec,
@@ -1247,6 +1247,110 @@ public sealed class RunBroker
             _log.LogError(ex, "Failed practice action {Action} on {RunId}.", actionId, runId);
             return BrokerResult.Fail(502, "The practice controller rejected the action.");
         }
+    }
+
+    /// <summary>
+    /// Apply one operator command outside a rated match.
+    ///
+    /// The same vocabulary and the same allowlist the arena uses, because the Academy teaches the
+    /// platform an operator will later be rated on — a course that taught a different set of words
+    /// would be teaching a dialect. What it deliberately does NOT do is the ranked bookkeeping:
+    /// nothing here writes an attempt ledger, spends an action budget, or can seal a result. A
+    /// learner's mistakes are the point, so they stay free.
+    ///
+    /// Refused on a ranked cluster rather than quietly downgraded: an unaudited path into a live
+    /// rated match is how a rating stops meaning anything.
+    /// </summary>
+    public async Task<BrokerResult> SubmitPracticeCommandAsync(
+        string runId, string input, string owner, CancellationToken ct)
+    {
+        var resource = await GetOwnedResourceAsync(runId, owner, ct);
+        if (resource is null)
+            return BrokerResult.Fail(404, "No such practice cluster.");
+
+        var view = RunView.From(resource);
+        if (view.DrillMode == "ranked")
+            return BrokerResult.Fail(
+                409,
+                "This cluster is running a rated match. Use the ranked console.");
+
+        if (!RankedCommand.TryParse(input, out var command, out var error) || command is null)
+            return BrokerResult.Fail(400, error);
+
+        var acceptedAt = DateTime.UtcNow;
+        var patchBody = new
+        {
+            metadata = new
+            {
+                annotations = new Dictionary<string, string>
+                {
+                    // The same pair the slider controls write, so the coaching and impact machinery
+                    // that reads "what did the learner just do" needs no second shape to understand.
+                    [PracticeActionAnnotation] = command.ActionId,
+                    [PracticeActionAtAnnotation] = acceptedAt.ToString("O"),
+                },
+            },
+            spec = command.SpecPatch,
+        };
+        var patch = new k8s.Models.V1Patch(patchBody, k8s.Models.V1Patch.PatchType.MergePatch);
+        try
+        {
+            var updated = await _k8s.CustomObjects.PatchClusterCustomObjectAsync(
+                patch, LabRun.Group, LabRun.Version, LabRun.Plural, runId, cancellationToken: ct);
+            await WriteThroughSpecAsync(runId, command.SpecPatch, ct);
+            return BrokerResult.Accepted(RunView.From(Parse(updated)));
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogError(
+                ex, "Failed practice command {Command} on {RunId}.", command.Canonical, runId);
+            return BrokerResult.Fail(502, "The practice controller rejected the command.");
+        }
+    }
+
+    /// <summary>
+    /// Run one read-only investigation outside a rated match.
+    ///
+    /// Identical evidence to the arena's, from the same helpers against the same cluster. The one
+    /// difference is what is kept: a ranked inspection appends to an attempt's immutable evidence
+    /// ledger, and a learner reading their own sandbox has no attempt to append to.
+    /// </summary>
+    public async Task<RankedInspectionBrokerResult> InspectPracticeAsync(
+        string runId, string input, string owner, CancellationToken ct)
+    {
+        var resource = await GetOwnedResourceAsync(runId, owner, ct);
+        if (resource is null)
+            return RankedInspectionBrokerResult.Fail(404, "No such practice cluster.");
+        var view = RunView.From(resource);
+        if (view.DrillMode == "ranked")
+            return RankedInspectionBrokerResult.Fail(
+                409, "This cluster is running a rated match. Use the ranked console.");
+        if (!RankedInspection.TryParse(input, out var inspection, out var error) ||
+            inspection is null)
+            return RankedInspectionBrokerResult.Fail(400, error);
+
+        IReadOnlyList<string> lines;
+        try
+        {
+            lines = await ReadEvidenceAsync(resource, view, inspection, owner, ct);
+        }
+        catch (HttpOperationException ex)
+        {
+            _log.LogDebug(
+                ex, "Practice inspection {Inspection} failed for {RunId}.",
+                inspection.Canonical, runId);
+            return RankedInspectionBrokerResult.Fail(
+                503, "That cluster evidence is temporarily unavailable.");
+        }
+
+        return RankedInspectionBrokerResult.Accepted(
+            new RankedInspectionResult(
+                Guid.NewGuid().ToString("n"),
+                inspection.Canonical,
+                inspection.Kind,
+                view.DrillStage,
+                DateTime.UtcNow,
+                lines));
     }
 
     /// <summary>
@@ -1365,21 +1469,7 @@ public sealed class RunBroker
         IReadOnlyList<string> lines;
         try
         {
-            lines = inspection.Kind switch
-            {
-                "metrics" => await InspectMetricsAsync(resource, view, inspection, ct),
-                "events" => InspectEvents(
-                    await GetEventsAsync(runId, owner, ct) ?? [],
-                    inspection.WarningsOnly),
-                "pods" => InspectPods(
-                    await GetComponentsAsync(runId, owner, ct) ?? [],
-                    inspection.Service),
-                "logs" => await InspectLogsAsync(resource, inspection.Service, ct),
-                "deployments" => await InspectDeploymentsAsync(resource, ct),
-                "trace" => InspectTrace(await GetTraceAsync(runId, owner, ct)),
-                "history" => InspectHistory(view),
-                _ => [],
-            };
+            lines = await ReadEvidenceAsync(resource, view, inspection, owner, ct);
         }
         catch (HttpOperationException ex)
         {
@@ -1392,7 +1482,6 @@ public sealed class RunBroker
                 503, "That cluster evidence is temporarily unavailable.");
         }
 
-        if (lines.Count == 0) lines = ["No matching evidence is available yet."];
         var observedUtc = DateTime.UtcNow;
         var evidenceId = Guid.NewGuid().ToString("n");
         var attemptId = resource.Metadata.Annotations?
@@ -1430,6 +1519,38 @@ public sealed class RunBroker
                 view.DrillStage,
                 observedUtc,
                 lines));
+    }
+
+    /// <summary>
+    /// One allowlisted read against the cluster, as transcript lines.
+    ///
+    /// Shared by the rated and unrated consoles so the evidence an operator learns to read in the
+    /// Academy is byte-for-byte the evidence a match gives them. The difference between the two
+    /// surfaces is what the caller does with the result afterwards, never what it says.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> ReadEvidenceAsync(
+        LabRunResource resource,
+        RunView view,
+        RankedInspection inspection,
+        string owner,
+        CancellationToken ct)
+    {
+        var lines = inspection.Kind switch
+        {
+            "metrics" => await InspectMetricsAsync(resource, view, inspection, ct),
+            "events" => InspectEvents(
+                await GetEventsAsync(view.RunId, owner, ct) ?? [],
+                inspection.WarningsOnly),
+            "pods" => InspectPods(
+                await GetComponentsAsync(view.RunId, owner, ct) ?? [],
+                inspection.Service),
+            "logs" => await InspectLogsAsync(resource, inspection.Service, ct),
+            "deployments" => await InspectDeploymentsAsync(resource, ct),
+            "trace" => InspectTrace(await GetTraceAsync(view.RunId, owner, ct)),
+            "history" => InspectHistory(view),
+            _ => [],
+        };
+        return lines.Count == 0 ? ["No matching evidence is available yet."] : lines;
     }
 
     private async Task<IReadOnlyList<string>> InspectMetricsAsync(
@@ -1872,6 +1993,13 @@ public sealed class RunBroker
     public const string RankedAttemptIdAnnotation = "homeops.isaacwallace.dev/ranked-attempt-id";
     public const string LastRankedDrillAnnotation = "homeops.isaacwallace.dev/last-ranked-drill";
     public const string RankedActionAnnotationPrefix = "homeops.isaacwallace.dev/ranked-action-";
+
+    // The last unrated change and when it landed. Written by both the slider controls and the
+    // Academy's operator console, so anything reading "what did the learner just do" sees one shape.
+    public const string PracticeActionAnnotation = "homeops.isaacwallace.dev/practice-action";
+    public const string PracticeActionAtAnnotation =
+        "homeops.isaacwallace.dev/practice-action-at";
+
     public const string DelayedStageAppliedAnnotationPrefix =
         "homeops.isaacwallace.dev/ranked-delayed-stage-";
     public const string LearningCourseAnnotation = "homeops.isaacwallace.dev/learning-course";

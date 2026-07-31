@@ -4,19 +4,17 @@ import {
   Activity,
   BellRing,
   Check,
-  ChevronRight,
   CircleDot,
   Clock3,
   Crosshair,
   FileClock,
   Loader2,
-  Search,
   Server,
   Shield,
   Terminal,
   X,
 } from "lucide-react";
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   rankedCommand,
   rankedInspect,
@@ -26,27 +24,19 @@ import {
   type RunComponent,
 } from "@/shared/api/live-client";
 import { clock } from "@/shared/lib/format";
-import { COMMAND_HELP, parseConsoleCommand } from "../model/console";
+import {
+  OperatorConsole,
+  type ConsoleHandle,
+} from "@/widgets/operator-console";
 import styles from "../ranked.module.css";
 
 type Act = (key: string, fn: () => Promise<LiveRunView | void>) => void;
 type RankedTool = "mission" | "console" | "metrics" | "activity" | "changes";
 
-interface ConsoleEntry {
-  id: number;
-  command?: string;
-  lines: string[];
-  tone?: "system" | "accepted";
-}
-
-const QUICK_READS = [
-  "inspect metrics",
-  "inspect events --warnings",
-  "inspect pods",
-  "inspect logs checkout",
-  "inspect deployments",
-  "trace latest",
-] as const;
+const RANKED_GREETING = [
+  "Connected to the isolated arena. This is a rated match.",
+  "Every read is recorded as evidence and every change is audited against your attempt. Type help for both lists.",
+];
 
 const TOOLS = [
   { id: "mission", label: "Mission", icon: Crosshair },
@@ -75,113 +65,36 @@ export function RankedArena({
   selection: string | null;
   onSelect: (selection: string | null) => void;
 }) {
-  const [activeTool, setActiveTool] = useState<RankedTool | null>("mission");
-  const [input, setInput] = useState("");
-  const [entries, setEntries] = useState<ConsoleEntry[]>([
-    {
-      id: 0,
-      tone: "system",
-      lines: [
-        "Connected to the isolated arena.",
-        "Investigate measured evidence, then operate through the audited allowlist. Type help for commands.",
-      ],
-    },
-  ]);
-  const [commandHistory, setCommandHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const nextId = useRef(1);
-  const transcript = useRef<HTMLDivElement>(null);
+  // The console opens first. It is the only way to change anything in a ranked match — the
+  // practice controls column is not rendered on this surface — so defaulting to the briefing put
+  // the entire operate loop behind an unlabelled icon.
+  //
+  // The selected tool and whether the panel is open are separate pieces of state so the panel can
+  // be hidden rather than unmounted. The console's transcript is the operator's record of the
+  // shift, and closing a panel to see the graph is not a reason to lose it.
+  const [activeTool, setActiveTool] = useState<RankedTool>("console");
+  const [panelOpen, setPanelOpen] = useState(true);
   const toolButtons = useRef<
     Partial<Record<RankedTool, HTMLButtonElement | null>>
   >({});
+  const consoleRef = useRef<ConsoleHandle | null>(null);
   const announcedStage = useRef(0);
 
   useEffect(() => {
     if (run.drillStage <= announcedStage.current) return;
+    const previous = announcedStage.current;
     announcedStage.current = run.drillStage;
-    const handoff =
-      run.drillStage > 1 && run.drillStageHandoff
-        ? run.drillStageHandoff
-        : "New objective received. The fault has not been disclosed.";
-    setEntries((current) => [
-      ...current,
-      {
-        id: nextId.current++,
-        tone: "system",
-        lines: [`Escalation ${run.drillStage}/${run.drillStageCount}`, handoff],
-      },
+    // Only a real escalation gets announced. The opening phase is not one: the ref starts at zero,
+    // so without this the console greeted every match with "Escalation 1/N — new objective received"
+    // before the operator had done anything. The same guard covers a resumed match, which arrives
+    // already on its current phase rather than having advanced into it.
+    if (run.drillStage <= 1 || previous === 0) return;
+    consoleRef.current?.announce([
+      `Escalation ${run.drillStage}/${run.drillStageCount}`,
+      run.drillStageHandoff ||
+        "New objective received. The fault has not been disclosed.",
     ]);
   }, [run.drillStage, run.drillStageCount, run.drillStageHandoff]);
-
-  useEffect(() => {
-    const element = transcript.current;
-    if (element) element.scrollTop = element.scrollHeight;
-  }, [entries]);
-
-  const append = (
-    command: string | undefined,
-    lines: string[],
-    tone?: ConsoleEntry["tone"],
-  ) =>
-    setEntries((current) => [
-      ...current,
-      { id: nextId.current++, command, lines, tone },
-    ]);
-
-  const execute = (raw: string) => {
-    const parsed = parseConsoleCommand(raw);
-    const normalized =
-      parsed.kind === "remote" ? parsed.command : raw.trim().toLowerCase();
-    if (normalized) {
-      setCommandHistory((current) => [
-        normalized,
-        ...current.filter((item) => item !== normalized),
-      ]);
-      setHistoryIndex(-1);
-    }
-
-    switch (parsed.kind) {
-      case "clear":
-        setEntries([]);
-        return;
-      case "help":
-        append(raw.trim() || "help", [...COMMAND_HELP]);
-        return;
-      case "inspect": {
-        append(parsed.query, ["Reading measured cluster evidence…"], "system");
-        act(`inspect:${parsed.query}`, async () => {
-          const evidence = await rankedInspect(run.runId, parsed.query);
-          append(undefined, evidence.lines);
-        });
-        return;
-      }
-      case "remote":
-        append(
-          parsed.command,
-          ["Submitting to the ranked control plane…"],
-          "system",
-        );
-        act(`command:${parsed.command}`, async () => {
-          const next = await rankedCommand(run.runId, parsed.command);
-          append(
-            undefined,
-            [
-              `Accepted: ${parsed.command}`,
-              "Requested state recorded. Watch measured telemetry for convergence.",
-            ],
-            "accepted",
-          );
-          return next;
-        });
-    }
-  };
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (!input.trim() || busy !== null) return;
-    execute(input);
-    setInput("");
-  };
 
   const allGoalsMet =
     run.drillGoals.length > 0 && run.drillGoals.every((goal) => goal.met);
@@ -195,10 +108,10 @@ export function RankedArena({
   const activeMeta = TOOLS.find((tool) => tool.id === activeTool);
   const panelId = "ranked-workspace-panel";
   const closeTool = () => {
-    const closing = activeTool;
-    setActiveTool(null);
-    if (closing)
-      window.requestAnimationFrame(() => toolButtons.current[closing]?.focus());
+    setPanelOpen(false);
+    window.requestAnimationFrame(() =>
+      toolButtons.current[activeTool]?.focus(),
+    );
   };
   const closeOnEscape = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key !== "Escape") return;
@@ -224,14 +137,18 @@ export function RankedArena({
             }}
             type="button"
             data-label={label}
-            className={activeTool === id ? styles.toolActive : ""}
+            className={panelOpen && activeTool === id ? styles.toolActive : ""}
             aria-label={label}
-            aria-pressed={activeTool === id}
-            aria-expanded={activeTool === id}
+            aria-pressed={panelOpen && activeTool === id}
+            aria-expanded={panelOpen && activeTool === id}
             aria-controls={panelId}
-            onClick={() =>
-              setActiveTool((current) => (current === id ? null : id))
-            }
+            onClick={() => {
+              if (activeTool === id) setPanelOpen((open) => !open);
+              else {
+                setActiveTool(id);
+                setPanelOpen(true);
+              }
+            }}
           >
             <Icon size={16} />
             {id === "activity" && warningEvents.length > 0 && (
@@ -241,9 +158,10 @@ export function RankedArena({
         ))}
       </nav>
 
-      {activeTool && activeMeta && (
+      {activeMeta && (
         <section
           id={panelId}
+          hidden={!panelOpen}
           className={styles.floatingPanel}
           data-tool={activeTool}
           aria-label={`${activeMeta.label} panel`}
@@ -254,7 +172,7 @@ export function RankedArena({
               <span>{activeMeta.label}</span>
               <small>
                 {activeTool === "mission"
-                  ? `Escalation ${run.drillStage} of ${run.drillStageCount}`
+                  ? `Phase ${run.drillStage} of ${run.drillStageCount}`
                   : activeTool === "console"
                     ? "Allowlisted · audited"
                     : activeTool === "metrics"
@@ -284,7 +202,7 @@ export function RankedArena({
                 </div>
                 <div className={styles.stageLine}>
                   <span>
-                    Escalation {run.drillStage} / {run.drillStageCount}
+                    Phase {run.drillStage} / {run.drillStageCount}
                   </span>
                   <div>
                     {Array.from({ length: run.drillStageCount }, (_, index) => (
@@ -373,92 +291,36 @@ export function RankedArena({
             </div>
           )}
 
-          {activeTool === "console" && (
-            <section className={styles.console}>
-              <div
-                className={styles.quickReads}
-                aria-label="Investigation shortcuts"
-              >
-                {QUICK_READS.map((command) => (
-                  <button
-                    key={command}
-                    type="button"
-                    onClick={() => execute(command)}
-                    disabled={busy !== null}
-                  >
-                    <Search size={10} /> {command.replace("inspect ", "")}
-                  </button>
-                ))}
-              </div>
-
-              <div
-                className={styles.transcript}
-                ref={transcript}
-                aria-live="polite"
-              >
-                {entries.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className={`${styles.consoleEntry} ${
-                      entry.tone === "system"
-                        ? styles.consoleSystem
-                        : entry.tone === "accepted"
-                          ? styles.consoleAccepted
-                          : ""
-                    }`}
-                  >
-                    {entry.command && (
-                      <p>
-                        <ChevronRight size={11} /> {entry.command}
-                      </p>
-                    )}
-                    {entry.lines.map((line, index) => (
-                      <code key={`${entry.id}-${index}`}>{line}</code>
-                    ))}
-                  </div>
-                ))}
-              </div>
-
-              <form className={styles.commandLine} onSubmit={submit}>
-                <span>&gt;</span>
-                <input
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "ArrowUp") {
-                      event.preventDefault();
-                      const next = Math.min(
-                        commandHistory.length - 1,
-                        historyIndex + 1,
-                      );
-                      if (next >= 0) {
-                        setHistoryIndex(next);
-                        setInput(commandHistory[next] ?? "");
-                      }
-                    } else if (event.key === "ArrowDown") {
-                      event.preventDefault();
-                      const next = historyIndex - 1;
-                      setHistoryIndex(next);
-                      setInput(next >= 0 ? (commandHistory[next] ?? "") : "");
-                    }
-                  }}
-                  placeholder="inspect metrics checkout"
-                  autoComplete="off"
-                  spellCheck={false}
-                  aria-label="Ranked operator command"
-                  disabled={busy !== null}
-                />
-                <button type="submit" disabled={busy !== null || !input.trim()}>
-                  {busy?.startsWith("command:") ||
-                  busy?.startsWith("inspect:") ? (
-                    <Loader2 size={12} className={styles.spin} />
-                  ) : (
-                    "Run"
-                  )}
-                </button>
-              </form>
-            </section>
-          )}
+          <div hidden={activeTool !== "console"} className={styles.consoleSlot}>
+            <OperatorConsole
+              busy={busy}
+              handle={consoleRef}
+              greeting={RANKED_GREETING}
+              onInspect={async (query) => {
+                const evidence = await rankedInspect(run.runId, query);
+                return evidence.lines;
+              }}
+              onCommand={(command) =>
+                new Promise<void>((resolve, reject) => {
+                  // Routed through the host's `act` so the accepted frame lands in the same run
+                  // state the graph and objective panel render from, and so a refusal still
+                  // reaches the HUD banner. The console only needs to know whether it settled.
+                  act(`command:${command}`, () =>
+                    rankedCommand(run.runId, command).then(
+                      (next) => {
+                        resolve();
+                        return next;
+                      },
+                      (cause: unknown) => {
+                        reject(cause);
+                        throw cause;
+                      },
+                    ),
+                  );
+                })
+              }
+            />
+          </div>
 
           {activeTool === "metrics" && (
             <div className={styles.metricsPanel}>

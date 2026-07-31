@@ -229,6 +229,33 @@ export async function rankedInspect(
   return asJson(res);
 }
 
+// The Academy's half of the operator console. Same vocabulary and same evidence as the ranked pair
+// above — the split is server-side, where one path is audited against a rated attempt and this one
+// is not.
+export async function practiceCommand(
+  runId: string,
+  command: string,
+): Promise<LiveRunView> {
+  const res = await fetch(`/api/live/practice/${runId}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command }),
+  });
+  return asJson(res);
+}
+
+export async function practiceInspect(
+  runId: string,
+  query: string,
+): Promise<RankedInspectionResult> {
+  const res = await fetch(`/api/live/practice/${runId}/inspect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  return asJson(res);
+}
+
 /** One drill in the catalog, with what the field has actually done on it. */
 export interface DrillCatalogEntry {
   id: string;

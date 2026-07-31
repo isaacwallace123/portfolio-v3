@@ -1,8 +1,14 @@
 "use client";
 
 import { Loader2, Square } from "lucide-react";
-import { endDrill, type LiveRunView } from "@/shared/api/live-client";
+import {
+  endDrill,
+  practiceCommand,
+  practiceInspect,
+  type LiveRunView,
+} from "@/shared/api/live-client";
 import { clock } from "@/shared/lib/format";
+import { OperatorConsole } from "@/widgets/operator-console";
 import type { Coaching } from "../model/useCoaching";
 import type { DrillState } from "../model/phase";
 import { DecisionList } from "./DecisionList";
@@ -19,6 +25,11 @@ import coach from "../coaching.module.css";
 import styles from "../drill.module.css";
 
 type Act = (key: string, fn: () => Promise<LiveRunView | void>) => void;
+
+const PRACTICE_GREETING = [
+  "Connected to your practice cluster. Nothing here is rated — being wrong is the point.",
+  "Read the platform with inspect, then change it with an operator command. Type help for both lists.",
+];
 
 /**
  * The Academy's drill surface: briefing → observe → hypothesise → act → consequence → verify →
@@ -162,6 +173,38 @@ export function PracticeDrillPanel({
           {coaching.hypothesis.predicts}
         </p>
       )}
+
+      {/* The same console a rated match is played through, on the same real cluster and the same
+          allowlist. The course has to teach the interface it is preparing someone for; a curriculum
+          whose only verb is "click the right button" prepares an operator for nothing.
+
+          The suggested actions below it stay. They are the guided affordance — a way in for someone
+          who has not learned the vocabulary yet — not a competing control plane: both ends produce
+          the identical spec change against the identical cluster. */}
+      <OperatorConsole
+        busy={busy}
+        greeting={PRACTICE_GREETING}
+        onInspect={async (query) => {
+          const evidence = await practiceInspect(run.runId, query);
+          return evidence.lines;
+        }}
+        onCommand={(command) =>
+          new Promise<void>((resolve, reject) => {
+            act(`command:${command}`, () =>
+              practiceCommand(run.runId, command).then(
+                (next) => {
+                  resolve();
+                  return next;
+                },
+                (cause: unknown) => {
+                  reject(cause);
+                  throw cause;
+                },
+              ),
+            );
+          })
+        }
+      />
 
       <DecisionList
         run={run}

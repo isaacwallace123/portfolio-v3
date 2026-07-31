@@ -271,6 +271,30 @@ public static class RunEndpoints
                 : Results.Json(new { error = result.Error }, statusCode: result.Status);
         }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
 
+        // The Academy's half of the operator console: same vocabulary, same allowlist, same
+        // evidence — and no attempt ledger, no action budget, and no way to seal a rated result.
+        // Separate routes rather than a mode flag, so an unaudited call can never reach a match.
+        app.MapPost("/v1/practice/{runId}/commands", async (
+            string runId, RankedCommandRequest req, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
+        {
+            var result = await broker.SubmitPracticeCommandAsync(
+                runId, req.Command ?? "", Owner(ctx), ct);
+            return result.Run is not null
+                ? Results.Ok(Public(result.Run))
+                : Results.Json(new { error = result.Error }, statusCode: result.Status);
+        }).RequireScope(ApiScopes.RunsWrite).ValidatesRunId();
+
+        // Read-only, and unlike the ranked twin it records nothing — so it takes the read scope.
+        app.MapPost("/v1/practice/{runId}/inspect", async (
+            string runId, RankedInspectionRequest req, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
+        {
+            var result = await broker.InspectPracticeAsync(
+                runId, req.Query ?? "", Owner(ctx), ct);
+            return result.Inspection is not null
+                ? Results.Ok(result.Inspection)
+                : Results.Json(new { error = result.Error }, statusCode: result.Status);
+        }).RequireScope(ApiScopes.RunsRead).ValidatesRunId();
+
         app.MapPost("/v1/ranked/{runId}/commands", async (
             string runId, RankedCommandRequest req, HttpContext ctx, RunBroker broker, CancellationToken ct) =>
         {
@@ -383,12 +407,17 @@ public static class RunEndpoints
             stageIndex = Math.Clamp(parsed, 0, definition.Stages.Count - 1);
         var definitions = definition.Stages[stageIndex].Goals;
 
+        // Withhold the reading, never the verdict.
+        //
+        // A dark gauge is meant to remove a number the operator would otherwise get for free, not to
+        // lie about where the platform stands. Forcing Met to false did the latter: above the
+        // throughput cutoff that goal read red for the whole match, which made the objective panel
+        // permanently incomplete, killed the verification bar, and told an operator the hold was not
+        // running while the server was holding and about to award the win.
         return judged.Select((goal, index) =>
-        {
-            if (index >= definitions.Count || plan.Telemetry.Reveals(definitions[index].Metric))
-                return goal;
-            return goal with { Current = "withheld", Met = false };
-        }).ToArray();
+            index < definitions.Count && !plan.Telemetry.Reveals(definitions[index].Metric)
+                ? goal with { Current = "withheld" }
+                : goal).ToArray();
     }
 }
 

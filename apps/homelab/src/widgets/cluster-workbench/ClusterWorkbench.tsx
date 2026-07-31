@@ -128,6 +128,24 @@ export default function ClusterWorkbench({
     drill,
     surface === "practice" && assignment !== undefined,
   );
+  // The falling edge of a ranked match: we saw an incident live on this cluster, and now we do not.
+  //
+  // Deliberately a transition rather than a state test. "No incident is running" is also true for
+  // the second between a launch reporting active and the run being attached, and clearing on that
+  // would cancel the hand-off. Only a match we actually observed can end.
+  const { clear: clearLaunch } = rankedLaunch;
+  const rankedMatchRun = useRef<string | null>(null);
+  useEffect(() => {
+    if (surface !== "ranked") return;
+    if (run && run.drillMode === "ranked" && run.drillId.length > 0) {
+      rankedMatchRun.current = run.runId;
+      return;
+    }
+    if (rankedMatchRun.current === null) return;
+    rankedMatchRun.current = null;
+    clearLaunch();
+  }, [clearLaunch, run, surface]);
+
   const notifiedSolve = useRef<string | null>(null);
   const solvedKey =
     run?.drillSolved && assignment && run.drillId === assignment.drillId

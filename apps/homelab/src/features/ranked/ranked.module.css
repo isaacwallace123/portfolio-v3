@@ -675,6 +675,15 @@
 .consoleAccepted code:first-child {
   color: var(--mint);
 }
+/* A refusal is a real answer from the control plane, so it reads like one rather than like the
+   transcript having stopped. Red is reserved for observed degradation elsewhere in HomeOps; this
+   is the same signal — the platform declined to move. */
+.consoleRefused {
+  border-left-color: var(--red);
+}
+.consoleRefused code {
+  color: var(--red);
+}
 .commandLine {
   flex: none;
   display: grid;
@@ -1702,6 +1711,11 @@
   pointer-events: auto;
   animation: ranked-panel-in 170ms ease-out;
 }
+/* The panel is hidden rather than unmounted so the console transcript survives a close, and
+   `display: flex` above would otherwise win against the hidden attribute's own rule. */
+.floatingPanel[hidden] {
+  display: none;
+}
 @keyframes ranked-panel-in {
   from {
     opacity: 0;
@@ -1776,7 +1790,18 @@
   flex-direction: column;
   gap: 11px;
 }
-.floatingPanel .console {
+/* The console is a shared widget now, so the arena styles the slot it sits in rather than the
+   widget itself — `hidden` keeps it mounted and its transcript alive while another tool is open. */
+.consoleSlot {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.consoleSlot[hidden] {
+  display: none;
+}
+.consoleSlot > section {
   min-height: 0;
   flex: 1;
   border: 0;

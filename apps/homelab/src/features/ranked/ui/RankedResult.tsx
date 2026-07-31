@@ -49,6 +49,14 @@ export function RankedResult({
     let retry: ReturnType<typeof setTimeout> | undefined;
     let reads = 0;
 
+    // Sealing is a server-side transaction that runs off the same snapshot which flipped the run to
+    // solved, so the attempt is usually final within a second — but a slow write, a retried ledger
+    // insert, or a cold replica can take longer. Four reads over 2s gave up while the match was
+    // still active and left the rating, the delta, and the whole performance card reading "—" with
+    // nothing left polling to fill them in. Back off instead, out to ~20s.
+    const MAX_READS = 12;
+    const delay = () => Math.min(2500, 400 + reads * 300);
+
     const read = () => {
       reads += 1;
       fetchRankedProfile()
@@ -58,13 +66,19 @@ export function RankedResult({
           const match = next.recentAttempts.find(
             (item) => item.runId === run.runId && item.drillId === run.drillId,
           );
-          setAttempt(match ?? null);
-          if ((!match || match.outcome === "active") && reads < 4)
-            retry = setTimeout(read, 650);
+          // Never clear a settled attempt: a later poll that raced the ledger would otherwise put
+          // the card back into its pending state.
+          setAttempt((current) =>
+            current && current.outcome !== "active" && !match
+              ? current
+              : (match ?? null),
+          );
+          if ((!match || match.outcome === "active") && reads < MAX_READS)
+            retry = setTimeout(read, delay());
           else setReadFinished(true);
         })
         .catch(() => {
-          if (alive && reads < 4) retry = setTimeout(read, 650);
+          if (alive && reads < MAX_READS) retry = setTimeout(read, delay());
           else if (alive) setReadFinished(true);
         });
     };
