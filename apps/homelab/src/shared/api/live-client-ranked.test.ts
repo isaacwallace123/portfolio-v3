@@ -75,12 +75,14 @@ describe("ranked launch client", () => {
   it("reassembles frames that arrive split across chunks", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        eventStream([
-          `event: launch\ndata: ${JSON.stringify({ launch }).slice(0, 20)}`,
-          `${JSON.stringify({ launch }).slice(20)}\n\nevent: tick\ndata: {"launchElapsedSeconds":9}\n\n`,
-        ]),
-      ),
+      vi
+        .fn()
+        .mockResolvedValue(
+          eventStream([
+            `event: launch\ndata: ${JSON.stringify({ launch }).slice(0, 20)}`,
+            `${JSON.stringify({ launch }).slice(20)}\n\nevent: tick\ndata: {"launchElapsedSeconds":9}\n\n`,
+          ]),
+        ),
     );
 
     const views: RankedLaunchView[] = [];
@@ -98,11 +100,13 @@ describe("ranked launch client", () => {
   it("stops reading at the end frame without consuming what follows", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        eventStream([
-          `event: end\ndata: {}\n\nevent: tick\ndata: {"launchElapsedSeconds":99}\n\n`,
-        ]),
-      ),
+      vi
+        .fn()
+        .mockResolvedValue(
+          eventStream([
+            `event: end\ndata: {}\n\nevent: tick\ndata: {"launchElapsedSeconds":99}\n\n`,
+          ]),
+        ),
     );
 
     const ticks: number[] = [];
@@ -119,10 +123,13 @@ describe("ranked launch client", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: "No ranked launch is in progress." }), {
-          status: 404,
-          headers: { "Content-Type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({ error: "No ranked launch is in progress." }),
+          {
+            status: 404,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       ),
     );
 
