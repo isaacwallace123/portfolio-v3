@@ -439,6 +439,7 @@ export default function ClusterWorkbench({
                 components={components}
                 events={events}
                 trace={trace}
+                history={history}
                 selection={selected}
                 onSelect={setSelected}
               />
