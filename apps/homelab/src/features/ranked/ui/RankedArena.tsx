@@ -28,6 +28,8 @@ import {
   OperatorConsole,
   type ConsoleHandle,
 } from "@/widgets/operator-console";
+import type { Series } from "@/widgets/cluster-workbench/model/useClusterRun";
+import { InspectorPanel } from "@/widgets/cluster-workbench/ui/InspectorPanel";
 import styles from "../ranked.module.css";
 
 type Act = (key: string, fn: () => Promise<LiveRunView | void>) => void;
@@ -53,6 +55,7 @@ export function RankedArena({
   components,
   events,
   trace,
+  history,
   selection,
   onSelect,
 }: {
@@ -62,6 +65,8 @@ export function RankedArena({
   components: RunComponent[];
   events: ClusterEvent[];
   trace: LiveTrace | null;
+  /** Measured CPU and memory samples per service and per pod — what the trend charts are drawn from. */
+  history: Series;
   selection: string | null;
   onSelect: (selection: string | null) => void;
 }) {
@@ -150,7 +155,11 @@ export function RankedArena({
               }
             }}
           >
-            <Icon size={16} />
+            <Icon size={15} />
+            {/* Named, not just tooltipped. Five unlabelled glyphs meant the only way to find the
+                metrics panel was to hover each one in turn — and the activity squiggle and the
+                event bell are exactly the pair a first-time operator guesses wrong. */}
+            <em>{label}</em>
             {id === "activity" && warningEvents.length > 0 && (
               <i>{warningEvents.length}</i>
             )}
@@ -385,6 +394,25 @@ export function RankedArena({
                     </button>
                   ))}
               </div>
+
+              {/* The real instrument, not a summary of one.
+                  The arena had a flat list of tiers and nothing else, while the practice surface
+                  kept the measured trend charts, per-pod saturation against limit, restart counts,
+                  the replica picker, and the trace spans in its inspector — none of which the
+                  ranked surface renders, because it does not draw the right-hand aside at all.
+                  Same component, same real samples; a competitor should not be reading a thinner
+                  panel than a learner. */}
+              {selection && (
+                <div className={styles.inspectorSlot}>
+                  <InspectorPanel
+                    selection={selection}
+                    components={components}
+                    history={history}
+                    trace={trace}
+                    onSelect={onSelect}
+                  />
+                </div>
+              )}
             </div>
           )}
 

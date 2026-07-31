@@ -1634,15 +1634,27 @@
 }
 .toolDock button {
   position: relative;
-  width: 38px;
-  height: 38px;
+  width: 46px;
+  min-height: 44px;
   display: grid;
   place-items: center;
+  gap: 2px;
+  padding: 5px 2px 4px;
   border: 1px solid transparent;
   border-radius: 10px;
   color: var(--ink-dim);
   background: transparent;
   cursor: pointer;
+}
+/* The tool's name, always on. The hover tooltip below stays for the keyboard path, but a label you
+   have to go looking for is not a label. */
+.toolDock button > em {
+  font:
+    700 6.5px/1 ui-monospace,
+    monospace;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 .toolDock button:hover,
 .toolDock .toolActive {
@@ -1695,9 +1707,11 @@
 .floatingPanel {
   position: absolute;
   top: 68px;
-  right: 72px;
+  /* Clears the dock, which is 46px of button plus its own 6px padding and 16px offset. Labelling
+     the tools widened it, and a panel that stopped 2px short of the dock reads as a collision. */
+  right: 84px;
   bottom: 74px;
-  width: min(430px, calc(100% - 170px));
+  width: min(430px, calc(100% - 182px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1790,6 +1804,18 @@
   flex-direction: column;
   gap: 11px;
 }
+/* The workbench inspector, borrowed whole. It brings its own panel chrome, which inside the arena's
+   floating panel would be a box in a box — so the slot flattens it and lets it size to its content. */
+.inspectorSlot > div {
+  border: 0;
+  border-radius: 0;
+  padding: 12px 0 0;
+  background: transparent;
+}
+.inspectorSlot :global(svg) {
+  max-width: 100%;
+}
+
 /* The console is a shared widget now, so the arena styles the slot it sits in rather than the
    widget itself — `hidden` keeps it mounted and its transcript alive while another tool is open. */
 .consoleSlot {
