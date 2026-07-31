@@ -3,30 +3,18 @@ import { liveFetch } from "@/shared/api/live-server";
 
 export const dynamic = "force-dynamic";
 
-async function forward(req: Request, method: "GET" | "POST" | "DELETE") {
-  const url = new URL(req.url);
-  const start = method === "POST" && url.searchParams.get("start") === "true";
+// Read a launch, or abandon one. Advancing it happens on ./stream, which holds a single connection
+// open and drives the state machine upstream — there is deliberately no POST here any more, because
+// a client that can only observe and cancel cannot step a launch into a state by hand.
+async function forward(req: Request, method: "GET" | "DELETE") {
   const g = await guard(req, {
-    kind:
-      method === "GET"
-        ? "read"
-        : method === "DELETE"
-          ? "cancel"
-          : start
-            ? "provision"
-            : "launch",
+    kind: method === "GET" ? "read" : "cancel",
   });
   if (!g.ok) return g.response;
 
-  const retry = method === "POST" && url.searchParams.get("retry") === "true";
   const res = await liveFetch(
     "/v1/ranked/launch",
-    {
-      method,
-      ...(method === "POST"
-        ? { body: JSON.stringify({ retry, start }) }
-        : undefined),
-    },
+    { method },
     g.caller.owner,
     g.caller.displayName,
   );
@@ -35,10 +23,6 @@ async function forward(req: Request, method: "GET" | "POST" | "DELETE") {
 
 export async function GET(req: Request) {
   return forward(req, "GET");
-}
-
-export async function POST(req: Request) {
-  return forward(req, "POST");
 }
 
 export async function DELETE(req: Request) {

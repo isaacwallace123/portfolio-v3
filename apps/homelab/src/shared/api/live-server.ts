@@ -71,3 +71,56 @@ export async function liveFetch(
     );
   }
 }
+
+// How long the API has to START answering a stream. A stream is then expected to stay open for
+// minutes, so this deadline covers the handshake only — see below for why that distinction is the
+// whole point of this function existing separately from liveFetch.
+const UPSTREAM_STREAM_HEADERS_TIMEOUT_MS = 15_000;
+
+/**
+ * Call the HomeOps API for a response whose body is a long-lived stream.
+ *
+ * liveFetch cannot be used for this: its deadline aborts the whole request, body included, so an
+ * event stream would be cut off mid-launch at the ten second mark. What actually needs a deadline
+ * here is the handshake — an upstream that never answers at all — and once the response headers
+ * arrive, staying open is the intended behaviour rather than a stall. So the timer is cancelled the
+ * moment headers land, and from then on only the caller's own signal (the browser going away) ends
+ * the request.
+ */
+export async function liveStream(
+  path: string,
+  signal: AbortSignal,
+  owner?: string,
+  ownerName?: string,
+): Promise<Response> {
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal.reason);
+  if (signal.aborted) abort();
+  else signal.addEventListener("abort", abort, { once: true });
+  const handshake = setTimeout(
+    () => controller.abort(),
+    UPSTREAM_STREAM_HEADERS_TIMEOUT_MS,
+  );
+
+  const headers = new Headers();
+  headers.set("Accept", "text/event-stream");
+  headers.set("Authorization", `Bearer ${RUNS_KEY}`);
+  if (owner) headers.set("X-Owner-Key", owner);
+  if (ownerName) headers.set("X-Owner-Name", ownerName);
+
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers,
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    return res;
+  } catch {
+    return Response.json(
+      { error: "The homelab API is not responding right now." },
+      { status: 504 },
+    );
+  } finally {
+    clearTimeout(handshake);
+  }
+}

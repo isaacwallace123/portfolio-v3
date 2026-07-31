@@ -517,16 +517,12 @@ export async function fetchRankedActions(
   return body.actions;
 }
 
+// Advancing a launch is the stream's job; these two are the single reads/writes around it, and both
+// answer immediately, so they keep an ordinary deadline.
 async function rankedLaunchRequest(
-  method: "GET" | "POST" | "DELETE",
-  retry = false,
-  start = false,
+  method: "GET" | "DELETE",
 ): Promise<RankedLaunchView> {
-  const query = new URLSearchParams();
-  if (method === "POST" && retry) query.set("retry", "true");
-  if (method === "POST" && start) query.set("start", "true");
-  const suffix = query.size > 0 ? `?${query}` : "";
-  const res = await fetch(`/api/live/ranked/launch${suffix}`, {
+  const res = await fetch("/api/live/ranked/launch", {
     method,
     cache: "no-store",
     signal: AbortSignal.timeout(15_000),
@@ -535,19 +531,114 @@ async function rankedLaunchRequest(
   return body.launch;
 }
 
+/** Observe without advancing: does this operator already have a launch to resume. */
 export function fetchRankedLaunch(): Promise<RankedLaunchView> {
   return rankedLaunchRequest("GET");
 }
 
-export function advanceRankedLaunch(
-  retry = false,
-  start = false,
-): Promise<RankedLaunchView> {
-  return rankedLaunchRequest("POST", retry, start);
-}
-
 export function cancelRankedLaunch(): Promise<RankedLaunchView> {
   return rankedLaunchRequest("DELETE");
+}
+
+/**
+ * Drive a ranked launch over one connection, reporting every phase it passes through.
+ *
+ * Deliberately fetch-and-parse rather than `EventSource`. EventSource cannot read the body of a
+ * failed handshake, and the launch answers its refusals — no launch in progress, no capacity, an
+ * incident already on the cluster — as ordinary HTTP statuses with a JSON reason, which the page
+ * needs in order to say what happened. It also reconnects on a schedule of its own choosing, and
+ * reconnect policy for something that provisions clusters belongs to the caller.
+ *
+ * Resolves when the launch reaches a terminal phase or the stream ends; rejects with a LiveError
+ * for a refused handshake, and with an abort error when the caller cancels.
+ */
+export async function streamRankedLaunch({
+  retry = false,
+  start = false,
+  signal,
+  onLaunch,
+  onElapsed,
+}: {
+  retry?: boolean;
+  start?: boolean;
+  signal: AbortSignal;
+  onLaunch: (launch: RankedLaunchView) => void;
+  onElapsed: (launchElapsedSeconds: number) => void;
+}): Promise<void> {
+  const query = new URLSearchParams();
+  if (retry) query.set("retry", "true");
+  if (start) query.set("start", "true");
+  const suffix = query.size > 0 ? `?${query}` : "";
+
+  const res = await fetch(`/api/live/ranked/launch/stream${suffix}`, {
+    headers: { Accept: "text/event-stream" },
+    cache: "no-store",
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    await asJson(res);
+    throw new LiveError("The launch stream could not be opened.", res.status);
+  }
+
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += chunk.value;
+
+      // Frames are separated by a blank line. Anything after the last separator is a partial frame
+      // and stays in the buffer until the rest of it arrives.
+      let split = buffer.indexOf("\n\n");
+      while (split !== -1) {
+        const frame = buffer.slice(0, split);
+        buffer = buffer.slice(split + 2);
+        if (dispatchLaunchFrame(frame, onLaunch, onElapsed)) return;
+        split = buffer.indexOf("\n\n");
+      }
+    }
+  } finally {
+    // Releasing the lock lets an abort tear the underlying connection down instead of leaving it
+    // held open by a reader nobody is reading from.
+    reader.cancel().catch(() => {});
+  }
+}
+
+/** Parse one SSE frame and hand it to the right callback. Returns true when the stream is over. */
+function dispatchLaunchFrame(
+  frame: string,
+  onLaunch: (launch: RankedLaunchView) => void,
+  onElapsed: (launchElapsedSeconds: number) => void,
+): boolean {
+  let event = "message";
+  const data: string[] = [];
+  for (const line of frame.split("\n")) {
+    // A leading colon is an SSE comment, which carries no event.
+    if (line.startsWith(":")) continue;
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data.push(line.slice(5).trim());
+  }
+  if (event === "end") return true;
+  if (data.length === 0) return false;
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(data.join("\n"));
+  } catch {
+    // A frame we cannot read is not a reason to abandon a launch that is still progressing.
+    return false;
+  }
+
+  if (event === "launch") {
+    const launch = (payload as { launch?: RankedLaunchView }).launch;
+    if (launch) onLaunch(launch);
+  } else if (event === "tick") {
+    const seconds = (payload as { launchElapsedSeconds?: number })
+      .launchElapsedSeconds;
+    if (typeof seconds === "number") onElapsed(seconds);
+  }
+  return false;
 }
 
 // A drill runs ON the provisioned cluster: it sets an objective and clock and unlocks decisions

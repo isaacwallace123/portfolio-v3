@@ -20,6 +20,10 @@ const LIMITS = {
   provision: { max: 5, windowMs: 60 * 60_000 }, // 5 clusters per hour
   action: { max: 120, windowMs: 60_000 }, // 120 control actions per minute
   launch: { max: 90, windowMs: 60_000 }, // bounded state-machine advances
+  // One connection drives an entire launch, so an honest client opens a handful of these in a
+  // minute even across reconnects. The budget is therefore small on purpose: it is not throttling
+  // the launch, it is stopping a client stuck in a reconnect loop from hammering the API.
+  stream: { max: 12, windowMs: 60_000 },
   cancel: { max: 10, windowMs: 60_000 }, // teardown cannot be starved by polling
   inspect: { max: 30, windowMs: 60_000 }, // cluster read plus an evidence write
   read: { max: 60, windowMs: 60_000 }, // 60 public reads per minute
@@ -162,7 +166,7 @@ export async function guard(
         429,
         kind === "provision"
           ? "You have provisioned too many clusters recently. Try again later."
-          : kind === "launch"
+          : kind === "launch" || kind === "stream"
             ? "The launch is being checked too often. Try again in a moment."
             : "Too many actions. Slow down for a moment.",
       ),

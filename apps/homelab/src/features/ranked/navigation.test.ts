@@ -45,18 +45,32 @@ describe("the unified Ranked destination", () => {
     const hub = read("widgets/leaderboard/ui/RankedHub.tsx");
     expect(workbench).toContain("useRankedLaunch");
     expect(workbench).toContain("<RankedLaunchScreen");
-    expect(launch).toContain("advanceRankedLaunch");
+    expect(launch).toContain("streamRankedLaunch");
     expect(launch).toContain("fetchRankedLaunch");
     expect(launch).toContain("cancelRankedLaunch");
     expect(route).toContain('"/v1/ranked/launch"');
     expect(route).toContain("g.caller.owner");
-    expect(route).toContain('? "provision"');
-    expect(route).toContain('? "cancel"');
-    expect(route).toContain(': "launch"');
+    expect(route).toContain('? "read"');
+    expect(route).toContain('"cancel"');
     expect(route).not.toContain("runId");
     expect(client).toContain("AbortSignal.timeout(15_000)");
     expect(hub).toContain("Start ranked");
     expect(hub).not.toContain("startDrill(");
+  });
+
+  it("advances the launch over one stream rather than a client-side timer", () => {
+    const launch = read("features/ranked/model/useRankedLaunch.ts");
+    const stream = read("app/api/live/ranked/launch/stream/route.ts");
+    const route = read("app/api/live/ranked/launch/route.ts");
+    // The single-step POST was what made the browser the drive loop. Its absence is the invariant.
+    expect(route).not.toContain("export async function POST");
+    expect(launch).not.toContain("setTimeout(() => void advance");
+    // A start can provision a cluster, so it keeps the expensive budget; a resume does not.
+    expect(stream).toContain('start ? "provision" : "stream"');
+    expect(stream).toContain("/v1/ranked/launch/stream");
+    // Passed through untouched: reading the body here would buffer the launch into one late blob.
+    expect(stream).toContain("new Response(res.body");
+    expect(stream).toContain('"X-Accel-Buffering": "no"');
   });
 
   it("renders launch time separately while match time remains paused", () => {

@@ -68,6 +68,99 @@ public static class RankedEndpoints
             return Project(result);
         }).RequireScope(ApiScopes.RunsWrite);
 
+        // Start or resume, and then keep advancing it here until it is done.
+        //
+        // Same lifecycle as the POST above, with the drive loop moved to the side of the wire that
+        // can see the cluster. A launch spends minutes waiting on a namespace, and having the
+        // browser supply each step meant a fixed client-side timer paid for a round trip, a session
+        // introspection, and a rate-limit decision per step — for a state machine whose next move is
+        // decided entirely server-side. The connection is not what the launch is made of: its state
+        // lives on the LabRun, every step is idempotent, and the orchestrator's per-owner gate
+        // serializes two of these against each other. So a dropped connection loses a viewer, not a
+        // launch, and reconnecting resumes exactly where it was — which is the same property that
+        // made a page reload free before.
+        app.MapGet("/v1/ranked/launch/stream", async (
+            HttpContext ctx,
+            RunBroker broker,
+            RankedStore ranked,
+            IOptions<RunBrokerOptions> options,
+            ILoggerFactory loggers,
+            bool? start,
+            bool? retry,
+            CancellationToken ct) =>
+        {
+            var owner = Owner(ctx);
+            if (owner.Length == 0)
+                return Results.Json(
+                    new { error = "Sign in to start a ranked match." }, statusCode: 401);
+
+            var orchestrator = Orchestrator(broker, ranked, options, loggers);
+            var displayName = OwnerName(ctx);
+
+            // The first advance happens before a single byte of the stream is written, so a refusal
+            // is still an ordinary HTTP status. A 404 for "no launch in progress", a 429 for
+            // capacity, a 409 for an incident already on the cluster: the caller reads them exactly
+            // as it reads them from the POST, instead of having to unpack an error frame out of a
+            // 200 response to find out the request was rejected.
+            var result = await orchestrator.LaunchAsync(
+                owner, displayName, retry == true, start == true, ct);
+            if (result.Launch is null) return Project(result);
+
+            ctx.Response.Headers.ContentType = "text/event-stream";
+            // no-transform matters as much as no-cache: an intermediary that buffers to compress
+            // turns an event stream into a response that arrives all at once, at the end.
+            ctx.Response.Headers.CacheControl = "no-cache, no-transform";
+            ctx.Response.Headers["X-Accel-Buffering"] = "no";
+
+            var launch = result.Launch;
+            RankedLaunchView? sent = null;
+            var deadline = TimeProvider.System.GetUtcNow() + RankedLaunchStream.Ceiling;
+
+            try
+            {
+                while (true)
+                {
+                    if (RankedLaunchStream.SameState(sent, launch))
+                        await ctx.Response.WriteAsync(
+                            RankedLaunchStream.TickFrame(launch.LaunchElapsedSeconds), ct);
+                    else
+                    {
+                        await ctx.Response.WriteAsync(
+                            RankedLaunchStream.LaunchFrame(launch), ct);
+                        sent = launch;
+                    }
+                    await ctx.Response.Body.FlushAsync(ct);
+
+                    if (launch.Terminal) break;
+                    if (TimeProvider.System.GetUtcNow() >= deadline) break;
+
+                    await Task.Delay(RankedLaunchStream.TickFor(launch.Phase), ct);
+
+                    // Resume rather than start: retry and start were consumed by the first advance,
+                    // and replaying them would re-arm a reset on a launch that is already running.
+                    var next = await orchestrator.LaunchAsync(
+                        owner, displayName, retry: false, allowProvision: false, ct);
+                    if (next.Launch is null)
+                    {
+                        // The launch stopped existing under us — cancelled from another tab, or torn
+                        // down by the reaper. There is nothing left to report and nothing to advance.
+                        break;
+                    }
+                    launch = next.Launch;
+                }
+
+                await ctx.Response.WriteAsync(RankedLaunchStream.EndFrame(), ct);
+                await ctx.Response.Body.FlushAsync(ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // The viewer went away. The launch keeps whatever state it had written; the next
+                // connection picks it up.
+            }
+
+            return Results.Empty;
+        }).RequireScope(ApiScopes.RunsWrite);
+
         // Observe without advancing, for a second tab or a page that only renders progress.
         app.MapGet("/v1/ranked/launch", async (
             HttpContext ctx,
