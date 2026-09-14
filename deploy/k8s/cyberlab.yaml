@@ -13,6 +13,12 @@ metadata:
   labels:
     app.kubernetes.io/part-of: portfolio-network
     pod-security.kubernetes.io/enforce: baseline
+    # Permits HTTPRoutes in this namespace to attach to the `edge` Gateway, which is the
+    # only path from the Cloudflare tunnel into the cluster. It does NOT publish anything on
+    # its own: a hostname is reachable only if an HTTPRoute names the Service, and those
+    # live in the homelab repo (platform/components/public-routes), not here. This label is
+    # necessary for publication; it is not sufficient.
+    homelab.isaacwallace.dev/exposure: public
 ---
 apiVersion: apps/v1
 kind: Deployment
