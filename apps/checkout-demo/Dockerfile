@@ -1,6 +1,6 @@
 # checkout-demo — tiny real three-tier service for the HomeOps arena. Deps are resolved at build
 # time so no go.sum needs committing for a single-file service.
-FROM golang:1.26-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS build
+FROM golang:1.26-alpine@sha256:c95332c2af86b6d89b91bd0500f4b9529ccbd090a0d1855c6d1ceaa142ae8615 AS build
 WORKDIR /src
 COPY main.go .
 RUN go mod init checkout-demo \
